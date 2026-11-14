@@ -1,0 +1,20 @@
+#!/bin/sh
+# The em dash is built from its UTF-8 bytes so this file itself stays dash-free.
+EM=$(printf '\342\200\224')
+# commit-msg: reject the em dash (U+2014) in the commit message.
+# pre-commit checks the CONTENT of a commit, not its message. In practice most
+# em dashes slipped in through commit subjects and bodies, past pre-commit.
+# Deliberate bypass (quoting someone else's text): ALLOW_EMDASH=1 git commit ...
+[ -n "$ALLOW_EMDASH" ] && exit 0
+msg_file="$1"
+# git comment lines (starting with #) do not end up in the message
+if grep -v "^#" "$msg_file" | grep -q "$EM"; then
+  echo "commit-msg: the commit message contains an em dash, and the house style forbids it." >&2
+  grep -v "^#" "$msg_file" | grep -n "$EM" | head -3 | sed "s/^/    /" >&2
+  echo "" >&2
+  echo "Replace by meaning: an explanation becomes a colon, an aside becomes commas" >&2
+  echo "or parentheses, a sharp turn becomes a period and a new sentence, a range a hyphen." >&2
+  echo "If the dash is really needed (a quotation): ALLOW_EMDASH=1 git commit ..." >&2
+  exit 1
+fi
+exit 0

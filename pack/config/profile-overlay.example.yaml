@@ -1,0 +1,127 @@
+# Profile overlay for the factory (Hermes Agent v0.23.1).
+#
+# Merge these keys into ~/.hermes/config.yaml AND into every
+# ~/.hermes/profiles/<role>/config.yaml: each profile config is a complete
+# file, not a diff over the root. Back up each file first
+# (cp config.yaml config.yaml.bak-pre-overlay).
+#
+# Provider and model names are placeholders:
+#   <provider>      your provider id as Hermes knows it (see `hermes model`)
+#   <strong-model>  the deep model: architect, reviewer, default profile
+#   <cheap-model>   the cheap/fast model: coder, tester, ops, auxiliary calls
+# Explanations and trade-offs: docs/config-and-quota.md.
+
+# ---------------------------------------------------------------- model
+# Per role (set in that profile's file):
+#   default, architect, reviewer: <strong-model>, fallback <cheap-model>
+#   coder, tester, ops:           <cheap-model>,  fallback <strong-model>
+model:
+  default: <strong-model>
+  provider: <provider>
+fallback_providers:
+  - provider: <provider>
+    model: <cheap-model>
+
+# ---------------------------------------------------------------- agent
+agent:
+  # Turn cap. 200 for default, coder and tester; 120 for architect,
+  # reviewer and ops. Measure the p90 of your successful runs.
+  max_turns: 200
+  # Was 12 when the provider answered 429 as a normal busy signal. With a
+  # quota plan a 429 usually means "quota gone", and 12 retries only hang.
+  api_max_retries: 3
+  # At 85% of the turn budget the worker is told to wrap up and leave a
+  # handoff. Native replacement for any self-made "save progress" script.
+  budget_warning_ratio: 0.85
+  # Toolsets the factory never uses: their schemas ride along with every
+  # request. Workers (architect, coder, reviewer, tester, ops) also drop
+  # `clarify`: nobody answers a worker's clarification question; workers
+  # block with needs_input instead.
+  disabled_toolsets:
+    - computer_use
+    - delegation
+    - connections
+    - browser-use
+    - tts
+    - session_search
+    # - clarify        # workers only
+  # Session default per role:
+  #   default: medium   architect: max   reviewer: high
+  #   coder: high       tester: low      ops: low
+  reasoning_effort: medium
+  # Per-model override; wins over reasoning_effort when that model runs.
+  # Keep cheap auxiliary-style calls shallow, but in the coder profile set
+  # the cheap model to high, or this shared override silently wins:
+  #   coder:  <cheap-model>: high
+  reasoning_overrides:
+    <cheap-model>: low
+
+# ---------------------------------------------------------------- output
+tool_output:
+  # Tool output kept in context; the full output goes to a file the agent
+  # can open. Big outputs (build logs, test reports) were the main source
+  # of context bloat.
+  max_bytes: 8000
+  max_lines: 2000
+  max_line_length: 2000
+
+# ---------------------------------------------------------------- compression
+compression:
+  enabled: true
+  # Fraction of the model's context window. 0.08 of a ~1.3M window is about
+  # 105k tokens. Recompute for your window: aim at 100-150k absolute.
+  threshold: 0.08
+  target_ratio: 0.2
+  protect_last_n: 20
+  proactive_prune_tokens: 60000
+
+auxiliary:
+  compression:
+    provider: <provider>
+    model: <cheap-model>
+    # Summaries at low effort are the same size and several times faster.
+    reasoning_effort: low
+
+# ---------------------------------------------------------------- memory
+memory:
+  memory_enabled: true
+  user_profile_enabled: true
+  # Upstream default. Project facts belong in a conventions skill, not here.
+  memory_char_limit: 2200
+  user_char_limit: 1375
+
+# ---------------------------------------------------------------- tools
+# architect, coder, tester only: progressive tool loading costs turns when
+# the core tool (for example an LSP MCP server) is used constantly.
+tools:
+  tool_search:
+    enabled: 'off'
+
+# ---------------------------------------------------------------- skills
+skills:
+  external_dirs:
+    - ~/hermes-dark-factory/pack/skills
+  # The project conventions skill, loaded into every session of the profile.
+  auto_load:
+    - <project>-conventions
+
+# ---------------------------------------------------------------- kanban (root config)
+# Dispatcher settings are read when the gateway starts: restart it after a
+# change (`hermes gateway restart`). 0 means "unset", not "stop".
+kanban:
+  dispatch_in_gateway: true
+  dispatch_interval_seconds: 120
+  failure_limit: 3
+  orchestrator_profile: architect
+  # Measure one card's peak memory; do not trust the memory-derived default.
+  max_in_progress: 2
+  max_in_progress_per_profile: 2
+  auto_decompose: true
+  auto_decompose_per_tick: 1
+
+# ---------------------------------------------------------------- updates
+updates:
+  # A full pre-update backup of a large home took minutes and gigabytes;
+  # the nightly `hermes backup` covers it.
+  pre_update_backup: quick
+  backup_keep: 5

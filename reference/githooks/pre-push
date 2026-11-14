@@ -1,0 +1,57 @@
+#!/bin/sh
+# pre-push: cheap local gates that would otherwise fail CI minutes later.
+# Installed once for every checkout and worktree of the project through
+# core.hooksPath, so agents' worktrees get it too.
+HERMES_SCRIPTS="${HERMES_SCRIPTS:-$HOME/.hermes/scripts}"
+
+# 1. GitHub link gate. Markdown and code comments travel in commits through
+#    git push, past the gh wrapper that checks comments and PR bodies. A model
+#    once generated two dozen permalinks to a misspelled, non-existent
+#    repository; a reviewer caught them by hand, not a mechanism.
+#    Active only inside Hermes sessions. Deliberate bypass: SKIP_LINK_GUARD=1 git push ...
+if [ -z "$SKIP_LINK_GUARD" ] && [ -n "$HERMES_AGENT$HERMES_SESSION_ID" ]; then
+  python3 "$HERMES_SCRIPTS/prepush-link-guard.py" || exit $?
+fi
+
+# 2. Identity gate. The default Hermes git identity uses an e-mail domain that
+#    GitHub attributes to an unrelated account, so commits pushed with it
+#    credit a stranger. The push is cancelled if any outgoing commit has an
+#    author or committer on that domain. There is no bypass flag: a wrong
+#    identity is fixed with user.email and `git commit --amend --reset-author`.
+python3 "$HERMES_SCRIPTS/prepush-identity-guard.py" || exit $?
+
+# 3. Static gates of the target project (formatter, linter, checkstyle...).
+#    Static gates fail in seconds on CI and abort the whole pipeline before
+#    the slow suites even start, hiding the real failure. Running them
+#    locally on the touched modules is cheaper than a red CI.
+#    Set FACTORY_STATIC_GATE to the command, for example
+#    "npm run lint" or "./gradlew spotlessCheck". The command receives the
+#    diff base as $1. Deliberate bypass: SKIP_STATIC_GATE=1 git push ...
+[ -n "$SKIP_STATIC_GATE" ] && exit 0
+[ -z "$FACTORY_STATIC_GATE" ] && exit 0
+git rev-parse --show-toplevel >/dev/null 2>&1 || exit 0
+
+# Derive the base from the branch instead of hard-coding it. A hard-coded base
+# breaks repositories with several release lines: a branch from one line was
+# compared with another, the diff pulled in thousands of foreign files, and the
+# hook linted the whole tree for a one-line markdown change.
+base=""
+up=$(git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null)
+[ -n "$up" ] && base=$up
+if [ -z "$base" ]; then
+  # the closest line, by commit count, among those present on origin
+  best=""; bestn=""
+  for cand in $(git for-each-ref --format='%(refname:short)' refs/remotes/origin | grep -E "${FACTORY_BASE_PATTERN:-origin/(develop|main$|master$)}"); do
+    n=$(git rev-list --count "$cand"...HEAD 2>/dev/null) || continue
+    if [ -z "$bestn" ] || [ "$n" -lt "$bestn" ]; then bestn=$n; best=$cand; fi
+  done
+  base=$best
+fi
+[ -z "$base" ] && exit 0
+
+echo "pre-push: static gate (base $base): $FACTORY_STATIC_GATE" >&2
+sh -c "$FACTORY_STATIC_GATE \"\$1\"" pre-push "$base" && exit 0
+echo '' >&2
+echo 'pre-push: the static gate is red. Fix it before pushing: on CI it aborts the' >&2
+echo 'whole pipeline and the real cause of a later failure stays invisible.' >&2
+exit 1

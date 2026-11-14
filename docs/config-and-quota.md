@@ -1,0 +1,89 @@
+# Config and quota
+
+This document explains the configuration overlay that roughly halved the factory's daily model spend and cut spend per closed card by about 60%. It covers each knob in `pack/config/profile-overlay.example.yaml`: what it does, why the value was chosen and what you give up. It also covers the role split between a cheap and a strong model, reasoning effort per role, and the peak-hour dispatch pause for providers with peak pricing. All keys are native Hermes v0.23.1 keys; only the values differ from the defaults.
+
+## Where the tokens went
+
+Before the overlay, one coder session on a rework card made about 200 model calls with an average context of 211k tokens, about 42 million tokens in one session, most of it re-read from the cache. The whole installation burned 300-500 million tokens a day and exhausted a weekly subscription limit in two and a half days. Three causes dominated:
+
+1. **Context never shrank.** The compression threshold is a fraction of the context window. On a model with a 1.3M window the default-ish 0.5 meant compression at about 655k tokens, so it never fired, and every call carried the whole history.
+2. **Tool output was kept whole.** Build logs and test reports landed in context at full size and stayed there.
+3. **Everything thought at maximum depth.** Reasoning took 70-88% of the output of worker sessions.
+
+Measure your own installation before tuning: count calls, context per call and reasoning tokens per profile from each profile's `state.db`, deduplicating repeated tool calls (after compression the same `tool_call_id` can appear several times).
+
+## The knobs
+
+### `compression.threshold: 0.08`
+
+Compress when the context passes 8% of the window (about 105k tokens on a 1.3M window). This is the single biggest saving: every call after the threshold is cheaper. The intermediate step of 0.12 helped; 0.08 helped further.
+
+Trade-off: summaries lose detail, so a worker may re-read a file it already saw. Keep `protect_last_n` (recent messages kept verbatim) at about 20 so the current step is intact. Recompute the threshold when you change models: what matters is the absolute size.
+
+### `auxiliary.compression.reasoning_effort: low`
+
+The compression model summarises at low effort. At the default (maximum) one compression took 100-374 seconds and, across three days, 17% of the coder's wall time. A direct measurement on a 22k-token input: 51-77 seconds at default, 17-18 seconds at low, summary of the same size. No trade-off was found.
+
+### `tool_output.max_bytes: 8000`
+
+Tool output kept in context is capped at 8 KB; Hermes writes the full output to a file the agent can open. The agent must then grep or read the part it needs, which is what it should do with a build log anyway.
+
+Trade-off: an agent that does not know about the file may conclude from a truncated tail. The skills tell workers to look for the full output.
+
+### `agent.disabled_toolsets`
+
+Each enabled toolset sends its tool schemas with every request. The factory never uses computer use, delegation, connections, browser-use, text-to-speech or session search, and workers also lose `clarify` (nobody answers a worker's question in the middle of a run; the right move is a `needs_input` block). Limit large MCP servers with their `tools.include` list for the same reason: one server's full tool set cost about 30 KB of schema per request.
+
+Trade-off: none for tools you do not use. Re-enable delegation only if you have measured that a delegate is cheaper than doing the step in place.
+
+### `agent.api_max_retries: 3`
+
+With a provider that answers 429 when concurrency is exhausted, many retries are right (the factory once ran 12). With a quota plan, a 429 usually means "limit exhausted", and 12 retries with backoff only hang the run for minutes. Three retries fail fast and let the health check stop dispatch.
+
+### `agent.budget_warning_ratio: 0.85`
+
+At 85% of `max_turns` the worker is warned to finish and leave a handoff note. This is the native answer to "a run hit the turn cap and lost its progress"; do not build your own.
+
+### `agent.max_turns`
+
+200 for coder, tester and the default profile, 120 for architect, reviewer and ops. Raising the cap looks like spending more, but a run that dies on the cap wastes everything it did. With 120, 18-20% of coder and tester runs died there, while the p90 of successful runs used 91 calls. Pair a higher cap with the budget warning and with splitting large cards (the rework gate sends cards with three or more blocking items to the architect).
+
+### `memory.memory_char_limit: 2200`
+
+Back to the upstream default from a raised 4000. Memory is in every prompt; project facts belong in the conventions skill, loaded only where needed.
+
+### `updates.pre_update_backup: quick`
+
+A full pre-update backup of a multi-gigabyte home is slow; the nightly native backup covers it. Not a quota setting, but part of the same cleanup.
+
+## Cheap model for doers, strong model for judges
+
+| Profile | Model | Effort | Reason |
+|---|---|---|---|
+| default | strong | medium | owner chat and triage need judgement; medium is close to low on some models |
+| architect | strong | max | a plan mistake multiplies across every child card |
+| reviewer | strong | high | missed defects reach the owner; high instead of max keeps reviews fast |
+| coder | cheap, strong as fallback | high | code is checked by reviewer and tester; depth still matters for writing it |
+| tester | cheap | low | commands with verifiable results |
+| ops | cheap | low | mechanical operations |
+| auxiliary (compression, titles, vision) | cheap | low | helper calls |
+
+On the original provider the cheap model cost about a third of the strong one per input, cached and output token. Moving coder, tester and ops to it is safe as long as the strong reviewer and the owner's review stay in the loop to catch what the cheaper model misses.
+
+Watch for one trap: `agent.reasoning_overrides` wins over `agent.reasoning_effort`. A shared override `<cheap-model>: low` (meant for auxiliary calls) silently overrode the coder's `high`. Set `<cheap-model>: high` in the coder profile's overrides.
+
+Reasoning effort, measured on one review task (median of three runs): maximum 98 seconds and about 5000 thinking tokens, high 66 seconds and about 3000, low 10 seconds and none, with answers of the same length. Choose low for mechanics, high for writing code, maximum for review, root-cause analysis and design, then check the real effect in `reasoning_tokens`.
+
+## Peak-hour dispatch pause
+
+Some subscription providers charge more during peak hours (the original one billed double on weekday mornings). The factory stops dispatching new cards in that window and lets running cards finish:
+
+- an ops cron job runs every 15 minutes and calls `kanban-dispatch-peak-pause.py tick`;
+- inside the window it holds the boards' dispatch locks (the same mechanism as the owner's manual stop); outside it releases only a hold that it owns;
+- an owner stop always wins: the pause never overwrites or releases it; a quota stop held by the health check gets the peak label so it is not released in the middle of the window.
+
+Trade-off: cards wait. Only use it if your provider's pricing has peaks and your queue tolerates a few hours of delay. Set the window and time zone in the script.
+
+## Measuring the result
+
+Report two numbers together: spend (per day and per closed card) and an invariant that must not drop, such as cards closed per day and the owner's rework rate. In the original installation spend per day fell by roughly half and spend per closed card by about 60%; the per-card number is the one to trust, because it already accounts for throughput. If spend falls together with throughput, you have not optimised anything: work simply stopped.

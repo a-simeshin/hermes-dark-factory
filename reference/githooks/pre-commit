@@ -1,0 +1,57 @@
+#!/bin/sh
+# The em dash is built from its UTF-8 bytes so this file itself stays dash-free.
+EM=$(printf '\342\200\224')
+# pre-commit: two bans, both on things that pass silently and surface later.
+
+# 1. Do not silently delete source files while "fixing a test".
+#    Adjust SRC_DELETE_PATTERN to your layout and languages.
+#    Deliberate bypass: ALLOW_SRC_DELETE=1 git commit ...
+SRC_DELETE_PATTERN="${SRC_DELETE_PATTERN:-(^|/)src/.*[.](py|ts|tsx|js|java|go|rs|kt)$}"
+if [ -z "$ALLOW_SRC_DELETE" ]; then
+  del=$(git diff --cached --diff-filter=D --name-only | grep -E "$SRC_DELETE_PATTERN")
+  if [ -n "$del" ]; then
+    n=$(printf '%s\n' "$del" | wc -l)
+    echo "pre-commit: this commit deletes $n source files:" >&2
+    printf '  %s\n' $del >&2
+    echo '' >&2
+    echo 'Deleting sources is a task of its own, not a side effect of fixing a test.' >&2
+    echo 'If the deletion really belongs to the card: ALLOW_SRC_DELETE=1 git commit ...' >&2
+    exit 1
+  fi
+fi
+
+# 2. No em dash (U+2014) in text we author. A written rule kept being broken
+#    because it relied on memory; a hook does not forget.
+#    Deliberate bypass: ALLOW_EMDASH=1 git commit ...
+if [ -z "$ALLOW_EMDASH" ]; then
+  # The rule applies only to OUR layers of ~/.hermes. Everything else, above
+  # all skills/ and profiles/*/skills/, is upstream, hub or curator text:
+  # normalising punctuation there makes those skills diverge from upstream and
+  # drop out of `hermes update`. Do not edit upstream text.
+  # When you install this hook in a product repository instead, replace the
+  # path filter with the directories your team authors.
+  bad=$(git diff --cached --name-only --diff-filter=ACM \
+        | grep -E '^(shared-skills/|projects-context/|scripts/|memories/|docs/|profiles/[^/]+/(scripts|memories)/|SOUL\.md$|DEVIATIONS\.md$|profiles/[^/]+/SOUL\.md$)' \
+        | grep -E '\.(md|txt|py|ts|tsx|js|java|yml|yaml|sh|json)$' || true)
+  hits=""
+  for f in $bad; do
+    [ -f "$f" ] || continue
+    if git diff --cached -- "$f" | grep -q "^+.*$EM"; then
+      hits="$hits $f"
+    fi
+  done
+  if [ -n "$hits" ]; then
+    echo 'pre-commit: the commit adds an em dash, and the house style forbids it.' >&2
+    for f in $hits; do
+      echo "  $f:" >&2
+      git diff --cached -- "$f" | grep -n "^+.*$EM" | head -3 | sed 's/^/    /' >&2
+    done
+    echo '' >&2
+    echo 'Replace by meaning: an explanation becomes a colon, an aside becomes commas' >&2
+    echo 'or parentheses, a sharp turn becomes a period and a new sentence, a range a hyphen.' >&2
+    echo 'If the dash is really needed (a quotation): ALLOW_EMDASH=1 git commit ...' >&2
+    exit 1
+  fi
+fi
+
+exit 0
