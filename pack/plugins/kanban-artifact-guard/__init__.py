@@ -200,7 +200,9 @@ def _make_handler(ctx, event="kanban_task_completed"):
         except Exception:
             # Warning, not debug: a guard that cannot reach the board is a
             # dead guard, and that must be visible in the gateway log.
-            logger.warning("artifact-guard: board unavailable", exc_info=True)
+            logger.warning(
+                "artifact-guard: board unavailable (board=%s), card %s was "
+                "not inspected", board, task_id, exc_info=True)
             return
         try:
             task = kb.get_task(conn, task_id)
