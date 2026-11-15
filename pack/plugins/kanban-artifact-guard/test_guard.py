@@ -59,7 +59,12 @@ class Ctx:
 handler = guard._make_handler(Ctx())
 
 kb.init_db(board_db)
-con = kb.connect(board_db)
+# connect() moved to kanban_db_connect in the v0.21+ module split.
+try:
+    from hermes_cli.kanban_db_connect import connect as _kb_connect
+except ImportError:
+    _kb_connect = kb.connect
+con = _kb_connect(board_db)
 tid = kb.create_task(con, title="card", assignee="coder")
 
 

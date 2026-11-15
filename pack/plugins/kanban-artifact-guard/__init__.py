@@ -178,6 +178,15 @@ def _body_head(task_id, event, report, owners=()):
     )
 
 
+def _connect(kb, board=None):
+    """Open the board. ``connect`` left ``kanban_db`` for ``kanban_db_connect``
+    when the module was split (Hermes v0.21+); older builds still export it."""
+    connect = getattr(kb, "connect", None)
+    if connect is None:
+        from hermes_cli.kanban_db_connect import connect
+    return connect(board=board) if board else connect()
+
+
 def _make_handler(ctx, event="kanban_task_completed"):
     def on_completed(task_id=None, board=None, assignee=None, **_kw):
         if not task_id:
@@ -187,9 +196,11 @@ def _make_handler(ctx, event="kanban_task_completed"):
         except Exception:
             return
         try:
-            conn = kb.connect(board=board) if board else kb.connect()
+            conn = _connect(kb, board)
         except Exception:
-            logger.debug("artifact-guard: board unavailable", exc_info=True)
+            # Warning, not debug: a guard that cannot reach the board is a
+            # dead guard, and that must be visible in the gateway log.
+            logger.warning("artifact-guard: board unavailable", exc_info=True)
             return
         try:
             task = kb.get_task(conn, task_id)

@@ -32,9 +32,11 @@ The scripts named here belong to the original setup and are not shipped in this 
 | Name | Profile | Schedule | Model tier | Prompt summary |
 |---|---|---|---|---|
 | holdout-nightly | tester | `0 20 * * *` | cheap | Run the hidden acceptance scenarios of the open milestone against each open PR. The job's script (`holdout-nightly.sh`) prepares worktrees and builds and prints a JSON of targets that is injected into the prompt; the agent starts stands through `run-bounded.sh`, drives the scenarios, and reports pass or fail per PR. The scenarios live in a directory only the tester may read. |
-| ux-tick | default | `0 9 * * *` | cheap | Daily UX audit by dogfooding the product: use the running demo like a user, file concrete findings as triage cards with reproduction steps and screenshots. |
-| ceo-tick | default | `0 7 * * 0` | strong | Weekly product review: where the product stands against its goals, what the board says about priorities, and a short memo with proposed triage cards for the owner to accept or reject. |
-| cto-tick | default | `0 8 * * 0` | strong | Weekly technical review: architecture drift, test pyramid health, recurring failure classes from the week's cards and PRs, proposed technical debt cards. |
+| ux-tick | default | `0 9 * * *` | cheap, high reasoning effort | Daily UX audit by dogfooding: walk the running demo with the built-in browser tools within a budget of 45 tool calls, file every friction finding as a triage card with reproduction steps, a screenshot and a mirrored issue. Friction only, no feature ideas. |
+| ceo-tick | default | `0 7 * * 0` | strong | Weekly product cycle: research the product's category, competitors, the underlying platform and user pain on the web, read the open issues, and file 1 to 3 proposals as triage cards with the rationale (why, for whom, market signal). |
+| cto-tick | default | `0 8 * * 0` | strong | Weekly technical audit in six directions (security alerts, CI health, technical debt, stack freshness, vendored upstream, conformance to the implemented standard) within 45 tool calls; at most 1 to 3 cards and a summary to the owner's chat. |
+
+The full prompts, as templates with placeholders, are in [agent-prompts.md](agent-prompts.md).
 
 Agent jobs produce owner-facing content, so keep them few. Each one costs a full session; a script that prints nothing when there is nothing to say is far cheaper than an agent that is asked to check.
 

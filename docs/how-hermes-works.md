@@ -33,7 +33,10 @@ Pitfall: the Telegram bot token must exist only in the root `.env`. If a profile
 ### When configuration is read
 
 - Profile `config.yaml` (model, compression, reasoning effort, toolsets) is read when a session is created and frozen inside that session. A change applies to the next session without a restart, and never to a session already running.
-- Kanban dispatcher settings (`kanban.dispatch_in_gateway`, `max_spawn`, `max_in_progress`) are resolved when the gateway starts (`gateway/kanban_watchers.py`, outside the tick loop). Treat a gateway restart as required after changing them. Some code paths re-read the concurrency caps per tick (`_read_concurrency_caps`); do not rely on that without checking your build.
+- Kanban dispatcher settings depend on which dispatcher you run (verified in the v0.23.1 sources):
+  - **Dispatcher embedded in the gateway** (`kanban.dispatch_in_gateway: true`, the default): `dispatch_in_gateway`, `dispatch_interval_seconds`, `max_spawn`, `max_in_progress`, `failure_limit` and `dispatch_stale_timeout_seconds` are read once when the gateway starts (`_kanban_dispatcher_boot` in `gateway/kanban_watchers.py`, `_resolve_dispatcher_settings` in `gateway/kanban_watchers_dispatcher.py`). Changing them requires a gateway restart.
+  - Re-read on every tick even there: the auto-decompose toggle (`kanban.auto_decompose`, `auto_decompose_per_tick`) and the emergency stop (`hermes pause` / `hermes resume`). These are the two switches that work without a restart.
+  - **Standalone `hermes kanban daemon`**: `max_in_progress` is re-resolved on every tick (`hermes_cli/kanban_db_dispatch.py`, "operator edits apply without a restart"). If you read somewhere that the cap applies live, it is about this mode, not the embedded one.
 - `max_in_progress: 0` does not stop the dispatcher: zero counts as "not set" (`kanban_watchers_dispatcher.py:64`) and is replaced by a default derived from memory, `clamp(MemTotal / 512 MB, 2, 8)`. To stop dispatch, use the dispatch lock (see below), not the config.
 
 ### Restarting

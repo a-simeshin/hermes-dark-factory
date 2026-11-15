@@ -56,3 +56,9 @@ This document collects the lessons from running the factory that were expensive 
 ## Re-pin scheduled agent jobs after a provider change
 
 **Rule.** Agent cron jobs store their own provider and model. After changing providers, edit every agent job, or it silently falls back to whatever is left in the chain.
+
+## A guard that fails silently is worse than no guard
+
+**Rule.** A plugin that hooks into Hermes internals must log its own failure at warning level, and its test must be run against the Hermes sources after every upgrade.
+**Why.** An upstream refactoring moved the board `connect` function to another module. The artifact guard caught the resulting error and logged it at debug level, so it kept reporting "subscribed" at every gateway start and did nothing for weeks. Nobody noticed: the absence of alerts from a guard looks exactly like healthy workers. It was found only when its test was finally run against the current sources.
+**How.** After `hermes update`, run each plugin's `test_guard.py` with the Hermes interpreter. In a plugin, never swallow the "cannot reach the board" branch below warning. For a guard that should fire now and then, treat a long silence as a signal and check the date of its last comment on the board.

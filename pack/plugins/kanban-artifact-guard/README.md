@@ -18,7 +18,7 @@ The completion hook cannot undo the completion (it fires after the transaction c
 - If a dirty tree belongs to another card (its directory name is a card id such as `t_2161519c`), the message names that owner and warns not to push blindly.
 - Patches go to `$HERMES_RESCUE_DIR` or `$HERMES_HOME/rescue/<card>-<tree>.patch`.
 - The catch-up card has priority 95, the same assignee, and an idempotency key derived from the set of dirty paths, so repeated events over the same tree do not create duplicates.
-- All failures are swallowed: the hook must never break the kanban.
+- The hook never raises, because it must not break the kanban. A failure to open the board is logged at warning level: a guard that cannot reach the board does nothing, and that has to be visible in the gateway log.
 
 ## Install
 
@@ -42,5 +42,7 @@ The test needs the Hermes sources for `hermes_cli.kanban_db`:
 ```bash
 HERMES_AGENT_SRC=~/.hermes/hermes-agent ~/.hermes/hermes-agent/venv/bin/python test_guard.py
 ```
+
+The test passes on Hermes v0.23.1 (commit `3b42157858`). Run it again after every `hermes update`: the plugin imports `hermes_cli.kanban_db`, and an upstream module split once moved `connect` out of it and left the guard silently inactive.
 
 Adjust the venv path to your installation. The test uses a temporary board and rescue directory; never run it with `HERMES_HOME` pointing at your live directory.

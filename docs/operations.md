@@ -81,6 +81,7 @@ hermes update --backup --yes
 - Before upgrading, walk `docs/extensions-catalog.md` (or your own deviations list) against the release notes and remove whatever upstream now does natively.
 - Diff local plugin overrides (such as `disk-cleanup`) against the new bundled version and re-apply the local change.
 - After the update restart the gateway (`hermes gateway restart`) and run `hermes doctor`.
+- Run the test of every plugin against the new sources (`test_guard.py` in each plugin directory). Plugins call internal modules of Hermes, and an upstream refactoring can break them without any visible error; see "A guard that fails silently is worse than no guard" in [lessons-learned.md](lessons-learned.md).
 - The config is not migrated automatically. If `hermes config show` reports an old config version or something behaves oddly, run `hermes config migrate` and diff the result.
 - If `hermes doctor` warns about the SQLite WAL-reset bug, the Python build from `uv` is old: `uv self update` and `uv python install <version> --reinstall --no-cache`.
 - **Re-pin agent cron jobs after any provider change.** Each agent job stores its own provider and model. A job pinned to a provider you removed falls through to some other route and fails there (one job ended on a paid fallback with an empty balance). For every agent job: `hermes cron edit <id> --provider <provider> --model <model>`, then check `hermes cron runs <id>` after its next run.
