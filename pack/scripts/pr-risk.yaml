@@ -1,0 +1,124 @@
+# PR risk class from the facts of the diff.
+#
+# The only carrier of the rules: edit them here, not in the code. pr-risk.py
+# reads only this file. The class: critical (at least one of critical_rules
+# fired), trivial (every file of the diff matches trivial_files), otherwise
+# normal.
+#
+# GENERIC SHIPPED DEFAULTS. Entries marked EXAMPLE below only show the shape
+# of a rule and must be replaced with the paths of your own project: the hot
+# path of your product (proxy_transport), the state and view layers of your UI
+# (ui_state_plus_view), your own known_misses. Calibrate with a shadow run
+# (pr-risk.py --shadow DATA.json) over recently merged PRs until it reports no
+# new misses and a critical share below 60%. A diff that touches both the
+# state layer and the view layer of a UI is heavier than a one-layer diff,
+# which is where ui_state_plus_view comes from.
+
+version: 1
+
+# Known exceptions of the shadow mode: a divergence "owner critical/major,
+# script not critical" on a PR from this list does not count as a NEW miss (it
+# is an owner decision). The reason lives inside each entry. The --shadow gate
+# tells them apart from new misses; an entry whose divergence no longer
+# reproduces is printed as stale: a signal to remove it here. This is data,
+# not a comment.
+# EXAMPLE: delete these two entries and add your own (pr, owner, script,
+# decision, reason).
+known_misses:
+  - pr: 101
+    owner: major
+    script: normal
+    decision: "owner decision"
+    reason: "example: an incomplete port of a sibling change; commits missing from the PR diff are not visible, completeness is a separate mechanism, not a risk class"
+  - pr: 102
+    owner: major
+    script: normal
+    decision: "owner decision"
+    reason: "example: test quality (weak assertions) is not a fact of the diff"
+
+# File categories: they affect the production line count and the trivial rule.
+# Check order: test -> docs -> lock -> build -> prod.
+categories:
+  test:
+    - "**/src/test/**"
+    - "**/__tests__/**"
+    - "**/*.test.ts"
+    - "**/*.test.tsx"
+    - "**/*.spec.ts"
+    - "**/*.spec.tsx"
+    - "**/*Test.java"
+    - "**/*Tests.java"
+    - "**/*IT.java"
+  docs:
+    - "**/*.md"
+    - "**/*.txt"
+    - "**/LICENSE*"
+    - "**/NOTICE*"
+  lock:
+    - "**/package-lock.json"
+    - "**/pnpm-lock.yaml"
+    - "**/yarn.lock"
+  build:
+    - "**/pom.xml"
+    - "**/package.json"
+    - "**/*.gradle"
+    - "**/Makefile"
+
+critical_rules:
+
+  proxy_transport:
+    comment: "EXAMPLE: the live request path of the product (replace these globs with your own hot-path directories)"
+    globs:
+      - "**/core/gateway/**"
+      - "**/core/**/gateway/**"
+      - "**/core/recorder/**"
+      - "**/web/gateway/**"
+      - "**/reactive/gateway/**"
+
+  auth_headers:
+    comment: "auth and headers"
+    globs:
+      - "**/auth/**"
+      - "**/*auth*"
+      - "**/*oauth*"
+      - "**/*header*"
+
+  ci_build:
+    comment: "CI and build"
+    globs:
+      - ".github/**"
+      - "**/.github/**"
+      - "**/pom.xml"
+      - "**/package.json"
+      - "**/*.gradle"
+
+  migrations_default_config:
+    comment: "migrations and default config"
+    globs:
+      - "**/db/migration/**"
+      - "**/migration/**"
+      - "**/*.sql"
+      - "**/application*.yml"
+      - "**/application*.yaml"
+      - "**/application*.properties"
+
+  test_deletion:
+    comment: "test deletion: the file is removed, or >= 20 lines are carved out with deletions > additions"
+    removed_file_min_lines: 0
+    partial_min_deletions: 20
+
+  prod_churn:
+    comment: "diff above 400 lines of production code (not tests, docs, locks or build files)"
+    max_lines: 400
+
+  ui_state_plus_view:
+    comment: "the UI diff goes through both the state layer and the view layer (EXAMPLE globs: replace with your own layout)"
+    state_globs:
+      - "**/src/hooks/**"
+    view_globs:
+      - "**/src/components/**"
+
+trivial_files:
+  - "**/*.md"
+  - "**/*.txt"
+  - "**/LICENSE*"

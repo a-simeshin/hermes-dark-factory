@@ -25,7 +25,7 @@ git -C ~/.hermes config core.hooksPath ~/.hermes/githooks
 git -C ~/projects/<repo> config core.hooksPath ~/.hermes/githooks
 ```
 
-`pre-push` calls `prepush-link-guard.py` and `prepush-identity-guard.py` from `$HERMES_SCRIPTS` (default `~/.hermes/scripts`); these guard scripts are not shipped yet, so remove those two calls or provide your own guards, and set `FACTORY_BOT_EMAIL` for the identity guard. Set `FACTORY_STATIC_GATE` to your fastest static check, for example `npm run lint` or a formatter in check mode; the command receives the diff base ref as its first argument. `FACTORY_BASE_PATTERN` (an extended regex over `origin/...` refs) tells the hook which branches count as release lines.
+`pre-push` calls `prepush-link-guard.py` and `prepush-identity-guard.py` from `$HERMES_SCRIPTS` (default `~/.hermes/scripts`); both guards ship in `pack/scripts/`; copy that directory to `~/.hermes/scripts/` or point `HERMES_SCRIPTS` at it. Set `FACTORY_BOT_EMAIL` in `factory.env` for the identity guard and `FACTORY_BASE_BRANCHES` for the link guard. Set `FACTORY_STATIC_GATE` to your fastest static check, for example `npm run lint` or a formatter in check mode; the command receives the diff base ref as its first argument. `FACTORY_BASE_PATTERN` (an extended regex over `origin/...` refs) tells the hook which branches count as release lines.
 
 ## Adapting
 

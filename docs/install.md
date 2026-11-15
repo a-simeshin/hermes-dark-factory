@@ -26,7 +26,7 @@ This document describes how to add the pack to an existing Hermes Agent v0.23.1 
 4. **Plugins.** Copy the directories under `pack/plugins/` into `~/.hermes/plugins/` and follow each plugin's README.
 5. **Config.** Merge `pack/config/profile-overlay.example.yaml` into each profile's config; pick models for your provider. Settings that the dispatcher reads (`max_in_progress` and friends) apply only after a gateway restart: use `hermes gateway restart` without `-y`.
 6. **Project layer.** Write a `<project>-conventions` skill: integration branch, build and test commands, stand URLs, owner decisions. Put the same essentials in the target repository's `AGENTS.md`.
-7. **Cron jobs.** Recreate the jobs you want from `pack/cron/jobs.example.md`. The scripts behind the script jobs are not shipped yet (see the catalog); write your own or wait for the engine split.
+7. **Cron jobs.** Recreate the jobs you want from `pack/cron/jobs.example.md`. Copy `pack/scripts/` to `~/.hermes/scripts/`, copy `factory.env.example` to `~/.hermes/factory.env` and fill it in. Jobs of other profiles need a small wrapper in `profiles/<profile>/scripts/` (the pack ships `peak-pause-tick.sh` and `holdout-stands-kill.sh` as such wrappers). The board watchdog, PR hygiene and evening metrics are not shipped yet; skip their jobs for now.
 8. **Snapshot.** Put the knowledge layer of the Hermes home under git with a whitelist and commit the starting point.
 
 ## Check that it works

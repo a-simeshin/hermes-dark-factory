@@ -25,7 +25,7 @@ Schedules below are cron expressions in the server's local time. Shift jobs that
 | peak-pause-tick | ops | every 15 min | `peak-pause-tick.sh` (wraps `kanban-dispatch-peak-pause.py tick`) | Holds dispatch during the provider's peak-pricing window, releases it after. Only needed if your provider prices peak hours higher. |
 | holdout-stands-kill | tester | `0 23 * * *` | `holdout-stands-kill.sh` (wraps `holdout-stands-kill.py`) | Stops stands left by the nightly holdout run. |
 
-The scripts named here belong to the original setup and are not shipped in this version of the pack: they still mix the generic engine with one project's rules. See docs/separation-and-adoption.md for the plan to split them into an engine plus a project config.
+Most of these scripts ship in `pack/scripts/` (see its README). Four do not yet, because they still mix the generic engine with one project's rules: `board-watchdog.py` (and its `rework-gate` wrapper), `pr-hygiene.py`, `metrics-evening.py` and `holdout-nightly.sh`. See docs/separation-and-adoption.md for the plan.
 
 ## Agent jobs
 

@@ -30,4 +30,4 @@ The pack contains only what sits on top of Hermes. Hermes itself is installed an
 
 ## Status
 
-Extracted from a factory that has been developing a real open-source project for several months. The skills and docs are generic; the watchdog, PR hygiene and metrics scripts of the original setup are described in the catalog but not shipped yet: they still need to be split into a generic engine and a project config.
+Extracted from a factory that has been developing a real open-source project for several months. The skills and docs are generic; the scripts of the original setup are being ported in waves. `pack/scripts/` holds the first wave (dispatch hold and peak pause, backup, health, token ledger, link and identity guards, PR risk labels, worktree cleanup, reviewer-miss and plan-review gates), with project values moved into one `factory.env` file. The board watchdog, PR hygiene, the evening metrics and the visual-delta and holdout scripts are described in the catalog but not shipped yet: they still mix the generic engine with one project's rules.
