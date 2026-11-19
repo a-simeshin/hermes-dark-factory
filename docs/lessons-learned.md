@@ -1,6 +1,6 @@
 # Lessons learned
 
-This document collects the lessons from running the factory that were expensive to learn and are not specific to any project. Each lesson has the rule, the incident that taught it (told generically), and how to apply it. Skill-level lessons for the agents live in each skill's `references/lessons.md`; these are lessons for the person operating the factory.
+This document collects the lessons from running the factory that were expensive to learn and are not specific to any project. Each lesson has the rule, why it exists, and how to apply it. Skill-level lessons for the agents live in each skill's `references/lessons.md`; these are lessons for the person operating the factory.
 
 ## Look for the native feature first
 
@@ -62,3 +62,40 @@ This document collects the lessons from running the factory that were expensive 
 **Rule.** A plugin that hooks into Hermes internals must log its own failure at warning level, and its test must be run against the Hermes sources after every upgrade.
 **Why.** An upstream refactoring moved the board `connect` function to another module. The artifact guard caught the resulting error and logged it at debug level, so it kept reporting "subscribed" at every gateway start and did nothing for weeks. Nobody noticed: the absence of alerts from a guard looks exactly like healthy workers. It was found only when its test was finally run against the current sources.
 **How.** After `hermes update`, run each plugin's `test_guard.py` with the Hermes interpreter. In a plugin, never swallow the "cannot reach the board" branch below warning. For a guard that should fire now and then, treat a long silence as a signal and check the date of its last comment on the board.
+
+## Do not build a parallel lane next to a native one
+
+**Rule.** If Hermes already has a lane for a step (the review lane after `kanban_request_review`, dependency waits, respawn guards), do not add cards or arms that do the same step from outside it. One PR is carried by one card, from opening to the owner's merge.
+**Why.** Separate reviewer, summary and rebase cards armed by a watchdog raced the native review lane: the same head was reviewed twice, rebases were done by two cards, and every extra card cost a full worker run.
+**How.** Route every card generator through one native-or-live check and put its receipt in the card body; fail the test suite when a generator skips it.
+
+## One way to park, one way to wait
+
+**Rule.** Park a card until a moment only with `kanban schedule` and a machine-readable wake time, and make a wait on an external event a single machine-checkable release line that a watchdog can execute.
+**Why.** Transient blocks used as parking dropped cards with run history into triage, where the decomposer rewrote them from stale bodies; free-text conditions in block reasons were read by nobody.
+
+## A stop switch can silence the safety net
+
+**Rule.** When you hold the dispatcher (quota stop, peak-pricing pause, manual stop), check what else that tick did. A hold that silences the whole tick also silences its reclaim of dead runs.
+**How.** Keep an independent watchdog that reclaims running cards whose worker process is gone and whose heartbeat is stale, and keep it scheduled whenever holds are in use.
+
+## Compression has a floor
+
+**Rule.** Set the compression threshold above the context a worker keeps after a compression (prompt, skills, tool schemas, protected tail), with a margin.
+**Why.** Below that floor every compression immediately triggers the next one: runs compressed dozens of times, each pass costing more than it saved, until Hermes blocked compression as ineffective.
+**How.** Measure the floor per profile from the worker logs, and recompute the threshold whenever models or skills change.
+
+## A test must not spawn itself
+
+**Rule.** A test never re-runs its own file without a single-test argument and a timeout, and the test runner puts each test in its own process group and kills the whole group on timeout.
+**Why.** A test that re-ran itself to prove it was red on the committed code started an unbounded chain of copies, which grew until the OOM killer took the gateway; after a commit, the committed code equals the current code anyway, so the check proved nothing.
+
+## "Green" is the runner's final line, verbatim
+
+**Rule.** A report that tests pass quotes the final summary line of the reporter's own run of the test runner. A marker that the runner does not print, or a summary of someone else's run, is not evidence.
+**Why.** Agents reported success with invented markers that no tool in the repository produces.
+
+## Native contracts expect their own formats
+
+**Rule.** When a native gate reads a field your agents fill in, write it in the exact format the gate parses. For the PR completion contract, `metadata.published_pr` is the full PR URL, not a number.
+**Why.** A value the gate cannot parse is not reported as a format error; it surfaces later as a completion that does not behave as the contract promises.

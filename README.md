@@ -10,9 +10,10 @@ The pack contains only what sits on top of Hermes. Hermes itself is installed an
 |---|---|
 | `pack/skills/` | Generic skills for the roles: kanban discipline, worker runs, decomposition, adversarial review, tester verdicts, PR deliverables, issue mirroring, debugging, lesson capture and more. Point `skills.external_dirs` at this directory. |
 | `pack/souls/` | Role personas (SOUL.md) for each profile. |
-| `pack/plugins/` | Hermes plugins: review-loop guard, artifact guard, disk-cleanup override. |
+| `pack/plugins/` | Hermes plugins: review-loop guard, artifact guard, admission guard (keeps unapproved cards from being claimed between two admission runs), disk-cleanup override. |
 | `pack/config/` | A config overlay with the settings that cut model spend roughly in half. |
-| `pack/cron/` | The scheduled jobs the factory runs, as a reference list. |
+| `pack/scripts/` | The mechanical layer: watchdogs, gates, guards and metrics, configured through one `factory.env` file, with their tests and a hermetic test runner. |
+| `pack/cron/` | The scheduled jobs the factory runs, as a reference list, and the prompts of the agent jobs. |
 | `reference/githooks/` | Git hooks the agents' commits pass through (identity, link and style guards). |
 | `docs/` | How it all works. |
 
@@ -30,4 +31,8 @@ The pack contains only what sits on top of Hermes. Hermes itself is installed an
 
 ## Status
 
-Extracted from a factory that has been developing a real open-source project for several months. The skills and docs are generic; the scripts of the original setup are being ported in waves. `pack/scripts/` holds all of them, including the board watchdog, PR hygiene and the evening metrics, with project values moved into one `factory.env` file and 60 test files. The three large scripts were ported with behaviour unchanged; sorting out what in them is broken, duplicated by Hermes or irreversible is the next step, so start them with their dry-run flags.
+Extracted from a factory that has been developing a real open-source project for several months, and kept in sync with that installation. The skills and docs are generic. `pack/scripts/` holds every script of the original setup, including the board watchdog, the worker-run watchdog, the issue executor poll, PR hygiene and the evening metrics, with project values moved into one `factory.env` file and more than a hundred test files that `run-tests.py --audit` runs in isolation.
+
+The pipeline follows the rule "one PR = one card": the card that owns a pull request carries it through the native review lane up to the owner's merge, and no separate reviewer, rebase or summary cards are created for it. Every card that a script generates first asks whether a native mechanism or a live card already covers the work, and carries that receipt in its body.
+
+The three large scripts (`board-watchdog.py`, `pr-hygiene.py`, `metrics-evening.py`) still encode one owner's rules and include irreversible actions (archiving cards, closing issues, rewriting the dispatcher cap). Start them with their dry-run flags and read what they would do on your board before you enable their cron jobs.

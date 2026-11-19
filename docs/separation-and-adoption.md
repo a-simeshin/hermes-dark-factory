@@ -18,7 +18,7 @@ Rules of thumb:
 - **A generic skill never names a branch, a path or a tool version.** It says "the integration branch" and the project conventions skill says which branch that is.
 - **Project decisions go to the project layer with a date and a reason.** They may override a pack default ("before/after evidence lives in issues, not PRs"); the pack documents the default and the knob.
 - **Lessons start in the project layer.** A lesson moves into the pack only after it has been retold without project details and still makes sense.
-- **Scripts are split into a generic engine and a project config.** The engine reads branch names, labels, board slug, stand URLs and thresholds from a config file; nothing project-specific is hard-coded. Until a script has been split this way it stays in `reference/`.
+- **Scripts are split into a generic engine and a project config.** The engine reads branch names, labels, board slug, stand URLs and thresholds from a config file (`factory.env`, read through `factory_config.py`); nothing project-specific is hard-coded. A script that needs a value you have not set stops with a message naming the key.
 
 ## How the agents see both layers
 

@@ -9,6 +9,7 @@ Agent turns run inside the gateway process. The worker client of a kanban run li
 - Use `hermes gateway restart` **without `-y`**. It drains first (up to `agent.restart_drain_timeout` seconds) and refuses to restart while agent turns are live. That refusal is the feature: wait or stop dispatch first.
 - Do not use `systemctl --user restart hermes-gateway` while turns are live. It kills them; the interrupted runs end as `crashed`, are retried, and the work since the last commit is lost.
 - To empty the factory before a restart, stop dispatch with the dispatch lock (`kanban-dispatch-hold.py start --owner <you> --reason "restart"`), wait for running cards to finish, restart, release the hold. Editing `max_in_progress` does not help: it is read at gateway start, and `0` means "unset".
+- A dispatch hold silences the whole dispatcher tick, including its reclaim phase. A worker that dies while the hold is on (for example killed together with the gateway) keeps its card `running` and its slot until someone reclaims it. `worker-api-watchdog.py` does that: it reclaims a running card whose worker process is gone and whose heartbeat is stale, so keep it scheduled whenever you use holds or the peak-pricing pause.
 - Restart after changing kanban dispatcher settings and after installing or updating plugins. Profile settings (model, compression, effort) apply to new sessions without a restart.
 
 ## OOM policy for the gateway unit
@@ -94,6 +95,8 @@ Many Hermes tests and your own script tests read `HERMES_HOME` to find their dat
 - Create a throw-away home (`mktemp -d`), copy only what the test needs, and export `HERMES_HOME` to it.
 - Never pass the live path into a test harness, even "read-only".
 - Run the test inside a memory-bounded scope (see above).
+- Run the pack's script tests with `python3 run-tests.py --audit`. Each test runs in its own process group, and a timeout kills the whole group, so grandchildren of a hung test do not survive it. The audit hook turns a test red when it reads the real Hermes home, a live board, a real `gh` or the network.
+- A test must never re-run its own file (for example to prove it is red against the committed code) without a single-test argument and a timeout. One such test re-ran itself, which re-ran itself again; the unbounded chain grew to almost 9 GB and the OOM killer took the gateway with it.
 - For anything that touches GitHub, use a scratch repository.
 
 ## SSH and host hygiene

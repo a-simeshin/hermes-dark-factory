@@ -172,7 +172,7 @@ Details:
 
 When a session's context passes `compression.threshold` (a fraction of the model's context window), Hermes summarises older turns with the auxiliary compression model (`auxiliary.compression.provider`, `model`, `reasoning_effort`). Other knobs: `target_ratio` (how small the summary should be), `protect_last_n` (recent messages kept verbatim), `proactive_prune_tokens`.
 
-The threshold is relative, so the same value means very different absolute sizes on different models. With a 1.3M-token window, a threshold of 0.5 never fired, and sessions dragged 200k tokens of context through every call. The factory runs at 0.08; see `docs/config-and-quota.md`. Run the compression model at low reasoning effort: at the default it spent minutes per compression for a summary of the same size.
+The threshold is relative, so the same value means very different absolute sizes on different models. With a 1.3M-token window, a threshold of 0.5 never fired, and sessions dragged 200k tokens of context through every call. The threshold must also sit above the context a worker keeps after a compression (prompt, skills, tool schemas, protected tail), or compression loops; the factory runs at 0.18 on a 1M window. See `docs/config-and-quota.md`. Run the compression model at low reasoning effort: at the default it spent minutes per compression for a summary of the same size.
 
 Caveat for accounting: after compression `state.db` can store the same tool call several times under one `tool_call_id`. Deduplicate before you sum tool time or count calls.
 

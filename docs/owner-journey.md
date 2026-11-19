@@ -18,9 +18,9 @@ There are four intake paths. All of them end as cards on the kanban board `<boar
 
 | Path | When to use it | What happens |
 |---|---|---|
-| Telegram chat with the orchestrator | Ideas, bugs you noticed, "look into X" | The orchestrator (default profile) turns the message into a triage card, usually decomposes it into implementation, review and QA children, and subscribes your chat to the card's events. |
-| GitHub issue in `<org>/<repo>` | Anything that should stay visible to other people | The issue mirror skill creates a linked card; the card and the issue reference each other. |
-| Scheduled agent ticks | Product discovery without you | Daily UX audit, weekly CEO and CTO reviews look at the product and file issues and cards themselves. You see them in the digest. |
+| Telegram chat with the orchestrator | Ideas, bugs you noticed, "look into X" | The orchestrator (default profile) turns the message into a triage card mirrored to an issue, and subscribes your chat to the card's events. Once you approve the issue, it is decomposed into executor cards. |
+| GitHub issue in `<org>/<repo>` | Anything that should stay visible to other people | Putting an issue into the active milestone is your approval: within a few minutes the issue executor poll gives it an executor card in the milestone's priority band. Issues outside a milestone wait for your triage. |
+| Scheduled agent ticks | Product discovery without you | Daily UX audit, weekly CEO and CTO reviews look at the product and file issues that await your triage. Nothing is built from them until you approve one. |
 | CLI on the server | Precise one-off work | `hermes kanban create "<title>" --assignee <role> --body "<details>"`. Useful when you want a specific role and priority. |
 
 What makes a good card, whichever path you use:
@@ -29,7 +29,9 @@ What makes a good card, whichever path you use:
 - **An acceptance criterion** you can check yourself: what you will click and what you expect to see.
 - **Scope boundaries**, if any: what must not change.
 
-Large ideas go through decomposition. The architect splits the card into children (implement, review, QA, end-to-end check), links them with parent/child dependencies, and a plan-review gate holds the plan until it is reviewed. Children wait in `todo` until their parents are done; that waiting is normal and is not a sign that the card is stale.
+Large ideas go through decomposition. The architect splits the card into children, each of which owns one pull request, links them with parent/child dependencies, and hands a large or critical plan to the reviewer through the review lane before the children run. Children wait in `todo` until their parents are done; that waiting is normal and is not a sign that the card is stale.
+
+Work you have not approved does not run. A card whose issue is not in a milestone and still awaits your triage is parked by the admission gate, and a plugin stops the dispatcher from claiming it in the minutes between two gate runs.
 
 ## 3. What happens without you
 
@@ -37,33 +39,34 @@ Once a card is `ready`, the dispatcher gives it to a worker of the right role, a
 
 ```mermaid
 flowchart LR
-  I[Issue or chat request] --> T[Triage card]
-  T --> D[Architect decomposes]
-  D --> C[Coder: branch, commits, PR]
-  C --> R[Reviewer: adversarial review, verdict on the PR]
+  I[Approved issue or chat request] --> D[Architect decomposes]
+  D --> C[Owner card: branch, commits, PR]
+  C --> R[Review lane: adversarial review, verdict on the PR]
   R -- changes requested --> C
-  R -- approved --> Q[Tester: QA on a stand built from the exact head]
-  Q --> W[Coder: 'What changes for you' comment]
-  W --> O[Owner review]
-  O -- changes requested --> RW[Rework cards from the webhook]
-  RW --> C
+  R -- approved --> W[Same card: 'What changes for you' comment]
+  W --> K[Card closes: remaining owner merge]
+  K --> O[Owner review]
+  O -- changes requested --> RW[One card for the new cycle]
+  RW --> R
   O -- approved --> M[Owner merges, squash]
 ```
 
 Things you will notice along the way:
 
+- **One pull request, one card.** The card that opened a PR carries it through review, rework and a rebase if one is needed. You will not see separate reviewer or rebase cards for the same PR, and a closed card that only waits for your merge keeps a signal in the watchdog report until you merge.
+
 - **Verdicts live on the pull request**, as comments starting with `## Review verdict`, with a `## Calibration` block that lists which promises were checked and which mutants were built.
 - **Every PR gets a "What changes for you" comment** bound to the exact head commit: what the user of the product will notice, in plain words. If the head moves, a fresh one is required.
 - **Visual before/after evidence lives in the issue**, at the prototype stage, not in the PR. This was an explicit cost decision: screenshot cards in every PR were the most expensive item in the budget.
 - **A peak-hour pause** stops new dispatch while the model provider charges peak rates. Cards simply wait.
-- **The review layer can park low-priority cards** while pull request heads wait for review, so reviews are not starved. They come back on their own when the review queue empties.
+- **Priorities follow your milestones.** Cards of the active milestone run first, then the next one; bringing an open PR to merge comes before both.
 
 ## 4. What reaches your phone
 
 The gateway delivers to `<telegram-chat>`:
 
 - events of cards you created or subscribed to (completed, blocked, review requested and so on);
-- the hourly board watchdog: stuck dispatch, cards blocked on you, review heads without a verdict, repeated failures;
+- the hourly board watchdog: stuck dispatch, cards blocked on you, closed cards waiting for your merge, issues of the active milestone without an executor, repeated failures;
 - quota alarms: when the provider returns a quota error the health check stops dispatch and tells you;
 - the evening report: tokens and credits spent, cards closed, the path from card to merge, and pull requests that are merge-ready.
 
@@ -83,7 +86,7 @@ Write your decisions down where the agents read them (the project conventions sk
 
 Your review is the expensive, high-value step. Treat an agent "APPROVED" as the start of your review, not the end.
 
-**Pick candidates.** A pull request is a candidate when the agents' chain has finished on the current head: an approving verdict on that exact head, a "What changes for you" comment on that head, green CI, and no conflicts. Pull requests with conflicts get a request to rebase, not a review.
+**Pick candidates.** A pull request is a candidate when its owner card has finished on the current head: a reviewer's approving verdict on that exact head (a QA verdict alone does not count), a "What changes for you" comment on that head, green CI, and no conflicts. Pull requests with conflicts get a request to rebase, not a review.
 
 **Check the artifact, not the report.**
 
@@ -122,7 +125,7 @@ Two details matter more than they look:
 - **Write the owner decision in the first person** ("I will merge after X"). Agents read imperative sentences ("merge as soon as X") as instructions and may act on them.
 - **Bind the verdict to the head.** If the branch is rebased or pushed after your approval, your verdict no longer applies; review the new head.
 
-A formal review triggers the webhook, and the agents turn each blocker into a rework card. You do not need to create cards by hand.
+A formal review triggers the webhook. The live card that owns the PR picks up the rework; if that card is already closed, one new card opens for the cycle (split into children when there are many blockers). You do not need to create cards by hand.
 
 **Merge** with squash, pinned to the head you approved:
 

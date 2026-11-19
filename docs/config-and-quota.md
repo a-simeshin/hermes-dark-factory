@@ -14,11 +14,13 @@ Measure your own installation before tuning: count calls, context per call and r
 
 ## The knobs
 
-### `compression.threshold: 0.08`
+### `compression.threshold: 0.18`
 
-Compress when the context passes 8% of the window (about 105k tokens on a 1.3M window). This is the single biggest saving: every call after the threshold is cheaper. The intermediate step of 0.12 helped; 0.08 helped further.
+Compress when the context passes 18% of the window (about 180k tokens on a 1M window). Lowering the threshold from the default was the single biggest saving: every call after it is cheaper.
 
-Trade-off: summaries lose detail, so a worker may re-read a file it already saw. Keep `protect_last_n` (recent messages kept verbatim) at about 20 so the current step is intact. Recompute the threshold when you change models: what matters is the absolute size.
+There is a floor below which a lower threshold stops helping and starts hurting. After a compression a worker still carries its system prompt, skills, tool schemas and the protected tail of recent messages; on the original installation that floor was 75-115k tokens depending on the profile. A threshold of 0.08 (80k) sat below it, so compression ran in a loop: up to 39 times in one run, each pass costing about a minute and more tokens than it saved, until Hermes blocked further compression as ineffective. Put the threshold above the measured floor with a margin. Measure the floor per profile from the context sizes after compression in `profiles/<profile>/logs/managed-worker.log`, and recompute the threshold when you change models: what matters is the absolute size.
+
+Trade-off: summaries lose detail, so a worker may re-read a file it already saw. Keep `protect_last_n` (recent messages kept verbatim) at about 20 so the current step is intact.
 
 ### `auxiliary.compression.reasoning_effort: low`
 

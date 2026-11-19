@@ -22,11 +22,11 @@ This catalog lists every mechanism the factory adds on top of Hermes Agent v0.23
 
 ### Quota savings overlay
 
-- **What:** compression threshold 0.08, `tool_output.max_bytes: 8000`, `api_max_retries: 3`, per-profile `disabled_toolsets`, `memory_char_limit: 2200`, `budget_warning_ratio: 0.85`, cheaper model for coder/tester/ops, reasoning effort per role.
+- **What:** compression threshold 0.18 (above the measured context floor after compression), `tool_output.max_bytes: 8000`, `api_max_retries: 3`, per-profile `disabled_toolsets`, `memory_char_limit: 2200`, `budget_warning_ratio: 0.85`, cheaper model for coder/tester/ops, reasoning effort per role.
 - **Native feature checked:** all are native keys; only the values deviate from defaults.
 - **Why:** the subscription quota ran out twice in a week. Together the values cut model spend roughly in half per day and by about 60% per closed card.
 - **Where (original setup):** `pack/config/profile-overlay.example.yaml`, explained in `docs/config-and-quota.md`.
-- **Coupling:** needs config (model names, thresholds per context window).
+- **Coupling:** needs config (model names, thresholds per context window). The compression threshold must sit above the context a worker keeps after a compression: at 0.08 on a 1M window it sat below that floor and compression looped dozens of times per run.
 
 ### Concurrency cap (`kanban.max_in_progress: 2`)
 
@@ -70,6 +70,14 @@ This catalog lists every mechanism the factory adds on top of Hermes Agent v0.23
 - **Where (original setup):** `pack/plugins/kanban-artifact-guard/`.
 - **Coupling:** needs config (`repos` list).
 
+### kanban-admission-guard
+
+- **What:** right before the dispatcher spawns a worker (hook `kanban_task_claimed`), checks whether the card or one of its ancestors refers to an issue or PR the owner approved, using the cache the admission gate writes; if not, parks the card with `kanban schedule` under the gate's own marker. Fail-open on a missing or stale cache.
+- **Native feature checked:** dispatcher claim order and the scheduled admission gate.
+- **Why not enough:** the dispatcher has no notion of owner approval, and the gate runs on a schedule. In between, the platform promotes cards on its own (a dependency is released when its parent closes) and the dispatcher claims them within minutes, so a worker was already spending on unapproved work when the gate next looked.
+- **Where (original setup):** `pack/plugins/kanban-admission-guard/`.
+- **Coupling:** needs config (the admission cache of your gate).
+
 ### disk-cleanup override
 
 - **What:** copy of the bundled plugin that never deletes files under `scripts/`.
@@ -82,15 +90,47 @@ This catalog lists every mechanism the factory adds on top of Hermes Agent v0.23
 
 ### board-watchdog
 
-- **What:** delivers `kanban diag` and aggregates (dispatcher heartbeat, stuck graph with the cost of each blocked root, silence, cards without assignee) plus owner gates: review layer, rework size, verdict dedup, merge unblocker, `needs_input` misuse on agent steps, stacked rework, `max_in_progress`, conflict debt, backlog ownership, prototype first. Alerts only on problems.
+- **What:** delivers `kanban diag` and aggregates (dispatcher heartbeat, stuck graph with the cost of each blocked root, silence, cards without assignee) plus owner gates: admission by milestone and owner approval, milestone priority bands, rework size and priority, verdict dedup, merge unblocker, `needs_input` misuse on agent steps, `max_in_progress`, conflict debt, backlog ownership, prototype first, no decomposition of a delivered PR, tails of closed issues and duplicate chains, the owner-merge hold of a closed PR card, idempotency keys, board lint. The review layer only reports on open PR heads; it no longer creates cards. Alerts only on problems.
 - **Native feature checked:** `hermes kanban diag` (`kanban_diagnostics.py`, `_RULES`) and the gateway notifier.
 - **Why not enough:** diagnostics are local and have no delivery; detectors do not reach GitHub; the notifier is per card and cannot filter by event kind (`kanban_watchers_notifier.py:47`), so "alert only on problems" cannot be expressed natively. A sweep that subscribed every card was tried and rolled back (127 cards, a ping on every event).
 - **Where (original setup):** `board-watchdog.py`, cron hourly; `rework-gate-watchdog.sh` every 5 minutes.
-- **Coupling:** reference only. Port the review layer and the stuck-graph check first; the rest encodes one owner's rules.
+- **Coupling:** reference only. Port the stuck-graph check and the admission gate first; the rest encodes one owner's rules.
+
+### Native-or-live guard (board_native_guard)
+
+- **What:** one helper, `native_or_live`, that every card generator and every reassign, restore or remove operation must call. It checks the native paths (review lane after `kanban_request_review`, native respawn and its guards, task links and dependency waits, a verdict on this head) and live cards with the same key; the generator may act only on a positive answer, and the receipt goes into the card body. A static test fails the suite when a generator skips the helper; the CLI gives webhook prompts the same receipt.
+- **Native feature checked:** idempotency keys on `kanban create`.
+- **Why not enough:** an idempotency key only stops the exact same key. The duplicates came from our own mechanisms acting next to native ones under different keys: an auto-armed review running in parallel with the native review lane, a worker's own handoff comment tripping the native active-PR guard while a watchdog kept reclaiming against it, several cards for one patch.
+- **Where (original setup):** `board_native_guard.py`, used by `board-watchdog.py`, `pr-hygiene.py`, `plan-review-gate.py`.
+- **Coupling:** portable.
+
+### Milestone priority bands (milestone_bands)
+
+- **What:** computes priority bands from the open GitHub milestones on every run (active 80, next 40, others 20), with a disk cache for `gh` failures; a CLI prints the band of an issue or PR for prompts that create cards.
+- **Native feature checked:** `--priority` on create and the dispatcher's priority order.
+- **Why not enough:** Hermes orders by priority but knows nothing about milestones, and the children of a decomposition get priority 0 from the core. Bands written into prompts and skills from memory went stale when milestones moved, and a webhook once created a card of the next milestone at the active band.
+- **Where (original setup):** `milestone_bands.py`.
+- **Coupling:** needs config (repository).
+
+### issue-executor-poll
+
+- **What:** every five minutes, every issue of the active milestone gets an executor card within one cycle, in the milestone's band; delivered issues (a merged PR after the last scope change) and anything already covered are skipped. `--check-issue N` answers a webhook prompt whether a card is appropriate.
+- **Native feature checked:** the GitHub webhook subscription and the issue bridge.
+- **Why not enough:** webhook events can be missed or arrive for issues that are already delivered, and the bridge creates cards without an assignee. Three duplicate cards appeared in twenty minutes for an issue whose PR had already merged.
+- **Where (original setup):** `issue-executor-poll.py` (logic in `board-watchdog.py`), cron every 5 minutes.
+- **Coupling:** needs config.
+
+### worker-api-watchdog
+
+- **What:** every ten minutes, findings and actions on live runs: API silence while the client is alive, compression thrash, a run that only polls GitHub (a repeated finding parks the card), self-review, a duplicate review of a head already in review, and orphaned claims (running card, worker process gone, heartbeat stale). It also executes `SCHEDULED_UNTIL=<UTC>` parking, the only parking-until-a-moment mechanism, and unblocks a card waiting on a PR merge once GitHub reports it merged.
+- **Native feature checked:** `kanban.diagnostics.stranded_threshold_seconds`, the dispatcher's reclaim phase, `kanban schedule`, dependency waits.
+- **Why not enough:** the stranded detector looks only at the heartbeat, which stays fresh while the model calls have stopped or the run only polls. The dispatcher's reclaim does not run while the dispatch hold is on (quota stop, peak-pricing pause), so a worker killed together with the gateway held its slot for hours. `kanban schedule` has no wake-up time. A dependency wait fires when the parent card closes, which happens at delivery, long before the PR merges.
+- **Where (original setup):** `worker-api-watchdog.py`, cron every 10 minutes.
+- **Coupling:** portable (thresholds in the source).
 
 ### pr-hygiene
 
-- **What:** sibling conflicts that `mergeable` does not show, retargeting after a sibling merges, PRs absorbed by another, exact mergeability, verdicts per head delta, abandoned branches; RSS guards after a memory leak.
+- **What:** sibling conflicts that `mergeable` does not show, retargeting after a sibling merges, PRs absorbed by another, exact mergeability, verdicts per head delta, abandoned branches, untracked follow-up promises (a promise in a PR body must name an issue or card), claims about external state without an artifact link, visual delta for UI issues only; RSS guards after a memory leak. A needed rebase is handed to the live card that owns the PR as a comment; a separate rebase card is created only when no owner card exists, and retired once the PR is mergeable.
 - **Native feature checked:** none exists: Hermes does not track the state of PRs or a review lane on GitHub.
 - **Where (original setup):** `pr-hygiene.py`, cron every 2 hours.
 - **Coupling:** reference only.
@@ -104,15 +144,15 @@ This catalog lists every mechanism the factory adds on top of Hermes Agent v0.23
 
 ### plan-review-gate
 
-- **What:** a decomposition with more than three children or a critical topic must pass a reviewer's plan review before children run; RETURN triggers architect rework and a repeat review, capped at two cycles.
-- **Native feature checked:** `decompose`.
-- **Why not enough:** decompose dispatches children immediately; there is no plan review step.
+- **What:** a decomposition with more than three children or a critical topic must pass a reviewer's plan review before children run; RETURN triggers architect rework and a repeat review, capped at two cycles. Now in drain mode: plan review goes through the native review lane on the root, and the gate creates no new review cards, it only services cycles that were already open.
+- **Native feature checked:** `decompose`, the review lane.
+- **Why not enough:** decompose dispatches children immediately; there is no plan review step. The review lane covers the review itself, which is why the gate is being drained.
 - **Where (original setup):** `plan-review-gate.py`.
 - **Coupling:** needs config (critical topic regex, model for the review).
 
 ### rework-gate
 
-- **What:** a coder rework card with three or more blocking items is reassigned to the architect for decomposition before it runs.
+- **What:** a coder rework card with three or more blocking items is reassigned to the architect for decomposition before it runs; rework of an open PR is lifted into the active priority band; rework cards on a head that has since moved are retired.
 - **Native feature checked:** none.
 - **Why:** on the board's history, rework with up to two blockers burned out 9% of the time, three to four 14%, five or more 50%.
 - **Where (original setup):** `board-watchdog.py --rework-gate-only` via `rework-gate-watchdog.sh`, every 5 minutes (the dispatcher picks up fresh cards within minutes, faster than the hourly watchdog).
@@ -120,7 +160,7 @@ This catalog lists every mechanism the factory adds on top of Hermes Agent v0.23
 
 ### hermes-health and dispatch hold
 
-- **What:** stops dispatch when the provider reports quota exhaustion, resumes when it recovers; checks cron failures, fallback chains, orphaned stands, long owner stops. The hold holds `flock` on each board's dispatch lock.
+- **What:** stops dispatch when the provider reports quota exhaustion, resumes when it recovers; checks cron failures, fallback chains, orphaned stands, long owner stops, doctor alerts for providers in use, and scripts that changed since the last green test run. The hold holds `flock` on each board's dispatch lock; because it also silences the dispatcher's reclaim phase, `worker-api-watchdog` reclaims orphaned claims while it is on.
 - **Native feature checked:** dispatcher retries.
 - **Why not enough:** there is no native stop on quota: the dispatcher kept retrying runs that died on HTTP 429, and four coder runs ended without completing in one night. `max_in_progress: 0` does not stop dispatch, and config changes need a gateway restart.
 - **Where (original setup):** `hermes-health.py` (every 10 minutes), `kanban-dispatch-hold.py`.
@@ -177,11 +217,11 @@ This catalog lists every mechanism the factory adds on top of Hermes Agent v0.23
 - **Where (original setup):** `visual-delta-capture.py`, `visual-delta-shot.py`.
 - **Coupling:** reference only.
 
-### rebase-notice and resolve-notice
+### rebase-registry-pr and resolve-registry
 
-- **What:** resolves a recurring merge conflict in a numbered notices file.
+- **What:** brings the base into a PR and resolves the recurring conflict in an append-only numbered registry file that every PR appends to.
 - **Native feature checked:** none.
-- **Where (original setup):** `rebase-notice-pr.sh`, `resolve-notice.py`.
+- **Where (original setup):** `rebase-registry-pr.sh`, `resolve-registry.py`.
 - **Coupling:** reference only. Better fix: split the file so it cannot conflict.
 
 ### reviewer-misses
@@ -207,6 +247,14 @@ This catalog lists every mechanism the factory adds on top of Hermes Agent v0.23
 - **Why not enough:** it does not know subscription pricing in credits (cost shows as unknown) and does not attribute spend to cards.
 - **Where (original setup):** `usage-ledger.py`, `metrics-evening.py`.
 - **Coupling:** reference only for the report; the per-card attribution is worth porting.
+
+### run-tests and the hermeticity audit
+
+- **What:** runs every `test_*.py` of the scripts directory, each in its own process group with a timeout that kills the whole group, prints one total line and writes a green stamp after a full green audited run. `--audit` loads an audit hook (`sitecustomize.py`) that turns a test red when it reads the real Hermes home, a live board, a real `gh` or the network. The health check reports scripts that changed after the last green stamp.
+- **Native feature checked:** none: Hermes does not run tests of user scripts.
+- **Why:** tests that read the live home acted on live boards (one released the owner's dispatch stop); a timed-out test left grandchildren running; agents reported "green" with invented markers instead of the runner's own final line.
+- **Where (original setup):** `run-tests.py`, `sitecustomize.py`, `scripts_digest.py`.
+- **Coupling:** portable.
 
 ## Knowledge layer and git
 
@@ -272,3 +320,9 @@ The original host also ran fail2ban and automatic security updates, and delibera
 - ~~**Conventions file in `projects-context/`**~~: replaced by an auto-loaded conventions skill.
 - ~~**Ops-profile board watchdog cron**~~: paused when v0.23.1 refused cron scripts outside the profile's scripts directory; the job runs in the default profile.
 - ~~**Own handoff script on the turn limit**~~: dropped in favour of native `agent.budget_warning_ratio`, which already asks the worker to leave a handoff.
+- ~~**Review layer: reviewer auto-arm and park**~~: the board watchdog armed a reviewer card for every PR head without a verdict and parked low-priority cards until those heads were reviewed. Removed with the move to "one PR = one card": the owner card requests review through the native review lane, and the armed cards raced that lane and reviewed the same head twice.
+- ~~**Paired arms, summary ("What changes for you") arm, executor safety arm**~~: extra cards armed next to a review or for a PR without a live executor. Removed for the same reason; the owner card publishes the summary and keeps the PR.
+- ~~**Serial rework gate**~~: chained the rework cards of one verdict so they would not push over each other. With one card per PR there is nothing to serialise.
+- ~~**Pilot exemptions**~~: a list of branches exempt from the review layer while "one PR = one card" was piloted. Removed when the pilot became the rule.
+- ~~**Plan review cards**~~: the plan-review gate no longer creates them (drain mode); the plan goes through the native review lane.
+- ~~**Parking with a labelled transient block**~~: replaced by `kanban schedule` with `SCHEDULED_UNTIL`; two transient blocks in a row send a card with run history to triage, where the auto-decomposer rewrites it.
