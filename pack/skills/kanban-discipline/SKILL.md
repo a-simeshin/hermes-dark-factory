@@ -144,6 +144,14 @@ There are no separate reviewer, rework, rebase or summary cards for a PR.
   what is already in the PR;
 - a card closed with "remaining: owner merge" keeps a signal and a release
   condition until the PR is merged;
+- WCFY is a step of the owner card: between the reviewer's accept verdict on
+  the exact head and `kanban_complete`, the same card posts a fresh
+  "## What changes for you" comment (pr-deliverable). Closing without WCFY on
+  the accepted head does not finish the card: the native completion contract
+  checks only CI gates of the head, so the watchdog's owner-merge hold flags a
+  closed card whose open PR has an accept verdict and no WCFY newer than the
+  head (marker `WCFY_HOLD_MARKER`, owner class; the PR number is also read
+  from the summary of the finishing run);
 - an owner CHANGES REQUESTED after the card closed opens one new card for
   the cycle; decompose from the LATEST verdict of the PR (all reviewers):
   the head may already have closed older blockers;

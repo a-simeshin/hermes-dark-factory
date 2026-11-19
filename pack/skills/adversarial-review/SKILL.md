@@ -138,6 +138,10 @@ means RETURN, however green the full run is.
 - The mutation must change BEHAVIOUR. A green run under the mutation means
   the mutation is wrong: reinvent it. Prove the mutant is live with a throw
   probe in the mutated branch or by listing the failing test names.
+- A throw probe must sit OUTSIDE the try block that covers the catch under
+  test: a throw inside that try is swallowed by the same catch and proves
+  only that the catch is live, not the path the exception propagates along.
+  Put the throw at the method entry or before the try.
 - A test that seeds the very state the fix writes (for example it puts the
   value into storage during setup) does not close anything: the mutant of the
   fix line stays green. That is RETURN; the test gets fixed, not the verdict.

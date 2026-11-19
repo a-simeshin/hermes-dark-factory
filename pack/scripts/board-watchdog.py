@@ -1010,7 +1010,8 @@ def check(slug, state=None):
 
     # 6c-3-ter. Close gate "remaining: owner merge": a closed PR card with an
     #           unmerged PR keeps the signal until the merge (one PR = one
-    #           card).
+    #           card). The same function holds a closed PR card whose PR has
+    #           an accept verdict on the head and no fresh WCFY.
     try:
         found.extend(owner_merge_hold_gate(slug))
     except Exception as exc:
@@ -6026,6 +6027,40 @@ OWNER_MERGE_LEFT_RE = re.compile(
 OWNER_MERGE_HOLD_MARKER = ("Watchdog: close gate (one PR = one"
                            " card).")
 OWNER_MERGE_HOLD_WINDOW_S = 14 * 24 * 3600
+# WCFY close gate: once review lives on the owner card, the WCFY step
+# belongs to that card too. A card was closed with its PR open, an accept
+# verdict on the head and no WCFY; the owner does not merge without WCFY
+# (pr-deliverable), so the gate holds a signal on the closed card until a
+# WCFY is posted on the head.
+WCFY_HOLD_MARKER = ("Watchdog: WCFY close gate (WCFY after accept, one PR"
+                    " = one card).")
+
+
+def _closed_card_pr_numbers(result, title, summary=""):
+    """PR number candidates of a closed card, most precise first: the form
+    "PR #N" in the result, the title and the summary of the latest run, then
+    any "#N" in the result and the title. Duplicates are dropped, order kept.
+
+    A PR can be named only in the summary of the finishing run ("Closed the
+    review cycle on PR #N") while the title carries the issue number and an
+    already merged PR. Issue numbers are filtered by the gate itself: gh pr
+    view fails on them, _pr_merged gives None and the candidate is skipped.
+    """
+    out = []
+
+    def add(n):
+        if n and n not in out:
+            out.append(n)
+
+    for text in ((result or ""), (title or ""), (summary or "")):
+        m = _REWORK_PR_TITLE_RE.search(text)
+        if m:
+            add(int(m.group(1)))
+    for text in ((result or ""), (title or "")):
+        m = re.search(r"#(\d+)", text)
+        if m:
+            add(int(m.group(1)))
+    return out
 
 
 def _pr_merged(repo, number, memo):
@@ -6044,7 +6079,8 @@ def _pr_merged(repo, number, memo):
 
 
 def owner_merge_hold_gate(slug, now=None, apply=True):
-    """Hold of closed PR cards whose result says "remaining: owner merge".
+    """Hold of closed PR cards whose result says "remaining: owner merge",
+    and of closed PR cards without WCFY on an accepted head.
 
     One PR = one card: a PR card is not closed before the owner merges the
     PR. The gate scans recently closed cards (a 14-day window) whose result
@@ -6053,6 +6089,11 @@ def owner_merge_hold_gate(slug, now=None, apply=True):
     by marker). The CLI archive is terminal (there is no unarchive) and the
     status of a closed card cannot be returned, so the signal and the
     comment are held, not the status.
+
+    Second branch (WCFY close gate): a closed card whose PR is open, has a
+    reviewer accept verdict on the exact head and no WCFY newer than the
+    head keeps a signal and a comment (marker WCFY_HOLD_MARKER). The PR
+    number is also looked up in the summary of the finishing run.
     """
     repo = board_repo(slug)
     if not repo:
@@ -6072,39 +6113,94 @@ def owner_merge_hold_gate(slug, now=None, apply=True):
             (now - OWNER_MERGE_HOLD_WINDOW_S,)).fetchall()
         findings = []
         memo = {}
+        review_memo = {}
         for tid, title, result, status, completed_at in rows:
-            if not OWNER_MERGE_LEFT_RE.search(result):
+            # The PR can be named only in the summary of the finishing run.
+            last_summary = (con.execute(
+                "SELECT summary FROM task_runs WHERE task_id = ? AND "
+                "summary IS NOT NULL ORDER BY id DESC LIMIT 1",
+                (tid,)).fetchone() or ("",))[0] or ""
+            if OWNER_MERGE_LEFT_RE.search(result):
+                m = (re.search(r"#(\d+)", result)
+                     or re.search(r"#(\d+)", title or ""))
+                if not m:
+                    continue
+                number = int(m.group(1))
+                merged = _pr_merged(repo, number, memo)
+                if merged is None or merged:
+                    continue
+                findings.append((
+                    "%s:owner-merge-hold:%s:%d" % (slug, tid, number), 1, (
+                    "    Close gate: card %s (%s) was closed with the result "
+                    "\"remaining: owner merge\", PR #%d is not merged yet "
+                    "(completed %s). Release condition: PR #%d merged by the "
+                    "owner."
+                    % (tid, (title or "")[:60], number,
+                       time.strftime("%Y-%m-%d %H:%MZ",
+                                     time.gmtime(completed_at)), number))))
+                if not apply:
+                    continue
+                seen = con.execute(
+                    "SELECT COUNT(*) FROM task_comments WHERE task_id = ? "
+                    "AND body LIKE ?",
+                    (tid, OWNER_MERGE_HOLD_MARKER[:40] + "%")).fetchone()[0]
+                if not seen:
+                    run([HERMES, "kanban", "--board", slug, "comment", tid,
+                         "%s the card was closed before PR #%d was merged. "
+                         "Check the WCFY and the merge steps. Release "
+                         "condition: PR #%d merged by the owner (one PR = one "
+                         "card)." % (OWNER_MERGE_HOLD_MARKER, number, number)],
+                        timeout=90)
                 continue
-            m = (re.search(r"#(\d+)", result)
-                 or re.search(r"#(\d+)", title or ""))
-            if not m:
-                continue
-            number = int(m.group(1))
-            merged = _pr_merged(repo, number, memo)
-            if merged is None or merged:
-                continue
-            findings.append((
-                "%s:owner-merge-hold:%s:%d" % (slug, tid, number), 1, (
-                "    Close gate: card %s (%s) was closed with the result "
-                "\"remaining: owner merge\", PR #%d is not merged yet "
-                "(completed %s). Release condition: PR #%d merged by the "
-                "owner."
-                % (tid, (title or "")[:60], number,
-                   time.strftime("%Y-%m-%d %H:%MZ",
-                                 time.gmtime(completed_at)), number))))
-            if not apply:
-                continue
-            seen = con.execute(
-                "SELECT COUNT(*) FROM task_comments WHERE task_id = ? "
-                "AND body LIKE ?",
-                (tid, OWNER_MERGE_HOLD_MARKER[:40] + "%")).fetchone()[0]
-            if not seen:
-                run([HERMES, "kanban", "--board", slug, "comment", tid,
-                     "%s the card was closed before PR #%d was merged. "
-                     "Check the WCFY and the merge steps. Release "
-                     "condition: PR #%d merged by the owner (one PR = one "
-                     "card)." % (OWNER_MERGE_HOLD_MARKER, number, number)],
-                    timeout=90)
+            # WCFY close gate. The native completion contract checks only
+            # the CI gates of the head and cannot express WCFY, so this gate
+            # is extended instead of building a second watchdog.
+            for number in _closed_card_pr_numbers(result, title,
+                                                  last_summary):
+                merged = _pr_merged(repo, number, memo)
+                if merged is None or merged:
+                    continue
+                if number not in review_memo:
+                    try:
+                        review_memo[number] = _pr_review_state(repo, number)
+                    except Exception:
+                        review_memo[number] = None
+                st = review_memo[number]
+                if st is None or st.get("pr_state") != "OPEN":
+                    continue
+                if st.get("head_kind") != "accept":
+                    continue
+                wcfy_at = st.get("wcfy_at")
+                head_at = st.get("head_commit_at")
+                if wcfy_at is not None and (
+                        head_at is None or wcfy_at >= head_at):
+                    continue
+                findings.append((
+                    "%s:owner-wcfy-hold:%s:%d" % (slug, tid, number), 1, (
+                    "    WCFY close gate: card %s (%s) is closed, PR #%d is "
+                    "open with a reviewer accept verdict on head %s, but no "
+                    "WCFY (## What changes for you) stands on that head. The "
+                    "owner does not merge without WCFY (pr-deliverable). "
+                    "Release condition: WCFY posted on the head of PR #%d, "
+                    "or the PR merged or closed."
+                    % (tid, (title or "")[:60], number,
+                       (st.get("head") or "")[:7], number))))
+                if not apply:
+                    break
+                seen = con.execute(
+                    "SELECT COUNT(*) FROM task_comments WHERE task_id = ? "
+                    "AND body LIKE ?",
+                    (tid, WCFY_HOLD_MARKER[:40] + "%")).fetchone()[0]
+                if not seen:
+                    run([HERMES, "kanban", "--board", slug, "comment", tid,
+                         "%s the card is closed, PR #%d is open with an "
+                         "accept verdict on the head and no WCFY. The owner "
+                         "does not merge without WCFY (pr-deliverable). "
+                         "Release condition: WCFY on the head of PR #%d, or "
+                         "the PR merged or closed."
+                         % (WCFY_HOLD_MARKER, number, number)],
+                        timeout=90)
+                break
     finally:
         con.close()
     return findings
@@ -9936,6 +10032,10 @@ def classify_finding(key):
     # A closed PR card whose PR is not merged is an owner action (the
     # merge); the signal is held until the merge.
     if ":owner-merge-hold:" in key:
+        return "owner"
+    # A closed PR card without WCFY on an accepted head: the owner faces a
+    # PR that must not be merged without WCFY.
+    if ":owner-wcfy-hold:" in key:
         return "owner"
     # A recorded race (both links in progress on one branch) needs
     # coordination, not routine.
