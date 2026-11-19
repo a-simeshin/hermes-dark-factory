@@ -1,7 +1,7 @@
 ---
 name: serena-lsp
 description: Searching, editing and renaming code through LSP.
-version: 1.0.0
+version: 1.1.0
 author: maintainer, Hermes Agent
 license: MIT
 metadata:
@@ -120,7 +120,10 @@ rename_symbol(name_path="ErrorDto/redactUrl", relative_path="core/src/main/java/
 A refactoring done by the language server: it edits the declaration and ALL
 references, including other modules. The only safe rename: textual search and
 replace also hits same-named methods of other classes and string literals.
-With overloads, the path must point at one method unambiguously.
+With overloads, the path must point at one method unambiguously. If a rename
+must be done by text (for example, while resolving a rebase), limit it to the
+calls of the specific API, never a global replace over the tree, and read
+`git diff HEAD` for unrelated hunks before staging.
 
 ### Delete a symbol safely
 
@@ -155,6 +158,18 @@ type typo shows in a second instead of after a full build.
 3. `find_referencing_symbols` before changing a signature or deleting;
 4. edit with `replace_symbol_body` or `insert_after_symbol`;
 5. `get_diagnostics_for_file` right after the edit, before running tests.
+
+## When Serena is broken: a stale workspace binding
+
+If `activate_project` on ANY path fails with `FileNotFoundError` naming
+another, already deleted worker workspace, the Serena process is bound to
+that workspace and will not recover from inside your run. Fall back for this
+run: targeted reads (offset/limit around known lines), file search by name
+and pattern, edits by patch; symbol search and LSP diagnostics are
+unavailable. Do not spend turns on repeated activation: two identical
+failures in a row are the diagnosis. Activate only the project you need;
+language servers are memory-heavy, and that, not CPU, limits parallel
+workers.
 
 ## References (read on demand)
 

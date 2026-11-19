@@ -3,7 +3,7 @@
 Delivery lessons reduced from an incident log to one entry each ("Rule. Why.
 How to apply."): API limits, the prototype gate, PR noise, same-mechanism
 fixes, garbage input, library contracts, frames, stale checks, house-style
-restoration and stack hygiene.
+restoration, stack hygiene and rebase conflict handling.
 
 1. **`gh pr view --json files` caps at 100 files.** Why: a large PR lost its
    UI files and was classified non-UI. How: at exactly 100, page through
@@ -50,8 +50,28 @@ restoration and stack hygiene.
     (`git log -1 origin/<parent>` before rebasing, re-check before delivery);
     after every rebase grep for conflict markers
     (`git grep -nE '^(<<<<<<<|\|\|\|\|\|\|\||>>>>>>>)'`) and build; never
-    rebase a child before the parent merges (a separate card blocked on it).
+    rebase a child before the parent merges. The rebase after the parent's
+    merge is done by the live card that owns the child PR (it waits with a
+    one-line release condition), not by a separate rebase card.
 12. **Infrastructure changes are never glued to a feature.** How: workflow
     and action bumps go in their own PR; together with a feature, RETURN.
 13. **Line numbers from someone else's verdict are re-measured** on the
     current head and tied to its hash; explain differences in a comment.
+14. **Resolving diff3 conflicts by script needs a marker check.** Why: a
+    lazy regex up to `=======` swallows the `|||||||` base section. How:
+    after each resolution grep for all four markers (`<<<<<<<`, `|||||||`,
+    `=======`, `>>>>>>>`) and diff the result against the side you took.
+15. **A PR handler and a base wrapper competing for one call site: route
+    through the wrapper.** Why: replacing the base wrapper silently drops
+    base behaviour, visible only at runtime. How: call the PR handler from
+    inside the base wrapper when resolving the conflict.
+16. **After rebasing onto a parent merged later, audit the replayed
+    commits.** Why: copy commits survive and auto-merge can leave duplicate
+    lines in non-conflicting files with no markers. How: `git show --stat`
+    each replayed commit against the base and drop the ones that change
+    nothing new.
+17. **Push a rebase against the PR's real head.** Why: from another worktree
+    the local branch name or remote ref may be stale, and
+    `--force-with-lease` then compares against the wrong thing. How: read
+    `gh pr view N --json headRefName`, `git fetch` that branch, then push
+    with `--force-with-lease`.

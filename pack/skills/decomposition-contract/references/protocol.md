@@ -76,6 +76,12 @@ budget give-ups landed on ten coder cards, all retried with unchanged bodies.
 A worker that burned the budget twice on a card is not retried: the card is
 decomposed.
 
+Keep each layer of a decomposition within one stack or one side (backend
+separate from UI). A card that combined a backend endpoint on two stacks with
+a UI tab died twice at the iteration ceiling, most of the time spent in the
+terminal: a multi-stack diff pushes the coder into full verification of every
+stack, which does not fit one run.
+
 ## Attach the skill to the card instead of hoping the worker opens it
 
 When creating a code card, pass `skills=["serena-lsp"]` (CLI: `--skill
@@ -140,9 +146,14 @@ reviewer uses to check closure incrementally.
 ## Check
 
 - every child has acceptance criteria, a target branch and a Stack line;
-- for a rework verdict: the push target "branch of PR #N" in every child's
-  body, children chained, not parallel;
-- children are held back until the plan is accepted and linked to the root;
+- for a rework verdict: decomposed from the LATEST verdict on the current
+  head, one review blocker per child, the push target "branch of PR <url>" in
+  every child's body, children chained, not parallel;
+- no child repeats work already delivered in a PR: a delivered PR is closed
+  with its result and the remainder becomes a new card;
+- children are held back until the plan is accepted and linked to the root,
+  with a dependency block, not `--initial-status blocked` (the core never
+  promotes such a child after the root is done);
 - the root card is handed in with `kanban_request_review`, no separate review
   card was created;
 - every fact about the repository in the plan is backed by `file:line` or

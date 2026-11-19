@@ -68,9 +68,14 @@ tool_output:
 # ---------------------------------------------------------------- compression
 compression:
   enabled: true
-  # Fraction of the model's context window. 0.08 of a ~1.3M window is about
-  # 105k tokens. Recompute for your window: aim at 100-150k absolute.
-  threshold: 0.08
+  # Fraction of the model's context window. It must sit ABOVE the context
+  # floor a worker keeps after a compression (system prompt, skills, tool
+  # schemas, protected tail), with margin. Below the floor compression runs
+  # in a loop (dozens of times per run, each costing a minute and more
+  # tokens than it saves) until Hermes blocks it as ineffective. Measure the
+  # floor per profile in profiles/<p>/logs/managed-worker.log; 0.18 of a ~1M
+  # window (about 180k) sat safely above a measured floor of 75-115k.
+  threshold: 0.18
   target_ratio: 0.2
   protect_last_n: 20
   proactive_prune_tokens: 60000
@@ -118,6 +123,25 @@ kanban:
   max_in_progress_per_profile: 2
   auto_decompose: true
   auto_decompose_per_tick: 1
+  diagnostics:
+    # How long a ready card may wait before the board diagnostics call it
+    # stranded (12 h). Raise it where low-priority cards routinely wait.
+    stranded_threshold_seconds: 43200
+
+# ---------------------------------------------------------------- plugins (root config)
+# Plugins from pack/plugins, copied into ~/.hermes/plugins/. Restart the
+# gateway after a change: the dispatcher loads plugins at start.
+plugins:
+  enabled:
+    - disk-cleanup
+    - kanban-artifact-guard
+    - kanban-review-loop-guard
+    - kanban-admission-guard
+  entries:
+    kanban-artifact-guard:
+      settings:
+        repos:
+          - ~/projects/<repo>
 
 # ---------------------------------------------------------------- updates
 updates:

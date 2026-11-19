@@ -1,7 +1,7 @@
 ---
 name: adversarial-review
 description: 'Review that tries to refute the work: what blocks and what does not.'
-version: 2.0.0
+version: 2.1.0
 author: maintainer, Hermes Agent
 license: MIT
 metadata:
@@ -52,6 +52,21 @@ measurement, not a "note").
 Not a blocker: an incomplete formal contract when the content is clear;
 wording, numbering, section order; style; a wish for more detail.
 
+An async test with a hand-written wait loop is reviewed by procedure, not
+only by reading: (a) the loop must also wait from an EMPTY initial state
+(continue while "no result yet OR not the wanted one", never "a result
+exists AND it is not the wanted one", which exits at once on an empty list);
+(b) run the test 20-50 times on the head and read its DURATION each time:
+milliseconds against a budget of seconds is the signature of "did not wait",
+and green repeats hide it; (c) a production mutant does NOT close this point,
+because the defect lives in the test itself. A red soak run on an untouched
+sibling test is an unmet criterion, not noise.
+
+Any claim about state outside the run (known flake, tracked, fixed,
+duplicated, posted, merged) in a report or PR text needs an artifact link (issue,
+PR, card, comment URL, sha). No link: a finding. With a link: verify it by a
+live call (`gh pr view`, `gh run list`, `gh search issues`) before trusting it.
+
 NEVER block on something only the owner can close (missing owner approval, an
 unapproved narrowing of criteria, a "do we do this at all" decision): verdict
 ACCEPTED with the note "awaiting the owner's decision on point X". Blocking
@@ -64,11 +79,15 @@ on it sends the executor around a loop it cannot exit.
   GitHub forbids formal reviews of your own PR, so this comment is the only
   machine-readable sign that a PR was reviewed. "This PR has no review" is
   checked by comments, never by the `reviewDecision` field.
-- The reviewer card is closed ONLY after the verdict is published. Done
-  without a verdict causes a re-arm and a watchdog alert. The same applies to
-  a review round inside a coder card's review lane: "approved" in the card
-  summary does not finish the round; the verdict must land as a PR comment on
-  the exact head before the card closes.
+- One PR = one card. You review on the card that owns the PR, dispatched
+  from the native review status (`kanban_request_review`); there are no
+  separate reviewer cards. "Approved" in the card summary does not finish
+  the round: the verdict lands as a PR comment on the exact head BEFORE
+  `kanban_complete` or `kanban_request_changes`.
+- No self-review: the review must run under the reviewer profile named in
+  `kanban_request_review`. If the head was produced by your own profile (no
+  reviewer was named and the card came back to its author), publish no
+  verdict: hand the card to the reviewer and say why.
 - In someone else's card (assignee is not you) refer to the PR by number
   only, never by URL: the dispatcher treats a fresh PR URL in a card comment
   as an "active PR" lock and holds that card for many ticks.
@@ -82,7 +101,12 @@ on it sends the executor around a loop it cannot exit.
   actually did, not a formula.
 - A stacked PR is not approved while any lower PR in the stack is unreviewed
   or unmerged: the verdict waits. Merging the upper PR would carry the lower
-  PR's unreviewed commits into the base.
+  PR's unreviewed commits into the base. `mergeable_state=blocked` with
+  `mergeable=true` over an unmerged base is branch protection, not a
+  conflict: only a moved head stops re-issuing a verdict.
+- Before reporting or asking to fix a minor (text, count, list of commits),
+  re-read the CURRENT PR body and comments: they may have changed after the
+  last verdict. Check the actual commit list and publication dates first.
 
 ## Repeat review: delta from the last reviewed head
 
@@ -117,8 +141,9 @@ means RETURN, however green the full run is.
 - A test that seeds the very state the fix writes (for example it puts the
   value into storage during setup) does not close anything: the mutant of the
   fix line stays green. That is RETURN; the test gets fixed, not the verdict.
-- A test of a prop or a text instead of behaviour is not verified by
-  mutation.
+- A test of a prop, a text, a class name or a markup string instead of
+  behaviour is not verified by mutation: a red run after deleting the checked
+  string proves only that the string exists, not the promised behaviour.
 - Do not build the artifact for live checks in the same tree while mutation
   runs are going: the bundle can carry the mutant. Verify the key expression
   inside the built artifact itself.
@@ -135,6 +160,38 @@ errors are written, what the user will see) and map EACH to a test that
 catches its violation, verified by a mutation on the exact head. A promise
 without a pinning test is a blocker (RETURN), not a deferred finding: the
 promise is already published, its fulfilment cannot be postponed to a card.
+Mutating the fix line and mutating the promises are DIFFERENT axes: the
+first does not cover the second.
+
+A PASS carries a promise table, one row per promise:
+
+    | Promise | Mutant | Test | Result |
+    |---|---|---|---|
+    | cached content renders at once | drop the cache read on open | CacheOpen test #2 | killed RED |
+    | error is cached, Refresh retries | do not write the error payload | CacheOpen test #3 | survived -> BLOCKER |
+
+- Result is the actual colour of a mutant run you did on the exact head.
+  "covered", "N/A" or an empty cell without a reason are not accepted;
+  survived is RETURN.
+- The gate looks for ONE header line naming both "promise" and "mutant"
+  anywhere in the comment; position does not matter. A PASS without it is
+  not counted. For diffs without production lines (workflow YAML, CI config)
+  name the column `Mutant-equivalent probe`. RETURN without the table is
+  allowed: the error direction is safe.
+- Killed by a test that reads the implementation (class name, "method was
+  called", a markup string) does NOT close a behaviour promise: the test must
+  observe behaviour (size, visibility, response, state). CSS promises ("never
+  overflows") are pinned by a browser measurement on the head, or rewritten
+  honestly as "defensive no-op".
+- A PR that turns unconditional behaviour into conditional pins BOTH branches
+  of the new condition. A one-off red under a mutant that does not reproduce
+  is a flake, not a pin.
+- Duplicate substrings mask deletion: if the promised element and another
+  element share text, a text query is satisfied by both. Pin the element
+  itself (a test id on the block) and mutate exactly that block away.
+- A verdict rejected only for its FORM on an unchanged head is re-issued as
+  text: mutants and the battery are not re-run. Check the body against the
+  gate before publishing.
 
 ## A third return on the same finding is an escalation
 
@@ -152,13 +209,13 @@ not count rounds; you have to stop.
 | return | `kanban_comment` with the findings, then `kanban_request_changes` (returns the card to THE SAME executor) |
 | escalation | `kanban_block` |
 
-RETURN on a PR does NOT need a rework card when the PR already carries a live
-card in the standard review cycle (review_requested, or changes_requested
-sent it back to the executor): the verdict travels through request_changes of
-that card. Create a follow-up card only when the verdict lives only in a
-GitHub comment and no card is in the review cycle (otherwise nobody picks the
-verdict up). Routing: the code does the wrong thing: coder; the code is right
-but the check does not prove it: tester; the plan is wrong: architect.
+RETURN on a PR goes back through `kanban_request_changes` of the card that
+owns the PR: rework, rebase and the re-request happen on that same card.
+Create a rework card (key `coder-pr<N>-rework-<head7>`, never your own
+spelling) only when the verdict lives only in a GitHub comment and no card
+owns the PR (otherwise nobody picks the verdict up). Routing: the code does
+the wrong thing: coder; the code is right but the check does not prove it:
+tester; the plan is wrong: architect.
 
 A deferred finding: an issue plus a card (`--triage`) plus the line
 `DEFERRED: t_xxxxxxxx` or `DEFERRED: none` as the last line of the summary
@@ -219,6 +276,9 @@ A deferred finding: an issue plus a card (`--triage`) plus the line
 
 ## Reviewing a rebase
 
+0. Compare the head's CI start time with base commits merged AFTER it: CI
+   never tested that combination. Merge the base tip into a worktree of the
+   head locally and run the suite.
 1. `git range-diff <old-base>..<old-head> <new-base>..<new-head>`: `!` outside
    the conflict region is an extra. The PR's file sets must match. After a
    rebase done in a worktree, grep for symlinks:
@@ -250,8 +310,13 @@ A deferred finding: an issue plus a card (`--triage`) plus the line
 - every claim has proof; the report says "CI: N of M green";
 - every blocker treated as closed (this round and earlier) has a mutation of
   its exact fix line that turns a test red;
-- every promise in the PR body and WCFY has a pinning test proven by
-  mutation;
+- every promise in the PR body and WCFY has a row in the promise table,
+  killed by a test that observes behaviour;
+- a new async wait loop: waits from an empty state, 20-50 repeats with
+  durations;
+- every claim about external state carries an artifact link you opened;
+- minors checked against the current PR body and comments;
+- the review runs under the named reviewer, not the head's author;
 - a diff that models a third-party library's output: a `Library contract`
   line in the PR body and a fixture produced by running the library;
 - repeat review: closures plus the delta since the reviewed head;
@@ -267,6 +332,6 @@ A deferred finding: an issue plus a card (`--triage`) plus the line
   rule
 - references/lessons.md: distilled lessons (plan review, mutation battery
   infrastructure, headless browser traps, library contracts, races, domain
-  knowledge)
+  knowledge, mutant probe traps, rebase and test-count reconciliation)
 - references/misses-template.md: the misses journal format and how to read it
   before every verdict

@@ -1,7 +1,7 @@
 ---
 name: dependency-bump
 description: Bump dependency versions without trusting a stale search index.
-version: 1.0.0
+version: 1.1.0
 author: maintainer, Hermes Agent
 license: MIT
 metadata:
@@ -61,5 +61,9 @@ crates `cargo search` or the crates.io API.
   in a separate PR.
 - Do not treat a green `build` job as enough for libraries whose behaviour
   only end-to-end jobs exercise.
+- Do not copy a browser driver version pin from old notes: it goes stale
+  silently as the system browser updates. Check the installed browser version
+  first and pin only after a "session not created" error, to the major of the
+  browser actually installed; an outdated pin fails every UI test at once.
 - If the project maintains several release lines, follow its conventions on
   which lines receive the bump; do not assume parity.

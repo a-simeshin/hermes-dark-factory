@@ -54,7 +54,7 @@ merges.
 |---|---|
 | breaking down a task, submitting or reworking a plan | `decomposition-contract` |
 | need an issue mirror, its content or its closing | `issue-mirror` |
-| creating, blocking, prioritising a card | `kanban-discipline` |
+| creating, blocking, prioritising or parking a card | `kanban-discipline` |
 | checking a fact about the code for a plan | `serena-lsp` |
 | finding out why a run fails | `debugging-discipline` |
 | learned something new before closing a card | `save-lesson-before-complete` |
@@ -73,5 +73,14 @@ merges.
   the built-in review lane.
 - Do not retry a card that burned its budget twice: decompose it.
 - Do not put a claim about someone else's API into a plan without a source.
+- Do not create a card or a mechanism before checking that nothing native or
+  live already covers it.
+- Do not plan separate reviewer, rework or rebase cards: one PR is one card,
+  and review, rework after a reject and rebase stay on the card that owns
+  the PR.
+- Do not decompose a delivered PR and do not file a card for an already
+  delivered issue: the remainder is a new card.
+- An erroneous card you created is archived by you, at once, with the
+  reason in a comment.
 - Do not break the house style rules (the reference setup forbids the em
   dash character in every text).

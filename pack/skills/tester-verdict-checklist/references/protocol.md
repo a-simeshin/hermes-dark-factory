@@ -52,6 +52,10 @@ Each of these was expensive once:
 3. **QA does not PASS while the reviewer's open REQUEST_CHANGES is not closed
    by a commit.** In one case QA wrote PASS twenty minutes after a reviewer's
    proven finding without addressing it.
+4. **The QA verdict header is `## QA verdict`.** Board tooling parses
+   "Review verdict" headers as the reviewer's verdict. A QA PASS posted as
+   `## Review verdict (QA): PASS` was counted as the review, and the PR went
+   to the owner with no review at all.
 
 ## The owner's decision on a point closes it for the verdict
 
@@ -72,8 +76,8 @@ owner merged them anyway.
   Before/After shots are not required in the PR; the visual delta lives in
   the issue);
 - a blocker-closing test that checks a prop or text instead of behaviour;
-- a count or claim in the divergence registry, WCFY or a test name that does
-  not match the facts on the current head.
+- a count or claim in the divergence registry, the PR description or a test
+  name that does not match the facts on the current head.
 
 ## A regression test proves the fix with a red run on broken code
 
@@ -118,6 +122,20 @@ is read from one red. Run the second module separately and require a finished
 exit code for EACH module. Collect test counts from reports fresh by run
 time: a shared worktree's report directory accumulates stale files of deleted
 classes.
+
+## "Red before the fix" is a mutant inside the test, not live git history
+
+For a test suite that lives next to a frequently committed tree (for example
+the agent's own scripts directory under a snapshot job), prove "red on the
+code before the fix" with a mutant inside the test itself: a copy of the
+source with every old/new pair of the fix reverted at once, or a substituted
+function. Do not look for the pre-fix commit in the live history. After the
+fix is committed, HEAD equals the current code, so "red against HEAD" proves
+nothing; and every later snapshot commit pushes the pre-fix snapshot out of a
+walk-back window, so the test turns red on someone else's commit and raises
+false alarms in drift monitoring. A self-launching "RED against HEAD" check
+that spawns the suite again from inside the suite can also recurse without
+bound and exhaust memory: keep the mutant in-process.
 
 How to verify: choose the minimal edit that cancels the fix (remove the
 gate, flatten the retry delays, drop the header from the filter), run the

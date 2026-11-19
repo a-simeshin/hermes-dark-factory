@@ -62,8 +62,11 @@ hash. `M ` in `git status` means there is no snapshot.
   The platform starts the child itself when the parent closes; a block with
   the text "waiting for card X" just hangs.
 - Waiting for an EXTERNAL event (a PR merge, a human answer, another
-  project's release): `--kind needs_input` plus a line `Unblock condition:
+  project's release): `--kind needs_input` plus one line `Unblock condition:
   ...` that anyone can check.
+- Waiting until a MOMENT (a CI ETA, a date): `hermes kanban schedule` with
+  SCHEDULED_UNTIL in UTC, never a block with a label. Two transient blocks in
+  a row drop a card with run history into triage.
 
 Mixing them up is expensive: a `dependency` block with all parents closed
 makes the platform restart the card every few minutes, and each run only
@@ -79,6 +82,7 @@ card id of the same board.
 | delivering code in a PR, publishing a verdict | `pr-deliverable` |
 | learned something new before closing a card | `save-lesson-before-complete` |
 | finding out why a run fails | `debugging-discipline` |
+| waiting for CI, a verdict, a merge or another result | `worker-run-discipline` |
 
 ## A gate said no: fix the cause or block
 
@@ -101,3 +105,12 @@ the same bypass. Gates are closed with code, never weakened.
 - Do not implement outside the kanban.
 - Do not guess the project.
 - Do not bypass gates.
+- Do not create a card or a mechanism before checking that nothing native or
+  live already covers it.
+- Do not split one PR across cards: review, rework and rebase stay on the
+  card that owns the PR.
+- Do not probe on the live board: there are no per-board dispatcher
+  settings, so a "sandbox" board in the live home is not a sandbox. An
+  erroneous card is archived by its creator.
+- Do not report external state (CI green, merged, posted) without an
+  artifact link.

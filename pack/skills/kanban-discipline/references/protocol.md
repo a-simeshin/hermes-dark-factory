@@ -11,6 +11,54 @@ mechanics refer to Hermes Agent v0.23.1.
 You create a card, block it, set its priority, hand work to review or send
 someone else's work back.
 
+## Native or live already exists: check before you act
+
+Before creating, reassigning, restoring or removing anything on the board,
+check whether a native Hermes mechanism or a live card already does it: the
+review lane after `kanban_request_review`, native respawn and its guards
+(active_pr, recent_success), task_links and dependency_wait, a verdict on this
+head, a live card with the same key (issue or PR + role + head). If one does,
+create nothing; extend it or wait for it. A local mechanism may act only where
+the native one will not, and the code next to it says which native path was
+checked and why it is not enough. The same holds for manual actions: restoring
+something by hand past the gates is forbidden, and restoring what the owner
+closed or archived is a question to the owner.
+
+The rule was distilled from four failures of one shape: three coder cards for
+one patch, a reclaim/respawn loop triggered by a card's own handoff comment,
+a head sampled while it was still in rework, and a review card duplicating the
+native review lane. Your own layer counts as "native" too: two local gates
+with the same job once parked and returned each other's cards. Before
+building a gate, watchdog or generator, walk the list of local mechanisms
+(the deviations file, scripts, plugins) and extend the one that exists.
+
+**No card for delivered work.** "Nobody is working on it" is not judged by
+live cards alone. Do not file an executor card for an open issue if (a) a
+merged PR references it and was merged after the last scope change (creation,
+label or title change; milestone changes and comments are not scope), or (b) a
+done executor card links a merged PR (done by itself is not coverage). A
+release chore left open until the tag is intentional: stay silent. Delivered
+work that is not a chore gets a question to the owner, "what is left on #N",
+not a card. In the incident behind this rule a poller filed three duplicates
+in twenty minutes for an issue whose PR had already been merged.
+
+**Erroneous cards are archived by their creator.** A card created by mistake
+(wrong verb, a probe, a duplicate) is archived by whoever created it, at once,
+with a comment giving the reason. Left in ready "for a worker to clean up", it
+costs a dispatcher slot and a run. There are no per-board dispatcher settings
+in Hermes: the configuration is host-wide and the dispatcher walks every
+board, so a "sandbox" board in the live home is not a sandbox (a probe card
+there was decomposed and spawned real workers). Experiments go into a separate
+`HERMES_HOME`, or use read-only commands.
+
+**Claims about mechanisms need evidence.** A report that says a mechanism
+"returns by itself", "does not leak" or "will let it through" is backed by a
+test on this code or a check on the live board made in the same session.
+Without evidence, write "not verified". In the incident behind this rule a
+report announced an automatic return that no code implemented, and the cards
+stayed parked. Only a red test before the fix and a green one after prove
+"works now".
+
 ## The Stack line belongs in the body, not in `--skill`
 
 `--skill` accepts ONLY the names of skills that are actually installed
@@ -55,37 +103,52 @@ ready recomputation lifts it when all parents are done or archived. After
 setting it up, check: status todo (not blocked), last event dependency_wait,
 parent alive in task_links.
 
-## A root waits for its rework chain through a link, not a block
+## One PR = one card: review and rework live on the owner card
 
-Sending back a root card whose children are already done: do not block the
-root and do not make the rework cards its children. The correct layout:
+The card that owns a PR carries the whole cycle until the owner merges:
+review, rework, rebase and the owner-facing summary. Earlier layouts with a
+separate reviewer card per head, a rework card per verdict, a serial chain of
+rework cards and a rebase card per PR were removed: every extra card was
+another place for duplicates, races of two coders pushing into one branch,
+and reviews of a head that was about to change.
 
-1. the coder rework card is created WITHOUT a parent link to the root
-   (otherwise deadlock: the coder needs the root done, the root waits for the
-   reviewer's verdict);
-2. the reviewer card is linked parent=coder;
-3. the root is linked as a child of the reviewer: `link <reviewer> <root>`.
-   The root goes to todo and auto-promotes when the reviewer completes; the
-   verdict arrives in the summary as a parent handoff.
+- Review: `kanban_request_review` on the owner card, with an explicit
+  `reviewer`. The card moves to the native review lane and the dispatcher
+  starts the review run itself. A reviewer card on the same head is a second
+  full review of the same sha.
+- Reject: the reviewer, running on the card claimed from review, calls
+  `kanban_request_changes`; the card returns to its owner. The owner fixes in
+  the PR's branch, answers each item in the PR (rework response) and requests
+  review again. `kanban_request_changes` is refused on a card that was not
+  claimed from review.
+- Rebase: only on CONFLICTING (or an owner request), on the owner card, once,
+  last before the final review. An automation that finds a conflict comments
+  on the live owner card instead of creating a rebase card.
+- After close: a card closed with "remaining: owner merge" keeps a signal and
+  a release condition until the PR is merged, so a PR waiting on the owner
+  never disappears from view. A new owner CHANGES REQUESTED after the card
+  closed opens one new card for the new cycle.
 
-`kanban_block(kind='dependency')` on the root does NOT hold it: dependency_wait
-promotes the card as soon as all current parents are done, and the dispatcher
+`kanban_block(kind='dependency')` on a card whose parents are all done does
+NOT hold it: dependency_wait promotes the card at once, and the dispatcher
 restarts it on the next tick (seen in practice: promoted again within 21
 seconds). `kind='needs_input'` after the run has finished is refused (a block
 is accepted only for running/ready cards with a live run).
 
-## Review-package cards are not hung on a blocked umbrella or root
+## Decomposing an oversized verdict
 
-Rework after an owner verdict, blockers, minor items, tester verification and
-re-review of an open PR are never made children of an umbrella or root card
-sitting in blocked: such a parent holds the whole package while gating nothing
-(the umbrella waits for some gate, the root waits for an external event or
-even named the rework as its own release condition). Order inside the package
-comes from links between its cards: PR body and end-to-end QA after the code
-blockers, re-review after its rework card. Priorities: owner review package
-80, re-review and tester on an open PR with green CI 100. In the incident
-behind this rule, removing the links released three stuck lines of work in one
-move.
+If a verdict does not fit one run's iteration budget, split it: one child =
+one blocker, idempotency key `<pr>:<head7>:<block>`, every child pushes into
+the PR's branch, and the children are chained with links (strictly one after
+another; only cards of different PRs run in parallel). Children inherit the
+root's priority; the core gives decomposed children 0. Decompose from the
+LATEST verdict on the PR from any reviewer: the branch head may already have
+moved past the verdict you remember and closed its blockers. In the incident
+behind this rule five blockers were split into cards that a later review
+round had already closed.
+
+A gate is not a parent of work: the result of a plan check is written into
+the plan card, and the work refers to it in the body.
 
 ## Create cards with the CLI and verify the result
 
@@ -117,6 +180,39 @@ hits one must block with a question rather than decide alone).
   with `kind='needs_input'`. `kind='dependency'` is useless here:
   dependency_wait auto-promotes the card to ready and the dispatcher reruns
   the check in a loop.
+- waiting for a human: the question goes in the reason and the kind is
+  `needs_input`. A block without a kind is invisible to reports that collect
+  owner questions (one such block went unnoticed for two weeks). A plain
+  comment after the block can reset a stuck-in-blocked timer, so an owner
+  question older than a day must be reported explicitly; if it is missing
+  from the attention report, that is a watchdog defect;
+- card ids of this same board in a needs_input reason mean the wrong kind
+  was chosen: waiting for a card is a link;
+- waiting for a PR merge: write the release condition as ONE line with the
+  machine check inside it, `Release condition: PR #N merged (gh pr view N
+  --json state == MERGED)`. Native dependency_wait and SCHEDULED_UNTIL do not
+  cover a PR merge, so a watchdog can execute exactly this form and return
+  the card to ready; composite conditions (milestone, owner decision,
+  re-review) stay with a human;
+- `needs_input` waits only for an owner event. "The owner will update the
+  branch, wait for CI, rerun a flaky job, re-review the new head" is a false
+  block: the agent does those itself with its app rights.
+
+**Parking until a moment is `kanban schedule`, nothing else.** Use `hermes
+kanban schedule` with SCHEDULED_UNTIL in UTC. Never park a card with run
+history through a transient block: two transient blocks in a row drop it into
+triage (block_loop_detected), and the auto-decomposer then rewrites title and
+body from the stale body written at creation, because it reads neither
+comments nor run history. The recurrence counter is not reset by specify or
+by schedule, so one more transient block repeats it. Cards whose body ages
+get `hermes kanban edit --body` at every handoff.
+
+**A delivered PR is not decomposed.** The same triage path once split a card
+that had already delivered its PR: four children redid work that was in the
+PR. After the PR is delivered, close the card with "PR #N" and file the tail
+as a NEW card whose body was checked against the PR (what is in, what is
+left). Do not transient-block a card that has delivered a PR. A review cycle
+(changes_requested, then decomposition) is legitimate.
 
 ## Priority is set at creation with `--priority`
 
@@ -124,41 +220,58 @@ The dispatcher picks the next card by `priority DESC, created_at ASC`. Without
 explicit priorities the queue degrades to "oldest first", and planning, of
 which there is always more, gets ahead of code.
 
-One scale, by proximity to merge (higher means picked earlier):
+Priority follows milestone bands:
 
 | value | meaning |
 |---|---|
-| 100 | last step before merge: tester or reviewer on an open PR with green CI |
-| 80 | fixes an already open PR: red CI, send-back verdict, missing fix |
-| 60 | stacked work on top of an open PR of the same line: the chain cannot merge without it |
-| 40 | coding to an accepted plan, no PR yet |
-| 30 | new feature to an accepted plan (long chain) |
-| 20 | planning and decomposition |
-| 0 | triage and ideas |
+| 100 | bring an open PR to merge: owner verdict, last fixes |
+| 80 | the active milestone |
+| 40 | the next milestone |
+| 0 | everything else: triage and ideas |
+
+The band is derived from the card's own anchor: the issue number in the
+title, the `Issue:` line, an issue-link marker, plus the same anchors of its
+ancestors. A PR or issue of another milestone mentioned in passing in the body
+does not change it; in the incident behind this rule such a mention gave a
+next-milestone chain the active band and a release slot. An owner comment in
+the issue without an explicit "do it now" or a milestone change does not raise
+the band either. If your setup has a helper that computes the band, every card
+generator and every hand-created card uses it rather than a constant.
 
 The point: do not accumulate work in progress. An open PR without a verdict
-costs more than a new feature started. Equal priority: the older card wins.
+costs more than a new feature started. Next-milestone ideas do not go to ready
+while the active milestone has work that can be unblocked.
 
 Example: `hermes kanban --board <board> create "<title>" --body "<body>"
 --assignee coder --priority 40 --idempotency-key coder-issue12-fix-retry`.
 
 A card without a priority is a defective card.
 
-## Rebase queue: the root of a stack before its child
+**Lifting a priority walks up task_links.** Raising a card whose ancestor is
+blocked changes nothing: the dispatcher never reaches it. Walk up to the first
+open ancestor; if it is blocked, unblock it or ask the owner. In the incident
+behind this rule three cards were raised close to 100 while they sat behind a
+gate that had been blocked for two weeks.
 
-When many PRs conflict at once, rebase cards can sit in ready for a day while
-the dispatcher keeps picking rework cards.
+## Rebase: owned by the PR's card, planned by overlap
 
-- rebasing the root of a stack unblocks the whole chain: priority 80 ("fixes
-  an open PR"). Rebasing a child before its parent is a wasted run: the
-  parent's head will move and the child must be rebuilt;
-- a "rebase #X onto #Y" card is not taken while #Y is sent back with blockers:
-  rebasing onto a head that is about to change is wasted work. Block it
-  (`kind='needs_input'`, release condition: PASS on PR #Y or its closure)
-  instead of leaving it in ready;
-- traversal order: stack roots, then the second layer, then the leaves. The
-  current list of roots lives in the body of a rebase umbrella card on the
-  board; it changes with every merge and does not belong in a skill.
+- No rebase without CONFLICTING when branch protection does not require an
+  up-to-date branch: freshness alone is wasted runs and new review rounds.
+- After each merge, map open PRs that touch the same files. Each affected PR
+  gets one decision "needs rebase because of #N", and the owner gets a
+  suggested merge order.
+- In a stack, the root is rebased before its child; rebasing a child onto a
+  head that is about to change is a wasted run. Do not rebase onto a PR that
+  is currently sent back with blockers.
+- **Budget burnout changes the strategy, not the queue.** A card that died on
+  the iteration budget during a rebase does not go back to ready with the same
+  wording: the same plan burns again (in the incident behind this rule a third
+  run spent its whole budget on repeated `git rebase --abort` and replays).
+  Read the run transcript first (restarts, repeated resolutions, builds), then
+  change the strategy and write it into the body: continue from the existing
+  workspace without replaying, merge the integration branch into the PR branch
+  once (each conflict resolved once) instead of rebasing N commits, or split
+  by conflicting files.
 
 ## GitHub-bridge cards arrive without an assignee
 
@@ -199,16 +312,25 @@ duplicates with no-duplicate-work before starting.
 
 ## Name the reviewer when requesting review
 
-`kanban_request_review` without a `reviewer` parameter leaves the card on you,
-and the dispatcher hands the review to the same assignee: the author reviews
-itself. For code and tests the reviewer is the `reviewer` profile.
+`kanban_request_review` without a `reviewer` parameter does not reassign the
+card, and the review dispatch spawns the current assignee: the author reviews
+itself. For code and tests the reviewer is the `reviewer` profile. After the
+request the run exits: someone else's verdict is never awaited inside a run.
+
+## Ready for the owner: a reviewer verdict on the current head
+
+A PR is reported ready for the owner only when a REVIEWER verdict (a
+`## Review verdict` header or a formal review) exists on the exact current
+head. A QA verdict (`## QA verdict`) is a different header and does not count.
+In the incident behind this rule a PR went to the owner on a QA verdict alone
+while no reviewer had looked at that head.
 
 ## One card: one root cause
 
 A card with slow runs (build, e2e: minutes per run) must fit the worker's
 iteration budget. Split up front, not when the budget is gone.
 
-A budget estimated for a run from scratch is not valid for a rework card. An
+A budget estimated for a run from scratch is not valid for a rework run. An
 owner review delivers a fresh package of blockers, and the first attempt
 spends iterations on setting up the environment (clone, dependency install,
 build), leaving no room for the package itself. In the incident behind this
@@ -221,7 +343,8 @@ about twenty minutes.
 Rule: a card that closes an owner review with more than three blockers is not
 created as one list. File one card per root cause (a primary blocker and its
 regression test are one cause) and tie them together under a shared umbrella.
-All cards of the package get priority 80.
+The pieces are chained in the PR's branch as described under "Decomposing an
+oversized verdict".
 
 ## Before closing an issue the board is empty of its cards
 
@@ -267,10 +390,11 @@ assigned to a profile that did not exist on disk.
 
 When a card goes to blocked, the same turn does one of two things:
 
-(a) creates a rework card with a concrete assignee and acceptance criteria,
-    linked to the blocked card: `link <new> <blocked>`;
+(a) puts the work on a card with a concrete assignee and acceptance criteria
+    (for a PR: its owner card), linked to the blocked card if one waits for
+    the other;
 
-(b) if the owner is needed, sends a question to `<telegram-chat>` with a
+(b) if the owner is needed, sends a question to `<owner-chat>` with a
     concrete choice (option A / option B, what each one costs), not "needs a
     human decision".
 
@@ -321,8 +445,9 @@ one of the three, it is not an unblock but an order for another burnt run.
 
 - every `--skill` name is in `hermes skills list`;
 - every `--assignee` is in `hermes kanban assignees` with `on disk = yes`;
-- the new card has `--priority` and `--idempotency-key`;
-- after a send-back there are two open cards linked by a dependency;
-- `kanban_request_review` was called with an explicit `reviewer`;
+- the new card has `--priority` from its band and `--idempotency-key`;
+- no native mechanism or live card already covers it;
+- `kanban_request_review` was called with an explicit `reviewer`, and no
+  separate reviewer card exists for the PR;
 - before closing, the card has no live parents and no self-links in
   task_links (a link cycle never completes).

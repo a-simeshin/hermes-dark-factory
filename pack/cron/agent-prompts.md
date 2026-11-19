@@ -13,39 +13,33 @@ The originals grew by appending a paragraph after every incident, and some parag
 | `<gh-repo>` | `owner/name` of the repository on GitHub |
 | `<board>` | Slug of the kanban board |
 | `<owner-login>` | GitHub login of the owner, used as the assignee of mirrored issues |
-| `<chat-id>` | Telegram chat of the owner for card notifications |
 | `<conventions-skill>` | Project conventions skill attached to the job (`--skills`) |
 | `<conventions-dir>` | Directory with the full text of the conventions |
 | `<demo-url>`, `<demo-unit>` | URL of the running demo and the systemd user unit that keeps it up |
 | `<milestone>` | The open milestone whose acceptance scenarios are run |
 | `<holdout-dir>` | Directory with hidden scenarios, readable only by the tester profile |
 
-## Shared block: card, mirror issue, subscription
+## Shared block: issue only, no card
 
 Three of the four prompts end with the same rules for what happens to every finding. Keep them in one place in your conventions skill and reference them from the prompt; they are spelled out here once.
 
+The ideation jobs (ux, ceo, cto) file GitHub issues only, never board cards. A card created by a scheduled agent bypasses the owner's triage: the board's own triage column is auto-decomposed regardless of what the owner decided on GitHub, and unapproved ideas turned into cards and PRs that way. The owner approves an issue (assigns a milestone or removes wait-for-triage), and only then does the admission gate or the issue poller create the executor card.
+
 ```text
-FOR EVERY CARD YOU CREATE:
-- Create it in triage with an idempotency key:
-  hermes kanban --board <board> create "<title>" --triage --created-by <job-name>
-  --idempotency-key <job-name>-<short-slug-of-the-finding> --body "<text>".
-  Never create a card without --idempotency-key.
-- Mirror it as a GitHub issue strictly by the template in
-  <conventions-dir>/issue-mirror.md. English only. The sections Current
-  behavior / After the change / User benefit (so what?) / Acceptance criteria
-  are mandatory. If you cannot state the benefit for the user, do not create
-  the card at all.
-- Deduplicate before creating the issue: if the card body already has an issue
-  URL, skip; search open issues by the card id in the body and by keywords
+FOR EVERY FINDING:
+- Do NOT create a kanban card. The deliverable is a GitHub issue awaiting the
+  owner's triage.
+- Write the issue strictly by the template in <conventions-dir>/issue-mirror.md.
+  English only. The sections Current behavior / After the change / User
+  benefit (so what?) / Acceptance criteria are mandatory. If you cannot state
+  the benefit for the user, do not file it at all.
+- Deduplicate first: search open and recently closed issues by keywords
   (gh issue list --search) and reuse what you find. A finding that already has
-  an issue or a card does not produce a new pair.
+  an issue, or whose work is already delivered, does not produce a new one.
 - Labels and assignee at creation: bug or enhancement, area label, the
   factory label, wait-for-triage, a severity label (minor / normal / major /
-  critical) by the criteria in the conventions; assignee <owner-login>.
-- Write the issue URL into the card body.
-- Subscribe the owner to the card:
-  hermes kanban --board <board> notify-subscribe <card-id> --platform telegram
-  --chat-id <chat-id> --chat-type dm --delivery-mode notify.
+  critical) by the criteria in the conventions; assignee <owner-login>. No
+  milestone: the milestone is the owner's approval.
 - Do not repeat proposals from the continuity output of previous runs.
 ```
 
@@ -70,11 +64,11 @@ properly is better than all screens skimmed.
    connection flow with a valid and an INVALID input, every main section of
    the product including error states, a mobile viewport of 375 px, and the
    browser console for JavaScript errors.
-2. Turn EVERY friction finding into a card IMMEDIATELY, with reproduction
+2. Turn EVERY friction finding into an issue IMMEDIATELY, with reproduction
    steps and an acceptance criterion in the body. Check whether old findings
    from the continuity output were fixed instead of filing them again.
 3. For a UI finding a screenshot is mandatory: save a PNG, commit it to the
-   assets branch of the repository as screenshots/<card-id>-<what>.png, and put
+   assets branch of the repository as screenshots/<date>-<what>.png, and put
    the raw URL into the issue.
 
 <shared block>
@@ -92,7 +86,7 @@ repository <gh-repo>.
    category, what competitors and the reference implementation shipped, changes
    in the platform the product builds on, and user pain (issues, forums).
 2. Read the open issues of the repository with gh.
-3. Formulate 1 to 3 proposals, product or technical, each as a triage card.
+3. Formulate 1 to 3 proposals, product or technical, each as an issue awaiting triage.
    The body must give the rationale: why, for whom, and the market signal
    behind it.
 
@@ -125,12 +119,12 @@ Audit six directions:
    implements and its recent proposals. Which capabilities appeared or changed,
    which of them the underlying SDK already supports, and which of those the
    product does NOT show or shows incorrectly. A gap of the form "the protocol
-   can, the product does not show it" is a candidate for a card.
+   can, the product does not show it" is a candidate for an issue.
 
-Result: at most 1 to 3 cards, the most valuable ones.
+Result: at most 1 to 3 issues, the most valuable ones.
 
 Report to the owner's chat: a short summary for each of the six directions
-and the list of created cards.
+and the list of filed issues.
 
 BUDGET: 45 tool calls.
 
@@ -209,4 +203,4 @@ the development lines) plus hints. Act strictly on it; do not invent targets.
 - **"The environment is ready."** Agents love to rebuild and restart things. Keep the demo and the browser running as services and say so.
 - **An idempotency key on every card.** A job that runs on a schedule will rediscover yesterday's finding; the key and the dedup check keep the board clean.
 - **Classify before filing.** The holdout job must write the kind of failure into the report before it may create a card; this is what stops false defects from scenario mistakes.
-- **A stated cap on the output** (1 to 3 cards). Owner attention is the scarcest resource of the factory.
+- **A stated cap on the output** (1 to 3 issues). Owner attention is the scarcest resource of the factory.

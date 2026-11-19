@@ -47,5 +47,8 @@ to apply."
 7. **`Refs` for several PRs, `Closes` only for one.** Why: GitHub closes the
    issue on the first merged PR carrying `Closes`. How: change `Closes` to
    `Refs` before pushing if the plan grows to several PRs; close by hand.
+   `Refs #N` does not fill the PR's `closingIssuesReferences`: when you look
+   for the PRs of an issue, read the `cross-referenced` events on the issue
+   timeline, not that field.
 8. **An issue wider than what is merged gets `keep-open`** plus a comment
    explaining why.

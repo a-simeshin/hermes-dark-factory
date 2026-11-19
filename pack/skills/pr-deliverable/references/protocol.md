@@ -1,8 +1,8 @@
 # pr-deliverable: full protocol
 
 This document is the long form of the pr-deliverable skill: the git and PR
-protocol, the owner summary comment (WCFY) and its lifecycle, the rule that
-the merge is the owner's only step, the requirement that every delivery text
+protocol, the owner summary comment (WCFY) and its lifecycle, the rework
+response, the rule that the merge is the owner's only step, the requirement that every delivery text
 is checked by a command on the current head, proofs for closed blockers,
 screenshots, the PR self-check, CI expectations, drive-by edits, merge
 conditions, and what to do when a PR shows no CI runs. Incidents are retold
@@ -37,13 +37,23 @@ that has a PR.
   by hand in a neighbouring PR that day. Do not duplicate a resolution
   blindly: pull the other fix's setters into your cleanup block and leave no
   duplicates. An automatic merge of tests can keep one side's test pinning the
-  other side's old behaviour: re-pin it to the merged semantics. Verify
-  (tests, lint, build) before pushing.
+  other side's old behaviour: re-pin it to the merged semantics. Before
+  pushing run the targeted tests of the changed modules, format and lint;
+  the full verify of every stack runs in CI after the push, and a later run
+  picks up its result.
 - The PR body links the issue mirror explicitly: `Refs #N` for multi-PR
   work, `Closes #N` for a single PR. A mention in prose builds no link.
   `Closes` closes the issue on the merge of the FIRST PR (documented GitHub
   behaviour), so with several PRs it closes the issue before the second is
   merged. One PR: `Closes`; several: `Refs` on each and manual closing.
+- `Refs #N` does NOT fill the PR's `closingIssuesReferences`: that field is
+  non-empty only for a closing keyword. The machine-visible link of a `Refs`
+  is the `cross-referenced` event in the issue timeline. A check or
+  acceptance criterion that reads an empty `closingIssuesReferences` as "no
+  link" is wrong; switching to `Closes` only to fill the field is forbidden
+  (it would close the issue on the first merge).
+- `metadata.published_pr` on the card is the full PR URL
+  (`https://github.com/<org>/<repo>/pull/N`), not a bare number.
 
 ## The owner summary: a mandatory comment
 
@@ -80,8 +90,8 @@ PASS it is neither published nor updated: rounds of changes are described in
 the PR body. An extra WCFY reads to the owner as readiness that does not
 exist.
 
-When the watchdog demands a new WCFY (the head moved past the old one), mark
-the old comment outdated by PATCH (numeric id), with the marker placed BEFORE
+WCFY is published by the card that owns the PR; there is no separate WCFY
+card. When the head moves past the old WCFY, mark the old comment outdated by PATCH (numeric id), with the marker placed BEFORE
 the heading, so the old comment's first line is no longer `## What changes
 for you` and exactly one candidate remains. "One per PR" beats any
 instruction in a card.
@@ -117,6 +127,25 @@ defect: the text fell behind the code. Before delivering each round:
 - numbers come from the output of THIS run's commands; counts written from
   memory are always slightly wrong.
 
+## Rework: a response in the PR and a fresh review request
+
+Whoever delivers a rework (pushes a new head after CHANGES REQUESTED or
+RETURN) has the same two duties, regardless of which card carried the work
+(the owner card, a decomposition child, a card without this skill attached):
+
+- post a rework response in the PR: a comment answering each BLOCK item of
+  the verdict with what was done, the commit, and the mutation or red run
+  that proves it;
+- request review again: `kanban_request_review` with the reviewer named
+  explicitly. A request without a reviewer does not reassign the card, and
+  the dispatcher spawns the author to review its own work. After the request
+  the run exits; someone else's verdict is not awaited inside a run.
+
+Without the response the reviewer gets a bare new head, does not know how the
+verdict was closed and either reviews blind or the review stalls. The duty
+sits on the process, not on a template: a template may never reach the
+executor.
+
 ### The merge is the owner's only step
 
 Only the merge, and decisions with no technical path (milestone, prototype
@@ -133,6 +162,12 @@ rights can do, the agent does before handing the PR over:
   are forbidden);
 - a fresh WCFY and a repeat review of the new head.
 
+All of this is done by the card that owns the PR. A rebase or update-branch
+is absorbed by that live card; a separate rebase card next to it is a
+duplicate. A card closed with the result "remaining: owner merge" keeps that
+signal (and a one-line release condition) until the PR is merged, so the PR
+does not drop out of sight.
+
 "Owner-only" or "owner steps" in a PR comment, verdict or block condition
 is allowed only for the merge or a decision with no technical path. In one
 case "update the branch, wait for checks, merge" were all called owner-only
@@ -147,6 +182,21 @@ registry, test names, doc comments, commit messages, PR title. Every claim,
 count, hash and promise must equal what a command shows. If nothing can check
 it, do not write it. Rework almost always makes old text false, and reviewers
 do not reread text.
+
+Two claims have a fixed form:
+
+- "green" is the verbatim final summary line of your own run of the test
+  runner, quoted as printed; a marker or word the runner never prints is an
+  invented claim;
+- a follow-up promise ("tracked as a follow-up", "will be handled
+  separately") carries the issue or card number on the same or the next
+  line. A promise without a number leaves the owner to create the issue.
+
+When a blocker can be closed either by pinning a test or by removing the
+claim from the texts, and the behaviour cannot be proven (a measurement in
+the browser does not change), remove the claim. A test that asserts a class
+name or a markup string pins a false promise: the class may have no effect on
+the measured behaviour at all.
 
 Update-branch makes a body false more quietly than a rebase: counts grow from
 OTHER people's merged commits (attribute them with `git diff --name-status
@@ -209,6 +259,13 @@ outdated WCFY is fixed by PATCHing its comment, not with a new comment or an
 "outdated" note. The id for the PATCH is the NUMERIC id from
 `gh api repos/<org>/<repo>/issues/N/comments --jq '.[].id'`; a GraphQL node id
 returns 404.
+
+Comment PATCH via `gh api`: a small `-f body=@file` inserts the LITERAL path
+string, not the file content (a WCFY once became a file path). A large `-F`
+reads the file, but the reliable form is again a JSON payload with
+`--input file.json`, which also lets you prepend the outdated marker by
+numeric id. Issue comments are updated with PATCH; `PUT
+/issues/comments/<id>` does not exist and answers 404.
 
 ## A mutation for every closed blocker is part of delivery
 
@@ -331,9 +388,9 @@ Authorization) verbatim in browser storage.
 
 ## Checklist
 
-- the issue body starts with `## Before / After` (UI: two real images on the
-  assets branch; non-UI: a mermaid diagram of the delta); the PR has no
-  Before/After section;
+- the visual delta is where the project keeps it (references/visual-delta.md;
+  for a UI-facing issue kept in the issue: the body starts with
+  `## Before / After` and the PR has no Before/After section);
 - the PR has a `## What changes for you` comment (one, after the reviewer's
   PASS, on the final head);
 - every closed blocker has a production-line mutation or a red run on the
@@ -348,9 +405,20 @@ Authorization) verbatim in browser storage.
 - `Refs #N` (or `Closes #N`) in the body is checked by command:
   `gh pr view <N> --json body --jq '.body' | grep -E '^(Refs|Closes) #[0-9]+'`.
   A self-reference or a missing link is fixed by PATCH. Forbidden: a number
-  from memory, `Refs:` with a colon, a board card id instead of an issue.
+  from memory, `Refs:` with a colon, a board card id instead of an issue;
+- after a rework: a rework response per BLOCK item and review re-requested
+  with the reviewer named;
+- every follow-up promise carries a number; "green" quotes the runner's final
+  line; `metadata.published_pr` is the full PR URL.
 
 ## No runs on the PR: check mergeability first
+
+"No CI run after a push" STARTS with `gh pr view <N> --json
+mergeable,mergeStateStatus`. "A GitHub glitch" is never written as a
+diagnosis without that check (a failure cause needs evidence). In one case a
+PR went CONFLICTING after neighbouring merges, no `pull_request` run was
+created at all, the "glitch" diagnosis was wrong and a rebase onto the
+current base fixed it.
 
 `pull_request` workflows run on the merge ref, not on the branch head. If
 the PR conflicts with its base, the merge ref is not computed and GitHub
@@ -365,6 +433,11 @@ Order when a push did not start a run:
     gh api "repos/<org>/<repo>/actions/runs?per_page=5" --jq ".workflow_runs[] | \"\(.created_at) \(.event) \(.head_branch)\""
 
 The third command answers "is CI stuck for everyone or only for me".
+CONFLICTING may show up only after a new head is pushed: before that the API
+can keep a stale MERGEABLE, while `gh run list --branch <branch>` has no run
+for the new SHA. An empty retrigger commit or close/reopen does not cure a
+conflict (the event still creates no merge ref); a local merge of the base or
+a rebase does, after which mergeability is recomputed and runs appear.
 A rerun restarts only an existing run; with no runs at all, the only way back
 to checkability is to remove the conflict. The app needs Actions read and
 write for rerun and dispatch; a 403 on rerun means degraded permissions, a

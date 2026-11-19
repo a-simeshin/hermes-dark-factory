@@ -1,7 +1,7 @@
 ---
 name: save-lesson-before-complete
 description: Where to record what you learned before closing a card.
-version: 1.0.0
+version: 1.1.0
 author: maintainer, Hermes Agent
 license: MIT
 metadata:
@@ -40,6 +40,13 @@ Check before writing: "will this be true on ANOTHER project?" No: the target
 is project-level, not profile memory. A project fact in profile memory becomes
 a lie on the next project.
 
+If your installation loads generic skills from a read-only pack (an external
+skills directory), the agents do not edit it. A lesson starts in the project
+layer (the project conventions skill or a project reference); it goes to the
+pack only as a proposal to the owner, after it has been retold without
+project details (branches, paths, modules, card or PR numbers) and still
+makes sense.
+
 ## What never goes into memory
 
 The Hermes docs list it explicitly: card content, statuses, anything already
@@ -76,13 +83,32 @@ other cards'. If a pre-commit gate rejects a line (for example a forbidden
 character in someone else's edit), fix the line by meaning; never bypass the
 gate.
 
+## The snapshot runs the whole test suite
+
+If the knowledge layer holds scripts with tests, the snapshot script runs
+your test runner over the WHOLE suite (plus a hermeticity audit, if you have
+one) before committing, and prints its final summary line. The round's report
+quotes that line verbatim. When the suite is red, the snapshot is still taken
+but the commit message is marked RED, and the red tests are open work of this
+round, not a footnote.
+
+Why no sampling: several rounds in a row broke tests and left others silently
+reading the live cache, and every report said "the sample is green".
+
+Hermeticity is part of green: a test that reads the live Hermes home (the
+kanban database, boards, caches, profiles) or goes to the network counts as
+red even when its asserts pass. Caches of the code under test are redirected
+into a sandbox by patching the module, never read from live files.
+
 ## Check
 
 - the lesson question was asked before closing the card;
 - if there is a lesson, it was written BEFORE `kanban_complete`;
 - the entry passed "is this true on another project";
 - a card that changed `~/.hermes` closed with a snapshot and its hash in the
-  summary.
+  summary;
+- if the snapshot ran the tests, the report quotes the runner's final summary
+  line verbatim, and a red run is reported as open work.
 
 ## Report who did what from data, not from guesses
 

@@ -1,7 +1,7 @@
 ---
 name: no-duplicate-work
 description: Check the work is not already done before starting a card.
-version: 1.0.0
+version: 1.1.0
 author: maintainer, Hermes Agent
 license: MIT
 metadata:
@@ -41,6 +41,13 @@ hermes kanban --board <board> list --json \
 gh pr list --json number,files --jq '.[] | "\(.number) \([.files[].path] | join(" "))"' | grep <file>
 ```
 
+Before creating a new card or mechanism (not only before starting one), the
+same question applies one level up: does a native Hermes feature or a live
+card already cover it (see kanban-discipline). An issue that is already
+delivered (a merged PR referencing it after its last scope change, or a done
+card with a merged PR) gets no new card and no new work; if it is still open,
+ask the owner what remains.
+
 ## What to do with the result
 
 **The work is already in the branch.** Do not redo it. Complete the card with
@@ -60,6 +67,29 @@ kanban-discipline for the canonical form).
 **An open PR touches the same files.** Build your branch on top of that PR
 instead of the base branch, and treat it as a stacked layer (priority 60, see
 kanban-discipline).
+
+## Archived duplicates carry the owner's answers
+
+A watcher may re-create a card from an open issue every few minutes. The
+archived copies with the same body are not noise: the owner may have
+answered there ("stop, duplicate", "waits for an owner decision", "push
+nothing"). Before acting on a fresh copy, read the comments of its archived
+twins (from a worker context, read the board database read-only if the CLI
+list is unavailable). An answer given there applies to you too: asking the
+same question again through needs_input starts another recreate, block,
+archive cycle. Complete with metadata (what closed it, what stays with the
+owner) and flag the re-creation in a card comment.
+
+## A layer merged under another PR number: drop it, do not replay it
+
+A merged neighbour PR may carry the content of your own commits under a
+different number; `git cherry` still shows them as new because review edits
+changed the patch ids. Prove equivalence by comparing trees, not commit
+subjects (`git diff HEAD origin/<base> -- <files of that layer>` empty
+outside other features, same test names), then
+`git rebase --onto origin/<base> <last commit to drop>` replays only your own
+layer. Resolving the conflicts of a full replay yields the same tree at a
+much higher cost.
 
 ## A review belongs to the head it was written on
 

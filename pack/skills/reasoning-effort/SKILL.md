@@ -1,7 +1,7 @@
 ---
 name: reasoning-effort
 description: Use when picking reasoning_effort or profiling slow sessions
-version: 1.0.0
+version: 1.1.0
 author: maintainer, Hermes Agent
 license: MIT
 metadata:
@@ -44,9 +44,16 @@ max to high cut a typical answer from about 30 minutes to about 5.
    `delegation.provider` are empty, a delegate inherits the parent's model and
    runs with `delegation.reasoning_effort`; a per-model override does NOT
    apply to delegates until a delegate actually runs on that model.
-4. Accepted values depend on the provider plugin (some map `xhigh` and
-   `ultra` to `max`).
-5. Starting layout: default medium, coder high, reviewer and architect max,
+4. Accepted values depend on the provider plugin and the model: some map
+   `xhigh` and `ultra` to `max`, and a model may not know every level (on some
+   models `medium` behaves close to `low`). Check what the plugin actually
+   sends before relying on a level.
+5. Auxiliary tasks (context compression, titles, vision) have their own
+   `auxiliary.<task>.reasoning_effort`. Compression is mechanical: on `low`
+   it is several times faster than on `max` with a summary of the same size,
+   and on a thinking model left at `max` it can eat a large share of session
+   time.
+6. Starting layout: default medium, coder high, reviewer and architect max,
    tester and ops low.
 
 ## Choosing the level

@@ -34,7 +34,7 @@ determined by its README and commit history.
 1. the whole card (`kanban_show`), including acceptance criteria and
    comments;
 2. if the card has an issue number or a PR URL: their discussion
-   (`gh issue view N --comments`, `gh pr view N --json comments`). People's
+   (`gh issue view N --comments`, `gh pr view N --comments`). People's
    decisions there outrank your assumptions;
 3. the project conventions: `~/.hermes/projects-context/<slug>.md` if it
    exists. Branches, release lines, runners and PR rules differ between
@@ -53,6 +53,7 @@ Details are not duplicated here: open the skill with `skill_view`.
 | red CI, a failing test, "nothing happens" | `debugging-discipline` |
 | a gate said no (hook, CI, threshold): fix or block | `kanban-discipline` |
 | planning a run, committing, delegating, out of budget | `worker-run-discipline` |
+| waiting for CI, a verdict, a merge; no CI run after a push | `worker-run-discipline` |
 | creating or blocking a card, handing off to review | `kanban-discipline` |
 | publishing work in a PR | `pr-deliverable` |
 | learned something new before closing a card | `save-lesson-before-complete` |
@@ -81,6 +82,16 @@ choice is made before a skill body loads, so the rule lives here too.
 - Do not mix infrastructure (CI workflows, build and gate configs) with a
   product change: separate PR only.
 - Do not close a card with a CI criterion without a green run on the PR.
+- Do not call anything green without quoting verbatim the final summary
+  line of your own test-runner run; no invented markers.
+- Do not claim external state (CI green, merged, posted, closed) without an
+  artifact link you opened.
+- Do not wait inside a run for someone else's result (CI, a verdict, a
+  merge): hand off with `kanban_request_review` naming the reviewer, or park
+  with `kanban schedule`, and exit.
+- Do not open a second card for your PR: review, rework after a reject
+  (rework response in the PR, review re-requested) and rebase stay on the
+  card that owns it. `metadata.published_pr` is the full PR URL.
 - Do not push a branch that does not build.
 - Do not add Co-Authored-By footers or generator mentions to commits.
 - Do not break the house style rules (the reference setup forbids the em

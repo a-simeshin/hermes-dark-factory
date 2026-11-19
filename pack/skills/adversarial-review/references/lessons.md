@@ -45,7 +45,7 @@ is the companion that tells you which of them you actually failed recently.
     depth), require a `Library contract: <artifact>:<version> <Class>#<method>`
     line and a fixture produced by running the library; add a Calibration line.
 10. **The verdict covers the whole head with its CI.** Why: "PASS on this
-    diff" with a red required job arms post-PASS work on a doomed head. How:
+    diff" with a red required job starts post-PASS work on a doomed head. How:
     PASS only when every required check is green; otherwise CHANGES REQUESTED
     or "blocked by #N".
 11. **A lock moves the cost of a race, it does not remove it.** Why: wrapping
@@ -60,3 +60,49 @@ is the companion that tells you which of them you actually failed recently.
     (including completeness), and separately check the DIRECTION of every
     inference. Tell-tale sign: the test's expectation uses the same words as
     the implementation.
+13. **Style gates fail a mutant probe before the tests.** Why: a formatter or
+    linter failing on the mutated file looks like a red mutant. How: run
+    mutant probes with style checks skipped, install unchanged modules once
+    before the series, clear stale test reports between runs so failing names
+    are not read from the previous mutant.
+14. **A missing predicted log marker does not refute static analysis.** Why:
+    frameworks can swallow an exception before any observable channel. How:
+    instrument the disputed lines in a scratch worktree, run one test, read
+    the output, revert at once.
+15. **After a rebase, measure PR content against the base.** Why: a diff
+    from the old head to the new head mixes in commits merged into the base.
+    How: `git diff <base>...HEAD` says what the PR touches; the head-to-head
+    diff only describes the round's delta.
+16. **A cadence test must be able to fail.** Why: the same loose regex before
+    and after advancing the timer matches both values, so any interval
+    passes; a test that feeds data through a path production never uses pins
+    nothing. How: assert exact text before and after the shift, and check the
+    test reaches the production path.
+17. **Test counts differ between the branch tree and the merge ref.** Why:
+    CI on a pull request runs the head merged with the current base, which
+    adds tests merged after branching. How: establish which trees are
+    compared before calling a count claim false; a reconciliation line in the
+    verdict is enough.
+18. **"Replicates upstream X" is a third-party claim.** Why: tests can
+    diligently pin the wrong semantics, with every mutant killed. How: read
+    the upstream source at the exact pinned version, and prefer a decisive
+    live probe (a minimal context with the real upstream component and the
+    disputed configuration).
+19. **Timing fixes may not reproduce on reviewer hardware.** Why: a race
+    window mutant can survive locally. How: a pair of real CI runs (mutant
+    value red, fix value green on first attempt) plus your local run with the
+    survival explained; keep the mutation worktree in the task workspace, not
+    a scratch directory a cleaner may remove, and verify which mutant the
+    installed artifact really carries before concluding.
+20. **Probe an end-to-end anchor by making it unreachable.** Why: an anchor
+    that no test depends on pins nothing. How: break the anchor, run only the
+    one focused test class: exactly the dependent test must go red on
+    "element not found", and the full module run must be green after the
+    revert.
+21. **A changed shared function changes every caller.** Why: a reclassified
+    error in one helper silently altered behaviour for all its callers
+    without tests. How: list every caller of a changed shared function and
+    ask which of them the tests cover.
+22. **A green gate goes stale when the base moves.** Why: a check that passed
+    before another PR merged can be red on the head. How: re-read gate
+    results on the exact head you are approving, not from an earlier run.

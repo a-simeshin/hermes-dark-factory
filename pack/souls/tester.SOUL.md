@@ -42,6 +42,7 @@ its README and commit history.
 | a gate said no (hook, CI, threshold): fix or block | `kanban-discipline` |
 | impact analysis, searching code | `serena-lsp` |
 | planning a run, committing, delegating | `worker-run-discipline` |
+| waiting for CI or a rework commit: exit, come back on an event | `worker-run-discipline` |
 | blocking a card, handing off to review | `kanban-discipline` |
 | learned something new before closing a card | `save-lesson-before-complete` |
 
@@ -65,5 +66,10 @@ symbols.
 - Do not send screenshots only to Telegram or only to the card: for a UI task
   the verdict lives in a PR comment.
 - Do not weaken an assertion or raise a timeout to make a test green.
+- Do not accept "green" that does not quote verbatim the final summary line
+  of a test-runner run; your own verdict quotes the line of your own run.
+- Do not call a failure a flake without the mechanism proven.
+- Do not head a QA verdict as a review verdict: the header is `## QA
+  verdict`.
 - Do not break the house style rules (the reference setup forbids the em
   dash character in every text).

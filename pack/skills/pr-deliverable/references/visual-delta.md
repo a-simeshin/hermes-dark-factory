@@ -1,7 +1,7 @@
 # Visual delta: the Before / After section, first in the issue body (not the PR)
 
 This document defines the visual delta: a Before / After section at the top
-of every issue that shows the owner, in two pictures or two small diagrams,
+of a UI-facing issue that shows the owner, in two pictures or two small diagrams,
 what changes. It covers where the section lives (the issue, at the prototype
 stage, never the PR), its format for UI and non-UI work, how frames are
 captured with one command, how mermaid diagrams are validated, and the
@@ -13,17 +13,22 @@ The owner does not want a wall of text; they want two visual prototypes,
 before and after. When the change is not visible on screen, they want a
 conceptual diagram of how the process, code or components change.
 
-The visual delta lives in the ISSUE, at the prototype stage. The PR has no
-Before/After section and no separate visual-delta cards: a final screenshot
-from the E2E test is enough when a UI test runs. This was an explicit cost
-decision: separate visual-delta work on PRs became the single most expensive
-item of the factory's token spend, while the owner needs the pictures before
-implementation starts, not after.
+Where it lives is a project decision; follow the project conventions. The
+reference setup keeps it in the ISSUE, at the prototype stage: the PR has no
+Before/After section and no separate visual-delta cards, and a final
+screenshot from the E2E test is enough when a UI test runs. The owner moved
+it there for cost (separate visual-delta work on PRs became the single most
+expensive item of the token spend) and because the pictures are needed before
+implementation starts, not after. A project that keeps before/after in the
+PR applies the same format there.
+
+The visual delta is required only for UI-facing issues. A delta the owner
+cancelled for an issue is not requested or recreated again.
 
 ## Format
 
-- The body of every issue starts with `## Before / After`, FIRST, before any
-  other text. The section heading must be the first line of the body
+- The body of a UI-facing issue starts with `## Before / After`, FIRST,
+  before any other text. The section heading must be the first line of the body
   (machines allow only whitespace before it), so any `Refs #N` line goes
   after the details block.
 - **UI** (a real visible change on screen): a two-column table, Before and
@@ -31,8 +36,9 @@ implementation starts, not after.
   screen, After is the prototype of the desired one (a DOM edit of the live UI
   or a render of a mock-up). Mark the important places with outlines or
   captions. PNG files on the assets branch, raw links.
-- **Non-UI** (a bug, documentation, refactoring, a protocol change): a mermaid
-  diagram of the delta only (flowchart for a process, sequenceDiagram for a
+- **Non-UI** (a bug, documentation, refactoring, a protocol change): no
+  section is required. When the author adds one, it is a mermaid diagram of
+  the delta only (flowchart for a process, sequenceDiagram for a
   protocol or calls, classes or components for structure). House style: TWO
   mermaid blocks, the first is the Before state, the second the After state;
   `classDef delta` on the changed nodes of the After diagram; 5 to 10 nodes,
@@ -51,7 +57,7 @@ implementation starts, not after.
 - Rendering text into a PNG to satisfy "two images differ" is forbidden. In
   one case an agent drew test output into a PNG and compared hashes to pass
   the check: that is fitting the evidence to a formal gate. No visible change
-  means a diagram, not images.
+  means no images (a diagram, if a delta is written at all).
 - A UI change that does not alter the runtime state of the screen (a link
   added to an existing note) needs no new shoot: the existing section stays
   the proof and the link is listed in the behaviour list.
@@ -149,7 +155,7 @@ Each of these cost a wasted run at least once.
 - **A workaround needed to capture a frame is a finding.** If you had to
   bypass a real bug of the head (for example nudge a field so a memoised
   callback is recreated), post a PR comment with a reproduction and create a
-  fix card; disclose the workaround in the caption. Never bake it silently
+  fix card (after checking that no live card already covers it); disclose the workaround in the caption. Never bake it silently
   into the steps.
 - **The head's stand needs the backend of its own tree;** a donor artifact
   from another branch of the same era does not guarantee the contract.

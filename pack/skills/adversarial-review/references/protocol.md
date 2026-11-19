@@ -104,33 +104,69 @@ signal answers at once:
     gh pr view <N> --json comments \
       --jq 'if any(.comments[]; .body | startswith("## Review verdict")) then "reviewed" else "not reviewed" end'
 
-## The reviewer card does not close before the verdict
+## One PR = one card: the review status closes only after the verdict
 
-A reviewer once closed a reviewer card as done without publishing the
-verdict. The idempotency key `reviewer-pr<N>-<head7>` deduplicates against any
-non-archived card, including done ones: a repeated create returned the same
-closed card, no new card was armed, and the PR waited a day without a verdict.
+The whole cycle of a PR lives on the one card that owns it. The executor
+calls `kanban_request_review` with an explicit reviewer; the dispatcher
+starts you on that card from the review status. There are no separate
+reviewer cards, pair cards, "What changes for you" cards or serial rework
+gates: an earlier scheme with such side cards produced duplicate reviews of
+one head and cards that stayed open for days after the PR moved on.
 
-Rule: the reviewer card closes ONLY after the verdict comment (with the head
-sha) is published on the PR. No verdict yet: the card stays open and its
-comment says what remains to check. The watchdog safeguard: it sees a done
-card for the head key without a verdict, raises "reviewer closed without a
-verdict" and arms a new card with key suffix `-r2`, `-r3`. A done without a
-verdict saves nothing.
+Rule: `kanban_complete` or `kanban_request_changes` comes ONLY after the
+verdict comment (with the head sha) is published on the PR. "Approved" in the
+card summary is invisible to the owner, who reads the PR thread: in one case a
+second round approved the new head only on the board while the thread still
+showed RETURN on the old head, and the PR looked unready. No verdict yet: the
+card stays in review and its comment says what remains to check.
+
+Waiting for a verdict on a head is a link or a wait, never a new review card.
+Someone else's result is not waited for inside your run either: publish,
+make the terminal call, exit.
+
+## No self-review: the reviewer must be named
+
+`kanban_request_review` without a reviewer leaves the card on its author, and
+the review run is then the author reviewing its own head. A PASS from the
+same profile that produced the head is not a review. Before reviewing, check
+the board's task runs: if the head's runs and your run share a profile,
+publish nothing and hand the card to the reviewer profile with the reason.
+The same check applies to an existing `## Review verdict` in the thread: all
+profiles share one app identity, so authorship is read from the task runs.
+
+## Claims about external state need an artifact link
+
+Any statement about state outside the run that produced it (known flake,
+tracked as a follow-up, duplicated in another PR, fixed, posted, merged) is a
+claim only with an artifact link: issue or PR number, card id, comment URL,
+sha. Reports have said "a known flake" for an issue that did not exist yet,
+and "duplicated in PR #N" when the PR contained no such change. No link: a
+finding. A link: open it, and if the claim is checkable by a live call
+(`gh pr view`, `gh run list`, `gh search issues`) check it in this session.
+
+## Minors are verified against the current artifacts
+
+A minor about text (the PR body says one commit, the list of own commits,
+a date) is checked against the CURRENT PR body and comments, not your memory
+of the previous round: the body may already have been updated after the
+verdict, and the real inaccuracy may sit elsewhere (a delivery comment, a
+parent PR's commit counted as own). Read the actual commit list and the
+publication dates before writing the minor.
 
 ## A verdict in someone else's card goes by PR number, without a URL
 
 The dispatcher's respawn guard checks only whether a fresh comment contains a
 PR URL, not who wrote it. A reviewer cross-posted a verdict with a PR comment
-URL into a ready rebase card that had never run, and the guard held that card
-for 100 ticks while slots were empty. Rule: in your own reviewer card a link
-is fine; in a card assigned to someone else, write "PR #N, CHANGES REQUESTED,
+URL into a ready card that had never run, and the guard held that card
+for 100 ticks while slots were empty. Rule: in the card you are reviewing a
+link is fine; in a card assigned to someone else, write "PR #N, CHANGES REQUESTED,
 verdict of <date>" without a URL.
 
 ## The `## Calibration` block
 
 The review layer (the board watchdog) does not count a verdict comment
-without a Calibration block and re-arms the card as if there were no verdict.
+without a Calibration block and sends the card back as if there were no
+verdict.
 The owner's formal reviews are exempt. The most recent verdict on the head
 decides.
 
@@ -161,7 +197,8 @@ The scope rule exists for cost: repeat reviews that redo the whole PR each
 time become the largest token expense of the factory. A repeat review covers
 ONLY the diff since the last reviewed head plus closure of earlier blockers.
 A full review only when the delta touches a new area or rewrites more than
-half the PR. The watchdog never arms two reviews on one head.
+half the PR. A head gets one review: never a second review run on the
+same sha.
 
 Checking closures is not review. Only the surface untouched since the last
 round is skipped: a new finding there gets a separate card and does not block
@@ -213,8 +250,10 @@ tests. A green run under an under-mutation does not mean weak coverage, it
 means the wrong mutation: reinvent it from the old version's semantics. The
 equal alternative: a red run of the new test on the base without the fix.
 
-**Prop and text tests.** A test that checks a prop or a text instead of
-behaviour is not verified by mutation.
+**Prop, text and class-name tests.** A test that checks a prop, a text, a
+class name or a markup string instead of behaviour is not verified by
+mutation: deleting the checked string turns it red, which proves only that
+the string exists.
 
 **Do not build the live artifact in parallel with mutation runs** in the same
 tree: the bundle can be built from the mutated source and the stand silently
@@ -249,7 +288,88 @@ exchanges, and the gap was filed as a separate issue past the verdict; a body
 promised "the same flow as the sidebar" and no live scenario checked it, so a
 single click with an empty field showed the promise broken. The second case
 happened on a FIRST review because the rule had lived only in the rebase
-section.
+section. In a third case the reviewer killed the fix-line mutant 3 of 3 and
+two body promises had no mutants at all: a prose Calibration line "every
+PR-body promise mapped" carried a false PASS. Fix-line mutation and promise
+mutation are different axes.
+
+### The promise table
+
+The pinning must be visible in the verdict and checkable by machine. A PASS
+carries a table, one row per promise of the PR body, WCFY and related
+comments:
+
+    | Promise | Mutant | Test | Result |
+    |---|---|---|---|
+    | cached content renders at once | drop the cache read on open | CacheOpen test #2 | killed RED |
+    | error is cached, Refresh retries | do not write the error payload | CacheOpen test #3 | survived -> BLOCKER |
+
+Rules:
+
+- Result is the actual colour of a mutant run on the exact head (killed RED,
+  or survived plus the test that should have failed). "covered", "N/A" and
+  an empty cell without a reason are not accepted. The result comes from a
+  run you did, not from retelling someone else's battery; carried-over
+  results are marked as such. One own killed mutant of the key promise is
+  more honest than a retold battery.
+- The gate finds the table by ONE header line that names both "promise" and
+  "mutant", anywhere in the comment: its position (inside or above
+  Calibration) does not matter. A PASS without such a line is not counted and
+  the card comes back. A prose line "every promise mapped" does not pass. For
+  a diff without production lines (workflow YAML, CI config), where mutation
+  is N/A and checks are probe based, name the column
+  `Mutant-equivalent probe`: a header like `| Promise | Probe | Evidence |`
+  is not counted. RETURN without a table is allowed: a return does not
+  accept the work, so the error is safe.
+- Survived is a blocker (RETURN) naming the surviving mutant.
+- **Killed by implementation does not count.** A mutant killed by a test that
+  reads the implementation (a class name, "the method was called", a markup
+  string) does not close a behaviour promise. Count it only when the test
+  observes behaviour: size, visibility, a response, state. In one case a
+  layout promise was "pinned" by an assertion that a CSS class stays on the
+  element; measured in a headless browser, the layout was identical with and
+  without the class at both widths. CSS promises ("never overflows", "does
+  not shift") are pinned by a browser measurement on the head, or rewritten
+  honestly as "defensive no-op, does not change behaviour".
+- **Both branches of a new condition.** A PR that turns unconditional
+  behaviour into conditional pins BOTH branches. A mutant on the true branch
+  (a state sync, a call order before the guard) that survives the full suite
+  is a blocker even when the suppressed branch is covered: such survivors
+  have reproduced exactly the regression the original fix addressed. A
+  one-off red under a mutant that does not reproduce is a flake, not a pin.
+- **Duplicate substrings mask deletion.** When the promised element and
+  another element on the page share substrings, a text query is satisfied by
+  both, and the mutant that removes the promised element survives a green
+  suite. Pin the element itself (a test id on the block) and mutate exactly
+  that block away.
+- **Re-issue as text.** If a verdict is not counted only because of its form
+  and the head has not moved, re-issue the text: mutants and the battery are
+  not run again. Before publishing, check the body against the gate itself
+  (import the gate's real matching function, do not reimplement it).
+
+## Async wait loops in tests
+
+A hand-written wait loop must also wait from an EMPTY initial state. The
+continue condition is "no result yet OR it is not the wanted one":
+
+    while ((sent.isEmpty() || !isWanted(last(sent))) && now < deadline) ...
+
+The form "a result exists AND it is not the wanted one" exits at once when
+the list starts empty (results arrive asynchronously), and the test fails in
+milliseconds instead of waiting seconds. A timeout exit ends in an assertion
+with a readable message, not a bare "expected not empty".
+
+Review procedure: (1) read the loop condition; (2) run the test 20-50 times
+on the head and read the DURATION of each run: milliseconds against a budget
+of seconds is the signature of "did not wait", and green repeats hide it;
+(3) a mutant of production code does NOT close this point: it changes the
+test's colour regardless of the loop's form, while the defect lives in the
+test. One such test passed mutation review and PR CI and then broke the
+integration branch after merge in 12 ms. A soak criterion ("N consecutive
+green CI runs") is itself a detector: an assertion right after a
+verify-with-timeout has no loop for an audit to find and is caught only by a
+series of runs. A red soak on an untouched sibling test is an unmet
+criterion, not noise.
 
 ## A third return on one finding is an escalation, not a fourth round
 
@@ -284,17 +404,20 @@ transitions.
 round history. Without this, boards grow a parallel machine of review and
 rework cards that eats a large share of machine time.
 
-## RETURN on a PR: a rework card only when no card is in the review cycle
+## RETURN on a PR: rework on the card that owns the PR
 
-First check the board and the PR's events. If the PR already has a live card
-in the review cycle, do NOT create a rework card: the verdict has reached the
-executor through request_changes. Creating a parallel card makes the same fix
-happen twice and get reviewed twice.
+First check the board and the PR's events. The PR's owner card is in the
+review cycle: RETURN goes through its `kanban_request_changes`, and the same
+executor does the rework, answers it in the PR and re-requests review with
+the reviewer named. A rebase of the PR is absorbed by that card too. Creating
+a parallel card makes the same fix happen twice and get reviewed twice.
 
 A rework card is needed only when the verdict lives only in a GitHub comment
-and no card is in the cycle. Without a card, RETURN stops the pipeline: root
-cards do not spawn themselves and nobody picks the verdict up. Even a
-mechanical fix is a card, not a comment.
+(for example the owner's review) and no live card owns the PR. Without a
+card, RETURN stops the pipeline: root cards do not spawn themselves and
+nobody picks the verdict up. Even a mechanical fix is a card, not a comment.
+Its key is the single convention `coder-pr<N>-rework-<head7>`: an invented
+spelling escapes deduplication and priority gates.
 
 | finding | to whom | example |
 |---|---|---|
@@ -330,7 +453,7 @@ is the base branch protection's required contexts:
 
 A red required check cancels PASS whatever the cause. "PASS on this PR's
 diff" with a red required job is not a PASS: machines read the verdict as an
-accept for the whole head and arm post-PASS work (WCFY, owner-ready signals)
+accept for the whole head and start post-PASS work (WCFY, owner-ready signals)
 for a head that is about to change. Wording on such a head: CHANGES REQUESTED
 with a link to the red job, or for a stack "Verdict: blocked by #N". The word
 PASS does not appear at all.
@@ -463,8 +586,16 @@ commits of a lower PR that had never been reviewed while the body said "part
 1 landed"; the stack-hygiene rule existed only in pr-deliverable, which the
 reviewer did not load.
 
+`mergeable_state=blocked` with `mergeable=true` on a stacked PR over an
+unmerged base is branch protection, not a conflict and not a reason to hold a
+re-issued verdict: only a moved head stops it.
+
 ## Reviewing a rebase: range-diff plus a mutation per conflict side
 
+0. Compare the start time of the head's CI run with base commits merged AFTER
+   it (`git log --format='%cI %s' <base-tip>` against the run's `createdAt`):
+   CI never tested the combination. File overlap is not enough: merge the
+   base tip into a worktree of the head locally and run the suite.
 1. `git range-diff <old-base>..<old-head> <new-base>..<new-head>`: identical
    commits are marked `=`, different ones `!`. Any `!` outside the conflict
    region is an extra. Compare the PR file lists old/new: the sets must match,
@@ -511,7 +642,14 @@ reviewer did not load.
 - a diff that models a third-party library's output: checked against the
   library's code, `Library contract` line and a run-produced fixture;
 - every blocker treated as closed has a mutation of its exact fix line;
-- every PR-body and WCFY promise has a pinning test proven by mutation;
+- every PR-body and WCFY promise has a row in the promise table (header line
+  names promise and mutant), killed by a test that observes behaviour;
+- a new async wait loop waits from an empty state; 20-50 repeats with
+  durations read;
+- every claim about external state carries an artifact link you opened;
+- minors checked against the current PR body and comments;
+- the review runs under the named reviewer, not the profile that produced
+  the head; the verdict is published before the card leaves review;
 - repeat review closed earlier findings and rechecked changed behaviour live;
 - PASS after CHANGES REQUESTED references a younger commit;
 - the verdict is on the branch head; no QA PASS over an open

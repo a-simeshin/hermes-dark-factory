@@ -8,7 +8,7 @@ behaviour.
 
 **Wait for CI with one blocking command, not a polling loop.** Why: a card spent its budget on nine identical `gh run list` calls and several sleeps after the real work was pushed. Apply: `gh run watch <id> --exit-status`; for the card author, "wait for green CI" is an expensive criterion: close with the push report and leave the run check to a cheap next step.
 
-**Retrigger a run with `workflow run`, never by closing and reopening a PR.** Why: after an amend and force-push no run appeared and a worker closed and reopened the PR, an outward action that notifies people and can confuse review state. Apply: check `gh api repos/<org>/<repo>/commits/<sha>/check-runs --jq .total_count`; then `gh workflow run <workflow> --ref <branch>` (if it has workflow_dispatch) or `gh run rerun <id> --failed`. A force-push after amend does not always emit a pull_request event.
+**Retrigger a run with `workflow run`, never by closing and reopening a PR.** Why: after an amend and force-push no run appeared and a worker closed and reopened the PR, an outward action that notifies people and can confuse review state. Apply: check `gh api repos/<org>/<repo>/commits/<sha>/check-runs --jq .total_count`; then `gh workflow run <workflow> --ref <branch>` (if it has workflow_dispatch) or `gh run rerun <id> --failed`. A force-push after amend does not always emit a pull_request event. Before any retrigger check `gh pr view <N> --json mergeable,mergeStateStatus`: a conflicting PR gets no merge ref and no run, and only merging the base fixes it. "A GitHub glitch" is not a diagnosis.
 
 **A debug line never prints a secret.** Why: a debug patch printed a whole access token at WARN; diagnostic lines reach PRs more often than expected. Apply: use a non-sensitive signal (length, hash, `identityHashCode` of the holder object); if the project logs no such values anywhere, adding the first is a separate decision.
 
@@ -37,3 +37,11 @@ behaviour.
 **INTENT: name three sources before changing behaviour.** Apply: write `INTENT: the code does <X>; the card or failing test expects <Y>; the spec says <Z>`, with Z filled only after opening the document. If they disagree, do not edit: the disagreement is the finding, report it on the card. Authority order: explicit owner instruction, spec, tests, current code; "make the tests pass" is not permission to edit the test instead of the code.
 
 **A test stub server must not serialise exchanges it is meant to run concurrently.** Why: an embedded HTTP server with a single dispatcher thread let a parked streaming request starve every following request, and a test passed vacuously because the checked path never ran. Apply: give test stubs a thread pool, and make a refutation probe really create the concurrency (check the stub's own logs that both exchanges reached their handlers).
+
+**A run cancelled by the concurrency group needs a full rerun.** Why: `gh run rerun --failed` after a concurrency cancel may restart only one of the cancelled jobs, leaving a partial result. Apply: cancel the partial attempt and run a full `gh run rerun <id>`.
+
+**A pending rerun on an outdated head blocks a fresh push.** Why: it holds the concurrency slot and cancels the run of the new push. Apply: cancel the old rerun and wait until it has finished before pushing or rerunning.
+
+**`--log-failed` is empty while a run is in progress.** Apply: read the live job log with `gh api repos/<owner>/<repo>/actions/jobs/<id>/logs`; a download failure before any test started marks a runner flake, not a test failure.
+
+**A local failure after a rebase is not the rebase's fault until the clean base is run.** Apply: run the same test on the clean base; the same failure there means a local environment problem, and CI is the arbiter.

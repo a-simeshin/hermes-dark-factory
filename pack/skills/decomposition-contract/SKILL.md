@@ -1,7 +1,7 @@
 ---
 name: decomposition-contract
 description: How to split a task into cards and hand the plan to review.
-version: 2.0.0
+version: 2.1.0
 author: maintainer, Hermes Agent
 license: MIT
 metadata:
@@ -63,9 +63,33 @@ checks itself.
 - the worker's iteration budget is finite: an "edit, slow run" loop is cut
   with headroom (two or three e2e tests or one module of edits per card).
   Retries without changing the card burn the budget in the same place;
+- one decomposition layer stays within ONE stack or one side (backend
+  separately from UI, each stack's backend separately when they differ):
+  a multi-stack layer pushes the coder into full verification of every
+  stack, which does not fit one run and is never verified locally as a whole;
 - triviality gate: one file, under 10 lines, no new behaviour, the place is
   known: one coder card without decomposition or plan review. Anything in
   doubt goes through the full cycle.
+
+## What is not decomposed, and from which verdict
+
+- **A delivered PR is not decomposed.** A card that already handed in a PR
+  does not go back to triage and is not split. Close it with the result
+  "PR <url>"; the remainder becomes a NEW card whose body is reconciled with
+  the PR (what is already in it, what is left). Why: a card that dropped into
+  triage after repeated blocks was auto-decomposed from its stale creation
+  body and the children redid work already sitting in the PR.
+- **A PR's rework starts from its LATEST verdict** (all reviewers, not only
+  the owner). Read the verdicts in order first: the branch head may have moved
+  past an older verdict and closed its blockers already; decomposing the old
+  one produces a duplicate chain.
+- **One child = one PR or one review blocker.** Rework normally stays on the
+  card that owns the PR. If a verdict is too big for one run, split it into a
+  chain (`kanban link` in order, never parallel) with one blocker per child;
+  every child's body names the push target "branch of PR <url>" and opens no
+  new PR.
+- **No card for an already delivered issue:** check for a merged PR that
+  references it (merged after the last scope change) before creating work.
 
 ## Attach the skill to the card, do not just mention it
 
@@ -96,9 +120,16 @@ gives the reviewer a new surface and repeats the cycle. Report line by line:
 ## Check
 
 - every child has acceptance criteria, a target branch and a Stack line;
-- rework: "branch of PR #N" as push target in every child, children chained;
+- rework: decomposed from the latest verdict, "branch of PR <url>" as push
+  target in every child, one blocker per child, children chained;
 - children are held back until the plan is accepted (dependency on the root,
-  see lessons.md) and linked to the root;
+  see lessons.md) and linked to the root; a child created with
+  `--initial-status blocked` is never promoted by the core when the root is
+  done, so nobody but you (or a watchdog that does it explicitly) releases it;
+- if the root closes on plan approval, every delivery-time duty of the root
+  (the "fix delivered" comment on the issue mirror after the merge, the
+  triage-label check) is written into the body of one child: by delivery
+  time the root is already closed;
 - the root is handed in with `kanban_request_review`, no separate review card;
 - every fact about the repository is backed by `file:line` or config;
 - the issue mirror's acceptance criteria are copied verbatim into the
@@ -110,4 +141,4 @@ gives the reviewer a new surface and repeats the cycle. Report line by line:
   gate for repeated gave_up
 - references/lessons.md: children inherit the mirror's acceptance criteria,
   the plan goes to the built-in review lane, repository facts are checked in
-  code, third-party APIs by their source
+  code, third-party APIs by their source, rework from the latest verdict

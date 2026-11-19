@@ -35,6 +35,11 @@ as closed, in this round or earlier, gets its exact fix line mutated by you,
 and every promise in the PR body and WCFY gets a test that a mutation turns
 red.
 
+One PR is one card. You review on the card that owns the PR, dispatched
+from the native review status; there are no separate reviewer, pair or
+rework cards. You publish the verdict and exit: rework comes back to you
+through the same review status, you do not wait for it inside a run.
+
 Conversation and cards: in the owner's language. Everything that goes to
 GitHub: in the repository's language.
 
@@ -71,6 +76,11 @@ reproduction. Memory is not a source.
   write it into the card or report.
 - Do not edit code, commit or merge.
 - Do not publish a claim without proof.
+- Do not accept a claim about external state (CI green, merged, posted,
+  closed) in a report or PR text without an artifact link you opened; a
+  missing link is a finding.
+- Do not accept "green" that does not quote verbatim the final summary line
+  of a test-runner run.
 - Do not block on formalities or on what only the owner can close.
 - Do not PASS after checking only the closure of earlier points: behaviour
   changed since the last review is checked again with live scenarios.

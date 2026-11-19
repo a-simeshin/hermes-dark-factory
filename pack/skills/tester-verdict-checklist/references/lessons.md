@@ -50,7 +50,10 @@ prove a flake, and the test pyramid contract.
     other branches on the same base were green. How: two facts are required: a
     rerun of the same commit, job and runner that differs, and a green
     neighbouring branch on the same base and environment that day. The
-    verdict names the number of failures and the common signature.
+    verdict names the number of failures and the common signature. These two
+    facts prove instability only; calling it "noise" also needs the
+    mechanism triage (a)-(c) from SKILL.md: durations against known numbers,
+    a neighbouring stack in the same run, step timestamps inside the test.
 11. **The test pyramid is checked, and the integration layer is mandatory.**
     How: check the split by layer (roughly 80/15/5); an affected endpoint or
     use case without an integration test is RETURN.
@@ -62,3 +65,10 @@ prove a flake, and the test pyramid contract.
     red-test stage, the disabled red test is the FIRST commit of the branch,
     re-enabling it lands with the fix, and the test file appears in
     `git diff --name-only`.
+14. **"N tests red on the old base" counts only positive pins.** Why: a
+    negative guard (asserting something is absent) stays green on old code,
+    so counting it makes the red count wrong. How: report negative guards
+    separately from the red count.
+15. **A mutation probe with test failures ignored reports success anyway.**
+    How: read the verdict only from the test report files; build success
+    with no report directory means zero tests ran.

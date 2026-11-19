@@ -62,6 +62,10 @@ As soon as a commit is pushed to the PR branch, the NEXT action is the handoff:
   loop, cheaper and without extra cards;
 - no review needed: `kanban_complete` (or `kanban_block` if stuck).
 
+One PR is one card: review, rework after a reject (with a rework response in
+the PR and a fresh review request) and a needed rebase all happen on the card
+that owns the PR. There are no separate reviewer, rework or rebase cards.
+
 Not after finishing the report, not after a final run for a nicer number, not
 after cleaning branches. On one board, successful runs averaged 14 minutes
 while runs marked timed_out averaged 32: in those runs the work was usually
@@ -137,17 +141,36 @@ URL stays in the PR and on your own card.
 ## Do not burn the budget on waiting and full builds
 
 - Wait for an event, not for the clock: `sleep N` longer than 30 s is not a
-  way to wait. CI: `gh run watch <id> --exit-status` or `gh pr checks <N>
-  --watch` (they return as soon as CI finishes); a build or a stand: a polling
-  loop on a condition from real output (a success line or exit code) with an
-  overall timeout, for example
+  way to wait. A build or a stand: a polling loop on a condition from real
+  output (a success line or exit code) with an overall timeout, for example
   `for i in $(seq 1 40); do grep -q '<success line>' log && break; sleep 15; done`.
   Blind sleeps are best caught by a nightly audit of tool calls in the
   profiles' state databases (one such audit counted 154 blind sleeps, 9.5
   hours, in three days).
 - `gh pr checks --watch` inside a card is waiting, not work; on short cards it
   burned a quarter of the runtime limit. Check CI with a single `gh pr checks
-  <N>` snapshot before the handoff; waiting for green belongs to the next run.
+  <N>` snapshot before the handoff; waiting for green belongs to the next run,
+  reached by `kanban schedule` with `SCHEDULED_UNTIL=<ISO8601 UTC>` at the CI
+  ETA. The same holds for every role: a run starts reruns, comments what was
+  started and where the result will be, and exits; the next run reads
+  `gh run list` and reports the delta.
+- When the card must see CI finish before closing (a final complete on a run
+  already in progress), use a background exit-code poller, not a piped
+  `--watch`: piped stdout is buffered and lost, and completion notifications
+  are unavailable in kanban and cron sessions. Start in the background a loop
+  that runs `gh pr checks <N> >/dev/null 2>&1; rc=$?` every 30-60 s and
+  appends a tick line with rc to `$TMPDIR/ci-<N>.log`: rc 0 is green, 8 is
+  pending, anything else is a failure. Right after a push rc 1 usually means
+  "no checks reported" (the first workflow has not appeared yet), not a
+  failure: check the line in the log and keep looping. Read the result with
+  one `process_manage` wait (windows are capped at a few minutes, repeat) or
+  by tailing the file. One such poller waited out a 20-minute CI with no
+  blind sleeps.
+- No CI run appeared after a push: first `gh pr view <N> --json
+  mergeable,mergeStateStatus`. On CONFLICTING GitHub builds no merge ref and
+  no pull_request workflow starts at all; an empty retrigger commit or
+  close/reopen will not help, only merging the base or a rebase does. Do not
+  diagnose "GitHub glitch" without this check (full order: pr-deliverable).
 - Background build: one process_manage with a long wait, not polling every
   few minutes. In the incident behind this rule a session hit three
   process_manage timeouts in a row waiting for the final verification and died
@@ -164,8 +187,9 @@ URL stays in the PR and on your own card.
   a module filter is combined with a test filter, configure the runner so that
   modules without matching tests do not fail.
 - Build on the spot: during the card only the touched module and the needed
-  tests; one full build (the phase CI runs) right before the push, CI does the
-  rest. A second full build in a row without code changes is forbidden. One
+  tests, format and lint; the full build of every stack is CI's job after the
+  push, its result collected by the next run. Exception: changes to the build
+  or CI configuration get one full build right before the push. A second full build in a row without code changes is forbidden. One
   background build per worker: on a small VPS parallel builds fight each
   other. A shared lock on full builds turned out not to pay off (cross-profile
   overlap was minutes); measure before adding one.

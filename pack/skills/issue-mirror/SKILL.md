@@ -1,7 +1,7 @@
 ---
 name: issue-mirror
 description: "A card's issue mirror: the gate, the content, the closing."
-version: 1.0.0
+version: 1.1.0
 author: maintainer, Hermes Agent
 license: MIT
 metadata:
@@ -23,6 +23,22 @@ references/lessons.md.
 ## When to use
 
 Before decompose, when creating a product card, when closing a chain.
+
+## No card for an already delivered issue
+
+Before creating an executor card for an open issue (by hand, from a webhook
+or from a polling job), check that the work is not delivered already:
+
+- a merged PR references the issue and was merged AFTER the last scope change
+  of the issue (creation, label changes, renames; milestone moves and
+  comments are not scope changes); or
+- a done executor card whose text links a merged PR (done alone is not
+  coverage).
+
+Delivered: no card. A release chore left open on purpose until the tag stays
+silent; any other delivered issue gets a question to the owner ("what is left
+on #N?") instead of a card. Why: one open issue with a merged PR received
+three duplicate executor cards within twenty minutes.
 
 ## Gate before decompose
 
@@ -54,7 +70,9 @@ code:
 - one line "what changes for the user" in product words.
 
 An empty promise ("will be fixed") is a defect: either the proof is there or
-the issue says why it cannot be obtained before implementation.
+the issue says why it cannot be obtained before implementation. A promised
+follow-up always names its issue or card number; an untracked "will follow
+up" is a defect too.
 
 ### The Before / After section comes first
 
@@ -101,6 +119,24 @@ below, so it can close an issue too early. Live with it like this:
 - if the script closed an issue too early while criteria are unmet: reopen
   it, uncheck the unmet criteria, and comment why it was reopened.
 
+## Promises of work on an end-of-life line
+
+When the owner declares a release line end-of-life, promises of work on it
+are removed from text as well as from plans:
+
+- PR bodies and issue acceptance criteria do not promise twin PRs for that
+  line, "both halves" or "both release lines";
+- at the first touch of an older PR or issue (rework, rebase, review) such a
+  section is deleted or marked "dropped: <line> end-of-life";
+- an issue whose criteria mention both lines gets a scope comment ("scope:
+  <live line> only") before it can be closed;
+- a reviewer blocks a PR that still carries such a promise, even when the
+  code is correct.
+
+Why: a "twin plan" section written before the end-of-life decision survived
+two passing reviews and reached the merge, promising work that no longer
+existed.
+
 ## Check
 
 - the issue body starts with `## Before / After` (UI: a table of two
@@ -111,7 +147,15 @@ below, so it can close an issue too early. Live with it like this:
 - the awaiting-triage label was removed at decompose;
 - before closing: every acceptance criterion is met and proven, the board
   has no live cards for it, the last comment does not contradict closing, and
-  the closing comment lists the PRs and links to the proof.
+  the closing comment lists the PRs and links to the proof;
+- the issue carries no promise of work on an end-of-life line;
+- after closing: live links of the issue's chain are retired. If your setup
+  has a watchdog that archives chain links anchored to a closed issue, do not
+  duplicate it by hand; a follow-up anchored to another OPEN issue survives;
+- closing as a duplicate ("Duplicate of #N", N open) does not kill the
+  chain: its cards are re-anchored to the original (titles and `Issue:`
+  lines rewritten). Do not archive that chain by hand, and do not write
+  "rewired" in a comment until the card fields actually changed.
 
 ## References (read on demand)
 

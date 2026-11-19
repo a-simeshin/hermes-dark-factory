@@ -1,7 +1,7 @@
 ---
 name: pr-deliverable
 description: What a PR must contain for the work to count as delivered.
-version: 2.0.0
+version: 2.1.0
 author: maintainer, Hermes Agent
 license: MIT
 metadata:
@@ -12,15 +12,12 @@ metadata:
 
 # Delivering work in a PR
 
-This skill defines how an agent delivers work: the git and PR protocol, how
-to keep gh output small, the single "What changes for you" comment, the rule
-that only the merge is left to the owner, why every delivery text must equal
-the facts, the proof required for each closed blocker, screenshots, merge
-conditions and what to do when a PR has no CI runs. The result lives in the
-PR, not in chat and not in the card. The full protocol with precedents is in
+How an agent delivers work. The result lives in the PR, not in chat and not
+in the card. One PR is
+owned by one card: that card delivers, goes through review, takes the rework
+and absorbs any rebase. The full protocol with precedents is in
 references/protocol.md; distilled lessons in references/lessons.md; the
-visual delta (which lives in the issue, not the PR) in
-references/visual-delta.md.
+visual delta in references/visual-delta.md.
 
 ## When to use
 
@@ -39,20 +36,23 @@ that has a PR.
 - `gh pr update-branch` cannot resolve conflicts (422): merge locally and
   resolve. An automatic merge can combine signatures from both sides and keep
   a test that pins the old semantics; re-pin the test to the merged semantics.
-  Verify before pushing.
+  Before pushing run the targeted tests of the changed modules plus format
+  and lint; the full verify runs in CI after the push.
 - Link to the issue: `Refs #N` when several PRs serve one issue, `Closes #N`
-  for a single PR (Closes closes the issue on the first merge). Prose like
-  "see #56" builds no link.
+  when the PR closes it (Closes closes the issue on the first merge). Prose
+  like "see #56" builds no link. `Refs` does NOT fill
+  `closingIssuesReferences` (only a closing keyword does); the machine-visible
+  link is the `cross-referenced` event in the issue timeline. An empty field
+  under `Refs` is not a missing link; never switch to `Closes` just to fill it.
+- `metadata.published_pr` on the card is the full PR URL, not a number.
 - If your gh wrapper cannot parse `-R owner/repo` and fails closed, `cd` into
   the repository checkout and run gh without `-R`/`--repo`.
 
 ## Keeping gh output small (budget rules)
 
-A bare `gh pr view N` (body plus all comments) was once the reviewer's
-single largest output cost. Rules:
-
 - always use gh with `--json <fields>` plus `--jq` to trim; never a bare
-  view;
+  `gh pr view N` (body plus all comments was once the reviewer's largest
+  output cost);
 - `git diff` / `git show`: `--stat` first, then only the needed files; write
   a full diff to a file and read the piece you need;
 - a PR or issue number in text comes only from a live `gh pr view N --json
@@ -60,10 +60,10 @@ single largest output cost. Rules:
 
 ## WCFY: one comment, after PASS, on the final head
 
-The `## What changes for you` (WCFY) comment is published ONCE, after the
-reviewer's PASS, on the final head; rounds of changes live in the PR body.
-Three parts: what changes for the user / how it is proven (screenshots,
-output, diff) / what was run (commands and numbers).
+The `## What changes for you` (WCFY) comment is published ONCE by the card
+that owns the PR, after the reviewer's PASS, on the final head; rounds of
+changes live in the PR body. Three parts: what changes for the user / how it
+is proven (screenshots, output, diff) / what was run (commands and numbers).
 
 - The head moved on: PATCH the old WCFY by its NUMERIC comment id (not the
   node id) and put the marker `outdated PATCH-<id>` before its heading, so
@@ -76,29 +76,50 @@ output, diff) / what was run (commands and numbers).
   publishing it is executing that decision; every earlier step of the recipe
   is verified by live commands first.
 
+## Rework: answer in the PR and re-request review
+
+Whoever pushes a new head after CHANGES REQUESTED or RETURN, whichever card
+carried the work, must:
+
+- post a rework response in the PR: one answer per BLOCK item of the verdict
+  (what was done, the commit, the mutation or red run that proves it);
+- request review again with `kanban_request_review` naming the reviewer
+  explicitly (without a reviewer the card is not reassigned and the author
+  reviews itself), then exit; the verdict is not awaited inside the run.
+
+Without the response the reviewer gets a bare new head and reviews blind.
+
 ## Only the merge is left to the owner
 
-Update-branch (422 means a local merge), waiting for required checks on the
-new head, `gh run rerun` for an infrastructure flake, a fresh WCFY and a
-repeat review of the new head are agent work. "Owner-only" is allowed in
-texts only for the merge or for decisions with no technical path (milestone,
-prototype acceptance, repository permissions).
+Update-branch or rebase (422 means a local merge), waiting for required
+checks on the new head, `gh run rerun` for an infrastructure flake, a fresh
+WCFY and a repeat review of the new head are agent work, done by the card
+that owns the PR (no separate rebase card). "Owner-only" is allowed in texts
+only for the merge or for decisions with no technical path (milestone,
+prototype acceptance, repository permissions). A card closed with "remaining:
+owner merge" keeps that signal until the PR is merged.
 
 ## Delivery texts equal the facts
 
 Before `kanban_request_review` and after ANY rework, reread ALL delivery
 texts against the current head's diff: PR body, WCFY, divergence registry
 entries, test names, commit messages. If no command can check a statement,
-do not write it. Edit a PR body with a JSON payload via `--input file.json`
-(`--field body=@file` sends multipart and fails); when editing byte for byte,
-do not carry the trailing `\n` from `--jq .body`.
+do not write it.
 
 - "Done" is written only when the artifact is exactly what was asked;
   otherwise "not done, I propose X".
+- "Green" means quoting verbatim the final summary line of your own run of
+  the test runner; no invented markers.
+- A follow-up promise ("tracked as a follow-up") references an existing
+  issue or card number on the same line; otherwise create it first.
 - An issue criterion is never rewritten: compare with its original wording.
 - "Before" for the user means the current integration branch, not an earlier
   head of the PR.
 - The owner's acceptance is quoted in the owner's words, not paraphrased.
+
+Edit a body or comment with PATCH and a JSON payload (`--input file.json`):
+`--field body=@file` fails as multipart, `-f body=@file` inserts the literal
+path. Do not carry the trailing `\n` from `--jq .body`.
 
 ## A mutation for every closed blocker
 
@@ -107,11 +128,14 @@ production line, with the new test red on the mutation and green on the fix;
 (2) a red run of the new test on the base before the fix. A prop or text
 test does not count; the reviewer repeats the mutation.
 
+- Behaviour cannot be proven (the measurement does not change)? Remove the
+  claim from the body, WCFY and registry instead of pinning a class name or
+  markup string: such a test pins a false promise.
 - Order: commit, mutate, run, `git checkout --` (on an uncommitted head the
   checkout reverts the fix, not the mutant).
-- Run the mutation battery in the background (`terminal(background=true)`)
-  with a log file: `execute_code` has a hard timeout and can leave a mutant
-  in the tree. After any interruption run `git status` first.
+- Run the battery in the background (`terminal(background=true)`) with a
+  log: `execute_code` times out and can leave a mutant in the tree; after any
+  interruption run `git status` first.
 - A surviving mutant with no killer is dead code: delete the line and shrink
   the matrix, or diagnose with a print (test stdout may go to the test report
   files, not the build log).
@@ -124,9 +148,9 @@ test does not count; the reviewer repeats the mutation.
   Telegram or the card alone do not count.
 - A selector fails: read the component source first (how the test id is
   really attached), then probe the DOM; the other order is a lottery.
-- The final screenshot of an E2E test is the test's artifact; no separate
-  Before/After shoot in the PR (the visual delta lives in the issue:
-  references/visual-delta.md).
+- The final screenshot of an E2E test is the test's artifact. Where the
+  project keeps the visual delta in the issue, the PR gets no separate
+  Before/After shoot (references/visual-delta.md).
 
 ## No drive-by edits
 
@@ -150,35 +174,43 @@ startswith("## Review verdict")) | {author: .author.login, createdAt:
 
 ## No runs on the PR
 
-A conflict with the base means the merge ref is not computed and GitHub
-creates NO run at all. Order: `gh pr view --json mergeable,mergeStateStatus`,
-then check suites for the SHA (0 means no event), then `actions/runs` (are
-other branches running?). A rerun only restarts an existing run; a 403 on
-rerun means degraded permissions: tell the owner.
+"No CI run after a push" STARTS with `gh pr view <N> --json
+mergeable,mergeStateStatus`; "a GitHub glitch" is not a diagnosis without
+that check. A conflict with the base means the merge ref is not computed and
+GitHub creates NO run at all; the API may report a stale MERGEABLE until a
+new head is pushed. Then check suites for the SHA (0 means no event), then
+`actions/runs` (are other branches running?). An empty commit or close/reopen
+does not help; only a local merge of the base or a rebase does. A rerun only
+restarts an existing run; a 403 on rerun means degraded permissions: tell the
+owner.
 
 ## Checklist before delivery
 
 - `gh pr view <N> --json baseRefName,files` matches the card (dozens of
   unrelated files mean the wrong base);
-- the issue body starts with `## Before / After`; the PR has no Before/After
-  section;
+- the visual delta is where the project keeps it (references/visual-delta.md);
 - WCFY: one, after PASS, on the final head, numbers from live commands;
 - every closed blocker has a mutation or a red run on the base attached;
+- after a rework: a rework response per BLOCK item and review re-requested
+  with the reviewer named;
 - tests that model a third-party library's output: a `Library contract:
   <artifact>:<version> <Class>#<method>` line in the body and a fixture from
   a real run;
 - CI green; the last verdict is a PASS younger than the last commit;
 - `Refs/Closes #N` checked by grepping the PR body, the number from a live
-  command; no board card ids in place of issues;
+  command; no board card ids in place of issues; every follow-up promise
+  carries a number;
+- `metadata.published_pr` is the full PR URL;
 - no drive-by edits;
 - self-check right after `gh pr create` (base, file count:
   `gh pr diff N --name-only | wc -l`).
 
 ## References (read on demand)
 
-- references/protocol.md: the full git and PR protocol, WCFY, merge and CI
-  rules with their reasoning
-- references/visual-delta.md: the visual delta in the issue (not in the PR)
+- references/protocol.md: the full git and PR protocol, WCFY, rework
+  response, merge and CI rules with their reasoning
+- references/visual-delta.md: the visual delta (Before / After for
+  UI-facing issues)
 - references/lessons.md: distilled lessons (prototype gate, noise in PRs,
   same-mechanism fixes, garbage input, library contracts, house-style
-  restoration, stack hygiene)
+  restoration, stack hygiene, rebase conflict handling)

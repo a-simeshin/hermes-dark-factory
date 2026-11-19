@@ -1,7 +1,7 @@
 ---
 name: debugging-discipline
 description: 'Order of investigating a breakage: experiment, log, screenshot, CI.'
-version: 2.0.0
+version: 2.1.0
 author: maintainer, Hermes Agent
 license: MIT
 metadata:
@@ -49,6 +49,17 @@ background: references/protocol.md, one-off techniques: references/lessons.md.
   DEBUG);
 - Hermes log timestamps (for example gateway.log) are the server's local
   time, not UTC: convert before declaring "the log was silent for N hours";
+- a failure cause is named only with evidence: list the candidates and for
+  each find the log or database record that proves it; an unconfirmed
+  candidate is dropped silently. Resetting a card's failure counter without a
+  found cause is FORBIDDEN (a reset on a plausible story was followed by
+  three new failures; the real cause was a skill id the worker could not
+  resolve);
+- the same failure signature on one card while its neighbours are healthy
+  in the same minutes points at that card's state (skills, claim, workspace,
+  bound session), not at the environment: read the card's fields in the
+  kanban database first. Kanban worker tracebacks are not in gateway.log but
+  in `profiles/<assignee>/logs/managed-worker.log`;
 - a `pgrep` check must not find itself: keep the pattern in a variable and
   filter out wrappers;
 - "green locally" means the phase CI runs with all its quality gates (static
@@ -61,6 +72,7 @@ background: references/protocol.md, one-off techniques: references/lessons.md.
 - on red CI, `gh run view <run-id> --log-failed` ran first;
 - the hypothesis was checked by a control experiment before editing, both
   conditions confirmed;
+- a named failure cause cites the log or database record that proves it;
 - the CI phase ran on the touched modules before the push.
 
 ## References (read on demand)

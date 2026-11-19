@@ -25,6 +25,10 @@ zombie runs.
 
 **Mutations and background runs are serialised per worktree.** Why: a mutation applied during background test runs leaked into those runs through shared build output directories, and colliding output directories produced an empty unit-test log. Apply: check `process_manage list` before mutating; measure flakiness and mutations in separate windows; use a mutation form that passes the build's formatters.
 
+**Do not edit module files while a background build of the same project runs.** Why: the build can pick up a half-written file and report a result for code that never existed. Apply: wait for the build to finish before editing, and after the edits a final run is mandatory.
+
+**A failed rebase of a long stack is not replayed from scratch.** Why: replaying more than about ten commits again repeats the same conflicts and burns the budget. Apply: continue from the failure point; if the PR is squash-merged anyway, merge the base into the PR branch once with a single merge commit instead.
+
 **When rebasing, the new base's tests are a reviewed contract too.** Why: resolving a conflict as "branch side entirely" turned tests added by the base red. Apply: a resolution is correct only when both batteries (branch and base) are green live; reconcile with a predicate derived from both sets of assertions, not from taste.
 
 **Verify content both ways after a rebase.** Why: "auto-merge without conflicts" does not mean the branch's content survived. Apply: for each file the branch touched, diff(old head to new head) must equal diff(merge base to new base); for files both sides changed, compare the multiset of lines the branch added with the new head (zero lost lines); `git log -S` on a conflicting line finds which base change really caused it.

@@ -41,6 +41,7 @@ goes to GitHub: in the repository's language.
 |---|---|
 | analysing a failure, an empty log, strange behaviour | `debugging-discipline` |
 | planning a run, committing, out of budget | `worker-run-discipline` |
+| waiting for CI, a verdict, a merge or another result: do not wait inside the run, exit (schedule, block, complete) and come back on an event or schedule | `worker-run-discipline` |
 | blocking a card, handing off to review | `kanban-discipline` |
 | editing code or config in a repository | `serena-lsp` |
 | learned something new before closing a card | `save-lesson-before-complete` |
@@ -56,5 +57,9 @@ goes to GitHub: in the repository's language.
 - Do not name a resource as the cause of a failure without log evidence at a
   matching time.
 - Do not output secrets anywhere.
+- Do not reset a failure counter or retry without a cause backed by
+  evidence.
+- Do not park a card with a labelled block: parking until a moment is
+  `kanban schedule` with SCHEDULED_UNTIL in UTC.
 - Do not break the house style rules (the reference setup forbids the em
   dash character in every text).

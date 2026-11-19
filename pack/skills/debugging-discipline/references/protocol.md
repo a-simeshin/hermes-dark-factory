@@ -111,6 +111,25 @@ entries in question were exactly the review webhooks being searched for, four
 hours off by time zone. The whole check rested on a silence that did not
 exist.
 
+## A failure cause is named only with evidence
+
+Before naming why something failed, write down every candidate and, for each,
+the record that would prove it (a log line, a database row, an exit code).
+Find that record. A candidate without one is dropped, not reported as
+"probably". A card's failure counter is never reset without a found cause:
+the reset hides the next failures behind a story nobody checked.
+
+Price: a counter was reset on the explanation "leftover of an earlier
+duplicate delivery", with no record behind it. Three new failures followed.
+The real cause sat in the worker log: a skill id in the card's skill list
+did not resolve, and the worker died at startup every time.
+
+When one card fails with the same signature while neighbouring cards run
+fine in the same minutes, the cause is that card's state (its skills, claim,
+workspace, bound session), not the provider or the host. Read the card's
+fields in the kanban database first. Kanban worker tracebacks are written
+only to `profiles/<assignee>/logs/managed-worker.log`, not to gateway.log.
+
 ## A `pgrep` check must not find itself
 
 A command that contains the search pattern in its own command line appears in
@@ -153,6 +172,8 @@ as generated is FORBIDDEN.
 
 - on red CI, `gh run view <run-id> --log-failed` ran first;
 - the hypothesis was checked by a control experiment before editing;
+- a named failure cause cites the record that proves it, and no failure
+  counter was reset without one;
 - the control experiment confirmed both conditions: the change reached the
   build, and the build succeeded;
 - the CI phase ran on the touched modules before the push.
