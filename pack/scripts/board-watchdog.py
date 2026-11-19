@@ -2396,7 +2396,7 @@ def _verdict_kind(body):
 
 
 def _latest_verdict(data, head, owner_any_head=True):
-    """The freshest valid verdict: dict(kind, at, body) or None.
+    """The freshest valid verdict: dict(kind, at, body, src) or None.
 
     Two verdict carriers compete by time: the formal GitHub review (the
     owner) and a comment with a '## ... review verdict' header (the
@@ -2432,7 +2432,7 @@ def _latest_verdict(data, head, owner_any_head=True):
         events.append((
             _iso_to_epoch(r.get("submittedAt")),
             "accept" if r.get("state") == "APPROVED" else "reject",
-            r.get("body") or ""))
+            r.get("body") or "", "owner"))
     for comment in reversed(data.get("comments") or []):
         body = (comment or {}).get("body") or ""
         if not _VERDICT_HEADER_RE.search(body):
@@ -2451,13 +2451,18 @@ def _latest_verdict(data, head, owner_any_head=True):
                 and _verdict_kind(body) == "accept" \
                 and not _calibration_has_promises_table(body):
             break
-        events.append((_iso_to_epoch(created), _verdict_kind(body), body))
+        events.append((_iso_to_epoch(created), _verdict_kind(body), body,
+                       "reviewer"))
         break
     if not events:
         return None
     events.sort(key=lambda e: (e[0] is not None, e[0] or 0))
+    # src names the verdict carrier (owner: formal review; reviewer: a
+    # verdict comment of the reviewer agent). Native-or-live receipts and
+    # handoff comments must name it correctly: a reviewer verdict was once
+    # signed as "the owner's verdict".
     return {"kind": events[-1][1], "at": events[-1][0],
-            "body": events[-1][2]}
+            "body": events[-1][2], "src": events[-1][3]}
 
 
 def _head_reject_first_at(data, head):
@@ -2918,7 +2923,8 @@ def cr_rework_gaps(states, live, pilot_numbers=()):
     return gaps
 
 
-def milestone_pr_orphans(states, live, admit, pilot_numbers=()):
+def milestone_pr_orphans(states, live, admit, pilot_numbers=(),
+                         owner_by_pr=None):
     """[number] of active-milestone PRs that have no card.
 
     A PR with admission (active milestone, approved issue, gen_admission),
@@ -2926,10 +2932,15 @@ def milestone_pr_orphans(states, live, admit, pilot_numbers=()):
     owner review. Such PRs stood green waiting for the owner while the board
     did not show them at all. The head must be at least REVIEW_ARM_MIN_AGE_S
     old: a freshly opened PR may not have its card yet.
+    A PR with a live owner card (owner_by_pr, live_cards_by_pr ranks 0-3)
+    is not an orphan: a decomposition card without the PR number in its
+    title is assigned work.
     """
     orphans = []
     for number in sorted(states):
         if number in pilot_numbers:
+            continue
+        if (owner_by_pr or {}).get(number):
             continue
         st = states[number]
         age = st.get("age")
@@ -2945,6 +2956,119 @@ def milestone_pr_orphans(states, live, admit, pilot_numbers=()):
             continue
         orphans.append(number)
     return orphans
+
+
+def _verdict_source_name(info):
+    """The CR verdict source as text for receipts and handoffs.
+
+    "the reviewer agent" (a verdict comment: the bot cannot formally review
+    a PR opened by the same App) or "the owner" (a formal review). An
+    unknown source is conservatively "the owner" (the former text).
+    """
+    return "the reviewer agent" if (info or {}).get("src") == "reviewer" \
+        else "the owner"
+
+
+def _sibling_pr_hygiene():
+    """pr-hygiene through the cycle guard convention (key hermes_sibling).
+
+    The PR owner lookup lives in pr-hygiene.live_cards_by_pr (the rebase
+    generator hands rebases to the owner through it); the watchdog takes
+    the same function instead of a second copy of the "one card = one PR"
+    rule.
+    """
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        "pr-hygiene.py")
+    key = "hermes_sibling:" + os.path.abspath(path)
+    mod = sys.modules.get(key)
+    if mod is not None and hasattr(mod, "live_cards_by_pr"):
+        return mod
+    if not os.path.exists(path):
+        return None
+    spec = _ilu.spec_from_file_location("pr_hygiene_wd", path)
+    mod = _ilu.module_from_spec(spec)
+    sys.modules[key] = mod
+    try:
+        spec.loader.exec_module(mod)
+    except Exception:
+        sys.modules.pop(key, None)
+        return None
+    return mod
+
+
+def _rework_owner_map(db, head_of, live):
+    """{PR: [(id, title, rank, key)]} of live cards that own a PR.
+
+    The CR rework arm saw only titles with #N and reviewer keys, missed the
+    decomposition owner card (rank 3, key coder-<issue>-<slug>) and created
+    a second card on a live PR while the owner was already pushing the fix.
+    Owners are found by pr-hygiene.live_cards_by_pr (the same function the
+    rebase generator uses): branch 0 > key 1 > title 2 > decomposition
+    owner 3. Service waits and context quotes do not count as owners. A
+    failing or missing sibling = no data = the arm behaves as before.
+    """
+    mod = _sibling_pr_hygiene()
+    if mod is None or not head_of:
+        return {}
+    old_db = getattr(mod, "BOARD_DB", None)
+    try:
+        if db:
+            mod.BOARD_DB = db
+        by_pr = mod.live_cards_by_pr(head_of) or {}
+    except Exception:
+        return {}
+    finally:
+        if old_db is not None:
+            mod.BOARD_DB = old_db
+    by_id = {t[0]: t for t in live}
+    out = {}
+    for number, cards in by_pr.items():
+        keep = []
+        for card in cards:
+            t = by_id.get(card[0])
+            if t is not None and (_is_service_wait_card(t[1], t[2])
+                                  or _is_context_cite_card(t[1], t[2])):
+                continue
+            keep.append((card[0], card[1], card[2], card[3]))
+        if keep:
+            out[number] = keep
+    return out
+
+
+def _rework_owner_handoff(owner_by_pr, number, head, info):
+    """(keeper_id, verdict source name) | None: a live owner retires the arm.
+
+    Keeper = the strongest carrier (lowest rank), on a tie the first by id:
+    deterministic between watchdog runs.
+    """
+    owners = (owner_by_pr or {}).get(number) or []
+    if not owners:
+        return None
+    keeper = min(owners, key=lambda c: (c[2], c[0] or ""))
+    return keeper[0], _verdict_source_name(info)
+
+
+def _card_commented(db, task_id, marker):
+    """True: the card already has a comment carrying the marker.
+
+    Makes handoff comments idempotent: the watchdog runs every few minutes,
+    and without the marker the owner would get a reminder on every run
+    while the CR stands.
+    """
+    if not db or not os.path.exists(db):
+        return False
+    try:
+        con = sqlite3.connect("file:%s?mode=ro" % db, uri=True, timeout=10)
+        row = con.execute(
+            "SELECT 1 FROM task_comments WHERE task_id = ? AND body LIKE ?"
+            " LIMIT 1", (task_id, "%" + marker + "%")).fetchone()
+        con.close()
+    except sqlite3.Error:
+        return False
+    return row is not None
+
+
+OWNER_REWORK_MARKER = "owner-rework"
 
 
 def _rework_arm_card(slug, number, head, info, key=None, rearm_of=None,
@@ -4523,6 +4647,10 @@ def review_layer_check(slug):
     # for a draft; here we retire cards that already exist, because the
     # owner can turn a PR into a draft after it was armed.
     draft_numbers = {p["number"] for p in parsed if p.get("isDraft")}
+    # Head branches for the PR owner lookup (live_cards_by_pr: carriers of
+    # rank 0 and 3 are tied to the branch).
+    head_of = {p["number"]: p.get("headRefName") or ""
+               for p in parsed if not p.get("isDraft")}
     db = os.path.join(BOARDS, slug, "kanban.db")
     if not os.path.exists(db):
         return []
@@ -4648,6 +4776,10 @@ def review_layer_check(slug):
                     % (gk[0], gk[1] or "-", t[0], keeper))))
     con.close()
 
+    # Live PR owners in one query (the same live_cards_by_pr the rebase
+    # generator uses).
+    owner_by_pr = _rework_owner_map(db, head_of, live)
+
     states = {}   # number -> review state (cache for both check phases)
     for number in numbers:
         state = _pr_review_state(repo, number)
@@ -4680,6 +4812,31 @@ def review_layer_check(slug):
         # the slots were taken by work of the next milestone.
         if not cr_rework_gaps({number: st}, live):
             continue
+        # A live card that owns the PR (ranks 0-3) retires the arm: the
+        # owner does the rework, no second card is created ("one PR = one
+        # card"). Handoff by a comment, once per head (marker).
+        handoff = _rework_owner_handoff(owner_by_pr, number, head, info)
+        if handoff:
+            keeper, src_name = handoff
+            marker = "%s:%s" % (OWNER_REWORK_MARKER, head[:7])
+            if not _card_commented(db, keeper, marker):
+                run([HERMES, "kanban", "--board", slug, "comment", keeper,
+                     "Watchdog: a CR verdict (source: %s) on head %s of"
+                     " PR #%d, and this card owns the PR (rule \"one PR ="
+                     " one card\"): this card does the rework, the"
+                     " watchdog does not create a duplicate card. Close the"
+                     " verdict blockers, write a rework response to every"
+                     " BLOCK item, then kanban_request_review with"
+                     " reviewer=reviewer. The marker %s silences repeated"
+                     " reminders on this head."
+                     % (src_name, head[:7], number, marker)], timeout=90)
+            findings.append((
+                "%s:revlayer:rework-owner:%d:%s" % (slug, number,
+                                                    head[:7]), 1,
+                ("    PR #%d %s CR verdict (%s) with a live owner %s: no"
+                 " rework card created, handoff sent to the owner."
+                 % (number, head[:7], src_name, keeper))))
+            continue
         base = "coder-pr%d-rework-%s" % (number, head[:7])
         fam_state, key, rearm_of = _family_arm_key(base, live, done_keyed)
         if fam_state == "live":
@@ -4703,9 +4860,10 @@ def review_layer_check(slug):
             native_checked=[
                 board_native_guard.NATIVE_VERDICT,
                 board_native_guard.NATIVE_REVIEW_LANE],
-            why="an owner change-request verdict on a head without a"
-                " rework card: there is no stock mechanism for rework on an"
-                " owner verdict (the CR rework arm)")
+            why="a change-request verdict of %s on a head without a"
+                " rework card: there is no stock mechanism for rework on"
+                " such a verdict (the CR rework arm)"
+                % _verdict_source_name(info))
         if covered:
             findings.append((
                 "%s:revlayer:50b-rework:%d:%s" % (slug, number,
@@ -4730,7 +4888,8 @@ def review_layer_check(slug):
     # board, and while the band of the active milestone is empty the
     # dispatcher fills the slots with lower-band work of the next one.
     for number in milestone_pr_orphans(
-            states, live, lambda n: gen_admission(slug, n)[0]):
+            states, live, lambda n: gen_admission(slug, n)[0],
+            owner_by_pr=owner_by_pr):
         findings.append((
             "%s:r36:ms-orphan:%d" % (slug, number), 2, (
             "    PR #%d of the active milestone has no live card and no "

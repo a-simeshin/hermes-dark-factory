@@ -1780,7 +1780,7 @@ def rework_card_priority(number):
     return band
 
 def create_rework_card(number, url, head40, verdict_ts):
-    """Rework card for an owner verdict: one card per verdict.
+    """Rework card for a reviewer verdict: one card per verdict.
 
     Key coder-pr<N>-rework-<head7>: the verdict is tied to the PR head, and
     there are no commits after the verdict, so the verdict head is the
@@ -1794,14 +1794,17 @@ def create_rework_card(number, url, head40, verdict_ts):
     if not str(head40 or "").strip():
         return False, "rework_key: the PR head is unknown, card not created"
     key = board_native_guard.rework_key(number, head40)
+    # pr_activity reads only verdict comments (the bot cannot formally
+    # review its own PR), so the source is always the reviewer agent; the
+    # native-or-live receipt must name it, not "the owner".
     covered, guard = board_native_guard.native_or_live(
         key,
         live_keys=_live_keys(),
         native_checked=[board_native_guard.NATIVE_VERDICT,
                         board_native_guard.NATIVE_REVIEW_LANE],
-        why="owner verdict CHANGES REQUESTED %s ago without an author "
-        "answer: Hermes has no native rework on an owner verdict (a pack "
-        "generator)" % (
+        why="reviewer agent verdict CHANGES REQUESTED %s ago without an"
+        " author answer: Hermes has no native rework on a reviewer verdict"
+        " (a pack generator)" % (
             ("%.0f h" % (effective_age_s(verdict_ts, time.time()) / 3600)
              if verdict_ts else "long")))
     if covered:
@@ -1810,10 +1813,10 @@ def create_rework_card(number, url, head40, verdict_ts):
     age_v = ("%.0f h" % (effective_age_s(verdict_ts, now) / 3600)
              if verdict_ts else "unknown")
     head7 = (head40 or "")[:7]
-    title = "[coder] PR #%d rework per owner verdict (head %s)" % (
+    title = "[coder] PR #%d rework per reviewer verdict (head %s)" % (
         number, head7)
     body = "\n".join([
-        "PR #%d: the last owner verdict CHANGES REQUESTED was %s ago, and"
+        "PR #%d: the last reviewer verdict CHANGES REQUESTED was %s ago, and"
         " the author has not answered since." % (number, age_v),
         "",
         url,
@@ -1845,7 +1848,7 @@ def stale_scan(prs, by_pr=None, dry_run=False):
     Candidate: updatedAt older than 48 h (a raw, wide filter). Then:
     - a live card for the PR exists ("one card = one PR" rule) -> work is
       assigned, no triage needed;
-    - the last owner verdict is CHANGES REQUESTED with no author answer ->
+    - the last reviewer verdict is CHANGES REQUESTED with no author answer ->
       a coder rework card p80 (one card per verdict);
     - otherwise -> an architect triage card p20 (finish, close or merge).
 
@@ -1898,7 +1901,7 @@ def stale_scan(prs, by_pr=None, dry_run=False):
             verdict_state == "rejected"
             and verdict_ts is not None
             and (commit_ts is None or commit_ts <= verdict_ts))
-        reason = ("rework for an owner verdict with no answer"
+        reason = ("rework for a reviewer verdict with no answer"
                   if verdict_no_answer else
                   "no card and no verdict: architect triage")
         text = ("  NO MOVEMENT > %d h (owner stop subtracted): #%d, %s"
