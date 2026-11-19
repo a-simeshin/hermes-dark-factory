@@ -82,16 +82,16 @@ sequenceDiagram
     participant O as owner
     participant W as webhook (default profile)
     C->>GH: push branch as bot account, open PR (Closes #issue)
+    C->>GH: "What changes for you" comment on the head under review
     C->>R: kanban_request_review on the owner card (reviewer named)
     R->>GH: "## Review verdict" comment on head sha (PASS or blocking findings)
     alt blocking findings
         R->>C: kanban_request_changes, rework on the same card and branch
-        C->>GH: push fix
+        C->>GH: push fix, refresh "What changes for you"
         C->>R: kanban_request_review again, new head
     end
     T->>GH: QA verdict with evidence, where the plan has a QA step
-    C->>GH: "What changes for you" comment on the reviewed head
-    C-->>C: complete with "remaining: owner merge"
+    R-->>C: approval closes the owner card ("remaining: owner merge")
     O->>GH: formal review: APPROVED or CHANGES_REQUESTED
     GH-->>W: pull_request_review / issue_comment (owner only)
     W->>C: one card for the new cycle (deduplicated by PR + head)

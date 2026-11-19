@@ -4,6 +4,19 @@ An extension pack for [Hermes Agent](https://hermes-agent.nousresearch.com/) (v0
 
 The pack contains only what sits on top of Hermes. Hermes itself is installed and upgraded upstream and is never patched.
 
+## How it works
+
+![From an idea to a merged pull request: the owner, the Telegram gateway, GitHub, the kanban board and the agent profiles across six stages](docs/assets/factory-flow.svg)
+
+| Stage | Who is responsible | What happens |
+|---|---|---|
+| 1. Intake | Owner, Telegram gateway (`default` profile), GitHub | The owner writes an idea or a bug to the bot in Telegram. The front desk turns the message into a triage card and mirrors it to a GitHub issue (`issue-mirror` skill). The owner can also file the issue directly, and scheduled agent jobs file issues that wait for the owner's triage. |
+| 2. Admission | GitHub milestone, board scripts and plugins | Putting an issue into the active milestone is the owner's approval. The issue executor poll gives an approved issue exactly one executor card, the admission gate parks work nobody approved, and the admission plugin stops the dispatcher from claiming it in between. Priority comes from the milestone band; the dispatcher claims ready cards in priority order and pauses during the provider's peak window if configured. |
+| 3. Plan | `architect` | Large work is decomposed into self-contained child cards, each owning one pull request. A large or critical plan goes to the `reviewer` through the native review lane before any child runs. |
+| 4. Build | `coder` | The card works in its own worktree, pushes a branch as the bot account and opens the pull request. Before asking for review it posts a "What changes for you" comment: what the user of the product will notice. One PR = one card: rework and rebases happen on this same card. |
+| 5. Review | `reviewer`, `tester`, GitHub | The reviewer tries to refute the work and posts `## Review verdict` on the exact head; changes requested send the work back to the same card. Where the plan has a QA step, the tester verifies the real diff. CI must be green on that head. |
+| 6. Merge | Owner, watchdogs, Telegram gateway | The owner reviews and squash-merges; a formal review with changes reaches the card through the GitHub webhook. Watchdogs keep a signal on closed cards waiting for the merge, return runs whose worker died, and report through the gateway: hourly findings, quota alarms and an evening spend report. |
+
 ## What is inside
 
 | Path | Contents |

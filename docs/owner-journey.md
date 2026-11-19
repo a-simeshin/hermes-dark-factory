@@ -41,10 +41,10 @@ Once a card is `ready`, the dispatcher gives it to a worker of the right role, a
 flowchart LR
   I[Approved issue or chat request] --> D[Architect decomposes]
   D --> C[Owner card: branch, commits, PR]
-  C --> R[Review lane: adversarial review, verdict on the PR]
+  C --> W[Same card: 'What changes for you' comment]
+  W --> R[Review lane: adversarial review, verdict on the PR]
   R -- changes requested --> C
-  R -- approved --> W[Same card: 'What changes for you' comment]
-  W --> K[Card closes: remaining owner merge]
+  R -- approved --> K[Card closes: remaining owner merge]
   K --> O[Owner review]
   O -- changes requested --> RW[One card for the new cycle]
   RW --> R
