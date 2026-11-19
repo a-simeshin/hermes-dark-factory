@@ -1,0 +1,281 @@
+<svg viewBox="0 0 1000 1340" width="1000" height="1340" xmlns="http://www.w3.org/2000/svg" font-family="Geist, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#4f5d75"/></marker>
+    <marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#eb6c36"/></marker>
+    <marker id="arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#2e5aa8"/></marker>
+    <style>
+      .mono { font-family: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+      .serif { font-family: 'Instrument Serif', Georgia, 'Times New Roman', serif; }
+      .stage { fill: #4f5d75; font-size: 12px; letter-spacing: 0.14em; }
+      .name { fill: #2d3142; font-size: 15px; font-weight: 600; }
+      .sub { fill: #4f5d75; font-size: 12px; }
+      .desc { fill: #2d3142; font-size: 12px; }
+      .tag { fill: #7a8399; font-size: 12px; letter-spacing: 0.06em; }
+      .lbl { fill: #4f5d75; font-size: 12px; letter-spacing: 0.06em; }
+      .lbl-accent { fill: #eb6c36; font-size: 12px; letter-spacing: 0.06em; }
+      .lbl-link { fill: #2e5aa8; font-size: 12px; letter-spacing: 0.06em; }
+      .leg { fill: #4f5d75; font-size: 12px; }
+      .cell { fill: #2d3142; font-size: 13px; }
+      .num { fill: #2d3142; font-size: 12px; font-weight: 600; }
+    </style>
+  </defs>
+
+  <rect width="100%" height="100%" fill="#f5f5f5"/>
+
+  <text x="40" y="36" class="mono stage">HERMES DARK FACTORY · GATES MAP 1 OF 2</text>
+  <text x="40" y="72" class="serif" fill="#2d3142" font-size="28">Gates around a card: creation, run, close, sweeps</text>
+  <rect x="40" y="112" width="136" height="28" rx="14" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+  <text x="108" y="130" class="mono num" text-anchor="middle">1 · CREATED</text>
+  <path d="M178 126 H194" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+  <rect x="196" y="112" width="136" height="28" rx="14" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+  <text x="264" y="130" class="mono num" text-anchor="middle">2 · RUN WORKS</text>
+  <path d="M334 126 H350" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+  <rect x="352" y="112" width="136" height="28" rx="14" fill="#f5f5f5" stroke="#7a8399" stroke-width="1" stroke-dasharray="4,3"/>
+  <text x="420" y="130" class="mono lbl" text-anchor="middle">3 · PUSH</text>
+  <path d="M490 126 H506" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+  <rect x="508" y="112" width="136" height="28" rx="14" fill="#f5f5f5" stroke="#7a8399" stroke-width="1" stroke-dasharray="4,3"/>
+  <text x="576" y="130" class="mono lbl" text-anchor="middle">4 · ON THE PR</text>
+  <path d="M646 126 H662" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+  <rect x="664" y="112" width="136" height="28" rx="14" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+  <text x="732" y="130" class="mono num" text-anchor="middle">5 · CLOSES</text>
+  <rect x="820" y="112" width="136" height="28" rx="14" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+  <text x="888" y="130" class="mono num" text-anchor="middle">6 · BOARD-WIDE</text>
+  <text x="40" y="176" class="mono stage">1 · WHEN A CARD IS CREATED</text>
+  <text x="960" y="176" class="leg" text-anchor="end">every generator, webhook prompt and poll</text>
+  <line x1="40" y1="186" x2="968" y2="186" stroke="rgba(45,49,66,0.16)" stroke-width="1"/>
+  <g class="node">
+    <rect x="40" y="200" width="220" height="112" rx="6" fill="#f5f5f5"/>
+    <rect x="40" y="200" width="220" height="112" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+    <text x="150" y="224" class="name" text-anchor="middle">Native-or-live receipt</text>
+    <text x="150" y="244" class="mono tag" text-anchor="middle">MODULE · EVERY GENERATOR</text>
+    <text x="150" y="264" class="desc" text-anchor="middle">native path or live card first,</text>
+    <text x="150" y="280" class="desc" text-anchor="middle">receipt in the card body</text>
+    <text x="150" y="300" class="mono sub" text-anchor="middle">board_native_guard.py</text>
+  </g>
+  <g class="node">
+    <rect x="276" y="200" width="220" height="112" rx="6" fill="#f5f5f5"/>
+    <rect x="276" y="200" width="220" height="112" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+    <text x="386" y="224" class="name" text-anchor="middle">Idempotency key</text>
+    <text x="386" y="244" class="mono tag" text-anchor="middle">GATE · HOURLY</text>
+    <text x="386" y="264" class="desc" text-anchor="middle">a retried tick creates nothing;</text>
+    <text x="386" y="280" class="desc" text-anchor="middle">one rework key per PR head</text>
+    <text x="386" y="300" class="mono sub" text-anchor="middle">board-watchdog.py</text>
+  </g>
+  <g class="node">
+    <rect x="512" y="200" width="220" height="112" rx="6" fill="#f5f5f5"/>
+    <rect x="512" y="200" width="220" height="112" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+    <text x="622" y="224" class="name" text-anchor="middle">Admission gate</text>
+    <text x="622" y="244" class="mono tag" text-anchor="middle">GATE · HOURLY</text>
+    <text x="622" y="264" class="desc" text-anchor="middle">work only on an issue or PR</text>
+    <text x="622" y="280" class="desc" text-anchor="middle">the owner approved; else park</text>
+    <text x="622" y="300" class="mono sub" text-anchor="middle">board-watchdog.py</text>
+  </g>
+  <g class="node">
+    <rect x="748" y="200" width="220" height="112" rx="6" fill="#f5f5f5"/>
+    <rect x="748" y="200" width="220" height="112" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+    <text x="858" y="224" class="name" text-anchor="middle">Admission claim guard</text>
+    <text x="858" y="244" class="mono tag" text-anchor="middle">PLUGIN · ON CLAIM</text>
+    <text x="858" y="264" class="desc" text-anchor="middle">same approval cache, right</text>
+    <text x="858" y="280" class="desc" text-anchor="middle">before a worker spawns</text>
+    <text x="858" y="300" class="mono sub" text-anchor="middle">kanban-admission-guard</text>
+  </g>
+  <g class="node">
+    <rect x="40" y="328" width="220" height="112" rx="6" fill="#f5f5f5"/>
+    <rect x="40" y="328" width="220" height="112" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+    <text x="150" y="352" class="name" text-anchor="middle">Plan review</text>
+    <text x="150" y="372" class="mono tag" text-anchor="middle">REVIEW LANE · DRAIN GATE</text>
+    <text x="150" y="392" class="desc" text-anchor="middle">more than 3 children or a</text>
+    <text x="150" y="408" class="desc" text-anchor="middle">critical area: review first</text>
+    <text x="150" y="428" class="mono sub" text-anchor="middle">plan-review-gate.py</text>
+  </g>
+  <g class="node">
+    <rect x="276" y="328" width="220" height="112" rx="6" fill="#f5f5f5"/>
+    <rect x="276" y="328" width="220" height="112" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+    <text x="386" y="352" class="name" text-anchor="middle">No card for delivered work</text>
+    <text x="386" y="372" class="mono tag" text-anchor="middle">POLL · EVERY 5 MIN</text>
+    <text x="386" y="392" class="desc" text-anchor="middle">merged PR after the last scope</text>
+    <text x="386" y="408" class="desc" text-anchor="middle">change: no executor card</text>
+    <text x="386" y="428" class="mono sub" text-anchor="middle">issue-executor-poll.py</text>
+  </g>
+  <g class="node">
+    <rect x="512" y="328" width="220" height="112" rx="6" fill="#f5f5f5"/>
+    <rect x="512" y="328" width="220" height="112" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+    <text x="622" y="352" class="name" text-anchor="middle">Milestone priority band</text>
+    <text x="622" y="372" class="mono tag" text-anchor="middle">MODULE · EVERY CREATE</text>
+    <text x="622" y="392" class="desc" text-anchor="middle">band from open milestones,</text>
+    <text x="622" y="408" class="desc" text-anchor="middle">never from memory</text>
+    <text x="622" y="428" class="mono sub" text-anchor="middle">milestone_bands.py</text>
+  </g>
+  <text x="40" y="484" class="mono stage">2 · WHILE A RUN WORKS</text>
+  <text x="960" y="484" class="leg" text-anchor="end">plugins on claim, watchdog every 10 min</text>
+  <line x1="40" y1="494" x2="968" y2="494" stroke="rgba(45,49,66,0.16)" stroke-width="1"/>
+  <g class="node">
+    <rect x="40" y="508" width="220" height="112" rx="6" fill="#f5f5f5"/>
+    <rect x="40" y="508" width="220" height="112" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+    <text x="150" y="532" class="name" text-anchor="middle">Do not do work twice</text>
+    <text x="150" y="552" class="mono tag" text-anchor="middle">SKILL · FIRST ACTION</text>
+    <text x="150" y="572" class="desc" text-anchor="middle">branch, open cards and PRs</text>
+    <text x="150" y="588" class="desc" text-anchor="middle">checked before the first edit</text>
+    <text x="150" y="608" class="mono sub" text-anchor="middle">no-duplicate-work</text>
+  </g>
+  <g class="node">
+    <rect x="276" y="508" width="220" height="112" rx="6" fill="#f5f5f5"/>
+    <rect x="276" y="508" width="220" height="112" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+    <text x="386" y="532" class="name" text-anchor="middle">Artifact guard</text>
+    <text x="386" y="552" class="mono tag" text-anchor="middle">PLUGIN · CLAIM/BLOCK/DONE</text>
+    <text x="386" y="572" class="desc" text-anchor="middle">uncommitted work: patch</text>
+    <text x="386" y="588" class="desc" text-anchor="middle">and a priority-95 card</text>
+    <text x="386" y="608" class="mono sub" text-anchor="middle">kanban-artifact-guard</text>
+  </g>
+  <g class="node">
+    <rect x="512" y="508" width="220" height="112" rx="6" fill="#f5f5f5"/>
+    <rect x="512" y="508" width="220" height="112" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+    <text x="622" y="532" class="name" text-anchor="middle">Review-loop guard</text>
+    <text x="622" y="552" class="mono tag" text-anchor="middle">PLUGIN · ON CLAIM</text>
+    <text x="622" y="572" class="desc" text-anchor="middle">third reviewer return:</text>
+    <text x="622" y="588" class="desc" text-anchor="middle">needs_input for the owner</text>
+    <text x="622" y="608" class="mono sub" text-anchor="middle">kanban-review-loop-guard</text>
+  </g>
+  <g class="node">
+    <rect x="748" y="508" width="220" height="112" rx="6" fill="#f5f5f5"/>
+    <rect x="748" y="508" width="220" height="112" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+    <text x="858" y="532" class="name" text-anchor="middle">Run signatures</text>
+    <text x="858" y="552" class="mono tag" text-anchor="middle">CRON · EVERY 10 MIN</text>
+    <text x="858" y="572" class="desc" text-anchor="middle">API silence, compression</text>
+    <text x="858" y="588" class="desc" text-anchor="middle">thrash, poll-only runs</text>
+    <text x="858" y="608" class="mono sub" text-anchor="middle">worker-api-watchdog.py</text>
+  </g>
+  <g class="node">
+    <rect x="40" y="636" width="220" height="112" rx="6" fill="#f5f5f5"/>
+    <rect x="40" y="636" width="220" height="112" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+    <text x="150" y="660" class="name" text-anchor="middle">Review signatures</text>
+    <text x="150" y="680" class="mono tag" text-anchor="middle">CRON · EVERY 10 MIN</text>
+    <text x="150" y="700" class="desc" text-anchor="middle">self-review, duplicate</text>
+    <text x="150" y="716" class="desc" text-anchor="middle">review of a head in review</text>
+    <text x="150" y="736" class="mono sub" text-anchor="middle">worker-api-watchdog.py</text>
+  </g>
+  <g class="node">
+    <rect x="276" y="636" width="220" height="112" rx="6" fill="#f5f5f5"/>
+    <rect x="276" y="636" width="220" height="112" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+    <text x="386" y="660" class="name" text-anchor="middle">Bounded stands</text>
+    <text x="386" y="680" class="mono tag" text-anchor="middle">WRAPPER · EVERY STAND</text>
+    <text x="386" y="700" class="desc" text-anchor="middle">owner tag and time-to-live</text>
+    <text x="386" y="716" class="desc" text-anchor="middle">for background processes</text>
+    <text x="386" y="736" class="mono sub" text-anchor="middle">run-bounded.sh</text>
+  </g>
+  <g class="node">
+    <rect x="512" y="636" width="220" height="112" rx="6" fill="#f5f5f5"/>
+    <rect x="512" y="636" width="220" height="112" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+    <text x="622" y="660" class="name" text-anchor="middle">disk-cleanup override</text>
+    <text x="622" y="680" class="mono tag" text-anchor="middle">PLUGIN · SESSION END</text>
+    <text x="622" y="700" class="desc" text-anchor="middle">never deletes the watchdog</text>
+    <text x="622" y="716" class="desc" text-anchor="middle">tests under scripts/</text>
+    <text x="622" y="736" class="mono sub" text-anchor="middle">pack/plugins/disk-cleanup</text>
+  </g>
+  <text x="40" y="792" class="mono stage">5 · WHEN A CARD CLOSES</text>
+  <text x="960" y="792" class="leg" text-anchor="end">hourly holds and the worker's last step</text>
+  <line x1="40" y1="802" x2="968" y2="802" stroke="rgba(45,49,66,0.16)" stroke-width="1"/>
+  <g class="node">
+    <rect x="40" y="816" width="220" height="112" rx="6" fill="#f5f5f5"/>
+    <rect x="40" y="816" width="220" height="112" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+    <text x="150" y="840" class="name" text-anchor="middle">Owner-merge hold</text>
+    <text x="150" y="860" class="mono tag" text-anchor="middle">GATE · HOURLY</text>
+    <text x="150" y="880" class="desc" text-anchor="middle">closed with an open PR: owner</text>
+    <text x="150" y="896" class="desc" text-anchor="middle">finding until the PR merges</text>
+    <text x="150" y="916" class="mono sub" text-anchor="middle">board-watchdog.py</text>
+  </g>
+  <g class="node">
+    <rect x="276" y="816" width="220" height="112" rx="6" fill="#f5f5f5"/>
+    <rect x="276" y="816" width="220" height="112" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+    <text x="386" y="840" class="name" text-anchor="middle">WCFY hold</text>
+    <text x="386" y="860" class="mono tag" text-anchor="middle">GATE · HOURLY</text>
+    <text x="386" y="880" class="desc" text-anchor="middle">accept verdict, no fresh WCFY:</text>
+    <text x="386" y="896" class="desc" text-anchor="middle">task card for the implementer</text>
+    <text x="386" y="916" class="mono sub" text-anchor="middle">board-watchdog.py</text>
+  </g>
+  <g class="node">
+    <rect x="512" y="816" width="220" height="112" rx="6" fill="#f5f5f5"/>
+    <rect x="512" y="816" width="220" height="112" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+    <text x="622" y="840" class="name" text-anchor="middle">Save the lesson</text>
+    <text x="622" y="860" class="mono tag" text-anchor="middle">SKILL · BEFORE COMPLETE</text>
+    <text x="622" y="880" class="desc" text-anchor="middle">lesson goes to the right</text>
+    <text x="622" y="896" class="desc" text-anchor="middle">knowledge layer, or nowhere</text>
+    <text x="622" y="916" class="mono sub" text-anchor="middle">save-lesson-before-complete</text>
+  </g>
+  <text x="40" y="972" class="mono stage">6 · BOARD-WIDE</text>
+  <text x="960" y="972" class="leg" text-anchor="end">scheduled sweeps, alerts only on problems</text>
+  <line x1="40" y1="982" x2="968" y2="982" stroke="rgba(45,49,66,0.16)" stroke-width="1"/>
+  <g class="node">
+    <rect x="40" y="996" width="220" height="112" rx="6" fill="#f5f5f5"/>
+    <rect x="40" y="996" width="220" height="112" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+    <text x="150" y="1020" class="name" text-anchor="middle">Board lint, stuck graph</text>
+    <text x="150" y="1040" class="mono tag" text-anchor="middle">CRON · HOURLY</text>
+    <text x="150" y="1060" class="desc" text-anchor="middle">no assignee, blocked roots,</text>
+    <text x="150" y="1076" class="desc" text-anchor="middle">dead or silent dispatcher</text>
+    <text x="150" y="1096" class="mono sub" text-anchor="middle">board-watchdog.py</text>
+  </g>
+  <g class="node">
+    <rect x="276" y="996" width="220" height="112" rx="6" fill="#f5f5f5"/>
+    <rect x="276" y="996" width="220" height="112" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+    <text x="386" y="1020" class="name" text-anchor="middle">Idle factory</text>
+    <text x="386" y="1040" class="mono tag" text-anchor="middle">CRON · HOURLY</text>
+    <text x="386" y="1060" class="desc" text-anchor="middle">no work taken for an hour</text>
+    <text x="386" y="1076" class="desc" text-anchor="middle">with a non-empty backlog</text>
+    <text x="386" y="1096" class="mono sub" text-anchor="middle">board-watchdog.py</text>
+  </g>
+  <g class="node">
+    <rect x="512" y="996" width="220" height="112" rx="6" fill="#f5f5f5"/>
+    <rect x="512" y="996" width="220" height="112" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+    <text x="622" y="1020" class="name" text-anchor="middle">Orphaned claims</text>
+    <text x="622" y="1040" class="mono tag" text-anchor="middle">CRON · EVERY 10 MIN</text>
+    <text x="622" y="1060" class="desc" text-anchor="middle">running card, worker gone,</text>
+    <text x="622" y="1076" class="desc" text-anchor="middle">stale heartbeat: reclaim</text>
+    <text x="622" y="1096" class="mono sub" text-anchor="middle">worker-api-watchdog.py</text>
+  </g>
+  <g class="node">
+    <rect x="748" y="996" width="220" height="112" rx="6" fill="#f5f5f5"/>
+    <rect x="748" y="996" width="220" height="112" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+    <text x="858" y="1020" class="name" text-anchor="middle">Orphaned stands</text>
+    <text x="858" y="1040" class="mono tag" text-anchor="middle">CRON · EVERY 10 MIN</text>
+    <text x="858" y="1060" class="desc" text-anchor="middle">unregistered stands older</text>
+    <text x="858" y="1076" class="desc" text-anchor="middle">than two hours</text>
+    <text x="858" y="1096" class="mono sub" text-anchor="middle">hermes-health.py</text>
+  </g>
+  <g class="node">
+    <rect x="40" y="1124" width="220" height="112" rx="6" fill="#f5f5f5"/>
+    <rect x="40" y="1124" width="220" height="112" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+    <text x="150" y="1148" class="name" text-anchor="middle">Rework gates</text>
+    <text x="150" y="1168" class="mono tag" text-anchor="middle">CRON · EVERY 5 MIN</text>
+    <text x="150" y="1188" class="desc" text-anchor="middle">3+ blockers to the architect;</text>
+    <text x="150" y="1204" class="desc" text-anchor="middle">open-PR rework band lifted</text>
+    <text x="150" y="1224" class="mono sub" text-anchor="middle">rework-gate-watchdog.sh</text>
+  </g>
+  <g class="node">
+    <rect x="276" y="1124" width="220" height="112" rx="6" fill="#f5f5f5"/>
+    <rect x="276" y="1124" width="220" height="112" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+    <text x="386" y="1148" class="name" text-anchor="middle">Quota dispatch hold</text>
+    <text x="386" y="1168" class="mono tag" text-anchor="middle">CRON · EVERY 10 MIN</text>
+    <text x="386" y="1188" class="desc" text-anchor="middle">stop dispatch on quota,</text>
+    <text x="386" y="1204" class="desc" text-anchor="middle">resume when it recovers</text>
+    <text x="386" y="1224" class="mono sub" text-anchor="middle">hermes-health.py</text>
+  </g>
+  <g class="node">
+    <rect x="512" y="1124" width="220" height="112" rx="6" fill="#f5f5f5"/>
+    <rect x="512" y="1124" width="220" height="112" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+    <text x="622" y="1148" class="name" text-anchor="middle">max_in_progress gate</text>
+    <text x="622" y="1168" class="mono tag" text-anchor="middle">CRON · HOURLY</text>
+    <text x="622" y="1188" class="desc" text-anchor="middle">cap of running cards, back</text>
+    <text x="622" y="1204" class="desc" text-anchor="middle">to 1 under memory pressure</text>
+    <text x="622" y="1224" class="mono sub" text-anchor="middle">board-watchdog.py</text>
+  </g>
+  <line x1="40" y1="1268" x2="960" y2="1268" stroke="rgba(45,49,66,0.10)" stroke-width="0.8"/>
+  <text x="40" y="1292" class="mono stage">LEGEND</text>
+  <rect x="40" y="1308" width="16" height="12" rx="2" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+  <text x="64" y="1318" class="leg">Pack script, hook or plugin</text>
+  <rect x="272" y="1308" width="16" height="12" rx="2" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+  <text x="296" y="1318" class="leg">Skill rule an agent applies</text>
+  <rect x="504" y="1308" width="16" height="12" rx="2" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.30)" stroke-width="1"/>
+  <text x="528" y="1318" class="leg">Native Hermes or GitHub</text>
+  <rect x="708" y="1308" width="16" height="12" rx="2" fill="#ffffff" stroke="#2d3142" stroke-width="1" stroke-dasharray="4,3"/>
+  <text x="732" y="1318" class="leg">Moment not in this map</text>
+</svg>

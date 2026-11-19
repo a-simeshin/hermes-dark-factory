@@ -17,6 +17,64 @@ The pack contains only what sits on top of Hermes. Hermes itself is installed an
 | 5. Review | `reviewer`, `tester`, GitHub | The reviewer tries to refute the work and posts `## Review verdict` on the exact head; changes requested send the work back to the same card. Where the plan has a QA step, the tester verifies the real diff. CI must be green on that head. |
 | 6. Merge | Owner, watchdogs, Telegram gateway | The owner reviews and squash-merges; a formal review with changes reaches the card through the GitHub webhook. Watchdogs keep a signal on closed cards waiting for the merge, return runs whose worker died, and report through the gateway: hourly findings, quota alarms and an evening spend report. |
 
+The diagrams below open each part of that picture in detail. Every fact in them comes from the files of this pack; the text sources are in `docs/`.
+
+### Where work comes from
+
+The owner's chat, the owner's own issues, the scheduled UX, product (CEO) and technical (CTO) audits, generated cards and the owner's PR reviews: what waits for the owner's triage, the three triage decisions, and the cards that skip triage.
+
+![Every source of work, the triage step with the owner's go, no and investigate decisions, and generated cards with their receipts](docs/assets/work-intake.svg)
+
+### Admission and priorities
+
+How approved work becomes a running worker: milestone priority bands, the issue executor poll, the admission gate and its plugin, the dispatcher with its holds (quota stop, peak pause, owner stop), and how parked cards come back.
+
+![From an approved issue to a claimed run: priority bands, coverage rule, admission gate, admission guard, dispatcher, dispatch lock holds and parking](docs/assets/admission-and-priority.svg)
+
+### The life of a card
+
+Every status a card passes through, what triggers each change, and who or what makes it.
+
+![Card states triage, todo, ready, scheduled, running, blocked, review, done and archived with every transition and its cause](docs/assets/card-lifecycle.svg)
+
+### The pull request path
+
+From a worktree to the owner's squash merge, with the check attached to each step: "What changes for you" before the review request, the adversarial verdict on the exact head, the tester's QA verdict, CI, the completion contract and the owner-merge hold.
+
+![Thirteen steps of the pull request path with the check attached to each one](docs/assets/pr-path.svg)
+
+### Gates and guards
+
+Every gate, plugin, hook and skill rule that checks the work, grouped by when it acts. Part 1 covers a card from creation to close and the board-wide sweeps; part 2 covers commit, push, publish and the pull request.
+
+![Gates around a card: on creation, while a run works, on close and in board-wide sweeps](docs/assets/gates-map-cards.svg)
+
+![Gates around a pull request: commit and push hooks, link guards, verdict rules, CI, completion contract, risk labels and PR hygiene](docs/assets/gates-map-pr.svg)
+
+### What runs on a schedule
+
+Every cron job grouped by how often it runs, what it touches and where its output goes. Silent when healthy is the default.
+
+![Cron jobs from every five minutes to weekly, with profile, schedule, what each touches and where it reports](docs/assets/cron-schedule.svg)
+
+### What reaches the owner
+
+Four sources reach the owner's phone through the Telegram gateway, and each comes with an action; routine events wait in the quiet digest that the evening report prints.
+
+![Card events, board watchdog, health and evening report delivered through the Telegram gateway, with what the owner does with each](docs/assets/owner-notifications.svg)
+
+### Roles and models
+
+Six profiles: the judges (architect, reviewer) run the strong model, the doers run the cheap one because later stages check their work.
+
+![The six profiles with role, model tier, reasoning effort, turn cap, what each reads before work and its main skills](docs/assets/roles-and-models.svg)
+
+### Knowledge and teaching
+
+Where the agents keep what they learn, and how the owner teaches them through their own channel and checks the snapshot diff rather than the agent's report.
+
+![Knowledge layers from persona to lessons, save-lesson-before-complete, teach-snapshot and the owner's teaching round](docs/assets/knowledge-and-teaching.svg)
+
 ## What is inside
 
 | Path | Contents |

@@ -1,0 +1,246 @@
+<svg viewBox="0 0 1000 1152" width="1000" height="1152" xmlns="http://www.w3.org/2000/svg" font-family="Geist, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#4f5d75"/></marker>
+    <marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#eb6c36"/></marker>
+    <marker id="arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#2e5aa8"/></marker>
+    <style>
+      .mono { font-family: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+      .serif { font-family: 'Instrument Serif', Georgia, 'Times New Roman', serif; }
+      .stage { fill: #4f5d75; font-size: 12px; letter-spacing: 0.14em; }
+      .name { fill: #2d3142; font-size: 15px; font-weight: 600; }
+      .sub { fill: #4f5d75; font-size: 12px; }
+      .desc { fill: #2d3142; font-size: 12px; }
+      .tag { fill: #7a8399; font-size: 12px; letter-spacing: 0.06em; }
+      .lbl { fill: #4f5d75; font-size: 12px; letter-spacing: 0.06em; }
+      .lbl-accent { fill: #eb6c36; font-size: 12px; letter-spacing: 0.06em; }
+      .lbl-link { fill: #2e5aa8; font-size: 12px; letter-spacing: 0.06em; }
+      .leg { fill: #4f5d75; font-size: 12px; }
+      .cell { fill: #2d3142; font-size: 13px; }
+      .num { fill: #2d3142; font-size: 12px; font-weight: 600; }
+    </style>
+  </defs>
+
+  <rect width="100%" height="100%" fill="#f5f5f5"/>
+
+  <text x="40" y="36" class="mono stage">HERMES DARK FACTORY · CARD LIFECYCLE</text>
+  <text x="40" y="72" class="serif" fill="#2d3142" font-size="28">From triage to done: every status change and who makes it</text>
+
+  <!-- Transitions (drawn before boxes) -->
+  <path d="M140 156 V240" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+  <path d="M100 296 V480" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+  <path d="M228 268 H292" fill="none" stroke="#eb6c36" stroke-width="1.4" marker-end="url(#arrow-accent)"/>
+  <path d="M468 256 H532" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+  <path d="M600 296 V360" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+  <path d="M596 240 V176" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+  <path d="M644 176 V240" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+  <path d="M708 388 H772" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+  <path d="M532 400 H468" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+  <path d="M640 360 V296" fill="none" stroke="#4f5d75" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#arrow)"/>
+  <path d="M860 360 V268 H708" fill="none" stroke="#4f5d75" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#arrow)"/>
+  <path d="M860 416 V480" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+  <path d="M468 372 H500 V280 H532" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+  <path d="M292 388 H180 V296" fill="none" stroke="#4f5d75" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#arrow)"/>
+  <line x1="140" y1="536" x2="140" y2="564" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+  <line x1="860" y1="536" x2="860" y2="564" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+
+  <!-- States -->
+  <circle cx="140" cy="148" r="8" fill="#2d3142"/>
+  <text x="156" y="152" class="mono lbl">START</text>
+  <circle cx="140" cy="576" r="12" fill="none" stroke="#2d3142" stroke-width="1.2"/>
+  <circle cx="140" cy="576" r="8" fill="#2d3142"/>
+  <text x="160" y="580" class="mono lbl" text-anchor="start">END</text>
+  <circle cx="860" cy="576" r="12" fill="none" stroke="#2d3142" stroke-width="1.2"/>
+  <circle cx="860" cy="576" r="8" fill="#2d3142"/>
+  <text x="880" y="580" class="mono lbl" text-anchor="start">END</text>
+  <g class="node">
+    <rect x="52" y="240" width="176" height="56" rx="6" fill="#f5f5f5"/>
+    <rect x="52" y="240" width="176" height="56" rx="6" fill="rgba(235,108,54,0.08)" stroke="#eb6c36" stroke-width="1"/>
+    <text x="140" y="264" class="name" text-anchor="middle">triage</text>
+    <text x="140" y="280" class="mono sub" text-anchor="middle">owner decides</text>
+  </g>
+  <g class="node">
+    <rect x="292" y="240" width="176" height="56" rx="6" fill="#f5f5f5"/>
+    <rect x="292" y="240" width="176" height="56" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+    <text x="380" y="264" class="name" text-anchor="middle">todo</text>
+    <text x="380" y="280" class="mono sub" text-anchor="middle">waits for parents</text>
+  </g>
+  <g class="node">
+    <rect x="532" y="240" width="176" height="56" rx="6" fill="#f5f5f5"/>
+    <rect x="532" y="240" width="176" height="56" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+    <text x="620" y="264" class="name" text-anchor="middle">ready</text>
+    <text x="620" y="280" class="mono sub" text-anchor="middle">queued by priority</text>
+  </g>
+  <g class="node">
+    <rect x="532" y="120" width="176" height="56" rx="6" fill="#f5f5f5"/>
+    <rect x="532" y="120" width="176" height="56" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+    <text x="620" y="144" class="name" text-anchor="middle">scheduled</text>
+    <text x="620" y="160" class="mono sub" text-anchor="middle">parked by a gate</text>
+  </g>
+  <g class="node">
+    <rect x="532" y="360" width="176" height="56" rx="6" fill="#f5f5f5"/>
+    <rect x="532" y="360" width="176" height="56" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+    <text x="620" y="384" class="name" text-anchor="middle">running</text>
+    <text x="620" y="400" class="mono sub" text-anchor="middle">one worker run</text>
+  </g>
+  <g class="node">
+    <rect x="292" y="360" width="176" height="56" rx="6" fill="#f5f5f5"/>
+    <rect x="292" y="360" width="176" height="56" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+    <text x="380" y="384" class="name" text-anchor="middle">blocked</text>
+    <text x="380" y="400" class="mono sub" text-anchor="middle">waits on a condition</text>
+  </g>
+  <g class="node">
+    <rect x="772" y="360" width="176" height="56" rx="6" fill="#f5f5f5"/>
+    <rect x="772" y="360" width="176" height="56" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+    <text x="860" y="384" class="name" text-anchor="middle">review</text>
+    <text x="860" y="400" class="mono sub" text-anchor="middle">native review lane</text>
+  </g>
+  <g class="node">
+    <rect x="772" y="480" width="176" height="56" rx="6" fill="#f5f5f5"/>
+    <rect x="772" y="480" width="176" height="56" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+    <text x="860" y="504" class="name" text-anchor="middle">done</text>
+    <text x="860" y="520" class="mono sub" text-anchor="middle">verdict accepted</text>
+  </g>
+  <g class="node">
+    <rect x="52" y="480" width="176" height="56" rx="6" fill="#f5f5f5"/>
+    <rect x="52" y="480" width="176" height="56" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+    <text x="140" y="504" class="name" text-anchor="middle">archived</text>
+    <text x="140" y="520" class="mono sub" text-anchor="middle">not planned</text>
+  </g>
+
+  <!-- Badges -->
+  <circle cx="140" cy="196" r="12" fill="#ffffff" stroke="#4f5d75" stroke-width="1"/>
+  <text x="140" y="200" class="mono num" text-anchor="middle">1</text>
+  <circle cx="100" cy="412" r="12" fill="#ffffff" stroke="#4f5d75" stroke-width="1"/>
+  <text x="100" y="416" class="mono num" text-anchor="middle">2</text>
+  <circle cx="260" cy="268" r="12" fill="#ffffff" stroke="#eb6c36" stroke-width="1"/>
+  <text x="260" y="272" class="mono num" text-anchor="middle">3</text>
+  <circle cx="500" cy="256" r="12" fill="#ffffff" stroke="#4f5d75" stroke-width="1"/>
+  <text x="500" y="260" class="mono num" text-anchor="middle">4</text>
+  <circle cx="600" cy="328" r="12" fill="#ffffff" stroke="#4f5d75" stroke-width="1"/>
+  <text x="600" y="332" class="mono num" text-anchor="middle">5</text>
+  <circle cx="596" cy="208" r="12" fill="#ffffff" stroke="#4f5d75" stroke-width="1"/>
+  <text x="596" y="212" class="mono num" text-anchor="middle">6</text>
+  <circle cx="644" cy="208" r="12" fill="#ffffff" stroke="#4f5d75" stroke-width="1"/>
+  <text x="644" y="212" class="mono num" text-anchor="middle">7</text>
+  <circle cx="740" cy="388" r="12" fill="#ffffff" stroke="#4f5d75" stroke-width="1"/>
+  <text x="740" y="392" class="mono num" text-anchor="middle">8</text>
+  <circle cx="500" cy="400" r="12" fill="#ffffff" stroke="#4f5d75" stroke-width="1"/>
+  <text x="500" y="404" class="mono num" text-anchor="middle">9</text>
+  <circle cx="640" cy="328" r="12" fill="#ffffff" stroke="#4f5d75" stroke-width="1"/>
+  <text x="640" y="332" class="mono num" text-anchor="middle">10</text>
+  <circle cx="860" cy="320" r="12" fill="#ffffff" stroke="#4f5d75" stroke-width="1"/>
+  <text x="860" y="324" class="mono num" text-anchor="middle">11</text>
+  <circle cx="860" cy="448" r="12" fill="#ffffff" stroke="#4f5d75" stroke-width="1"/>
+  <text x="860" y="452" class="mono num" text-anchor="middle">12</text>
+  <circle cx="500" cy="324" r="12" fill="#ffffff" stroke="#4f5d75" stroke-width="1"/>
+  <text x="500" y="328" class="mono num" text-anchor="middle">13</text>
+  <circle cx="236" cy="388" r="12" fill="#ffffff" stroke="#4f5d75" stroke-width="1"/>
+  <text x="236" y="392" class="mono num" text-anchor="middle">14</text>
+  <text x="772" y="132" class="mono stage">WHO MOVES CARDS</text>
+  <text x="772" y="156" class="leg">Owner: triage decisions, answers.</text>
+  <text x="772" y="172" class="leg">Workers and reviewer: native tools.</text>
+  <text x="772" y="188" class="leg">Dispatcher and plugins: claims.</text>
+  <text x="772" y="204" class="leg">Watchdogs: parking, wake, reclaim.</text>
+
+  <!-- Transition table -->
+  <text x="48" y="640" class="mono stage">#</text>
+  <text x="92" y="640" class="mono stage">TRANSITION</text>
+  <text x="260" y="640" class="mono stage">TRIGGER</text>
+  <text x="640" y="640" class="mono stage">CAUSED BY</text>
+  <line x1="40" y1="652" x2="960" y2="652" stroke="rgba(45,49,66,0.22)" stroke-width="1"/>
+  <circle cx="60" cy="668" r="12" fill="#ffffff" stroke="#4f5d75" stroke-width="1"/>
+  <text x="60" y="672" class="mono num" text-anchor="middle">1</text>
+  <text x="92" y="672" class="mono sub">[*] → triage</text>
+  <text x="260" y="672" class="cell">a proposal enters the board</text>
+  <text x="640" y="672" class="cell">owner chat, scheduled agent job, poll or gate</text>
+  <line x1="40" y1="684" x2="960" y2="684" stroke="rgba(45,49,66,0.10)" stroke-width="0.8"/>
+  <circle cx="60" cy="696" r="12" fill="#ffffff" stroke="#4f5d75" stroke-width="1"/>
+  <text x="60" y="700" class="mono num" text-anchor="middle">2</text>
+  <text x="92" y="700" class="mono sub">triage → archived</text>
+  <text x="260" y="700" class="cell">owner says no: issue closed as not planned</text>
+  <text x="640" y="700" class="cell">owner</text>
+  <line x1="40" y1="712" x2="960" y2="712" stroke="rgba(45,49,66,0.10)" stroke-width="0.8"/>
+  <circle cx="60" cy="724" r="12" fill="#ffffff" stroke="#eb6c36" stroke-width="1"/>
+  <text x="60" y="728" class="mono num" text-anchor="middle">3</text>
+  <text x="92" y="728" class="mono sub">triage → todo</text>
+  <text x="260" y="728" class="cell">owner says go: triage label removed, decompose</text>
+  <text x="640" y="728" class="cell">owner, then the architect decomposes</text>
+  <line x1="40" y1="740" x2="960" y2="740" stroke="rgba(45,49,66,0.10)" stroke-width="0.8"/>
+  <circle cx="60" cy="752" r="12" fill="#ffffff" stroke="#4f5d75" stroke-width="1"/>
+  <text x="60" y="756" class="mono num" text-anchor="middle">4</text>
+  <text x="92" y="756" class="mono sub">todo → ready</text>
+  <text x="260" y="756" class="cell">parents done, or plan review accepted</text>
+  <text x="640" y="756" class="cell">Hermes dependency release; reviewer</text>
+  <line x1="40" y1="768" x2="960" y2="768" stroke="rgba(45,49,66,0.10)" stroke-width="0.8"/>
+  <circle cx="60" cy="780" r="12" fill="#ffffff" stroke="#4f5d75" stroke-width="1"/>
+  <text x="60" y="784" class="mono num" text-anchor="middle">5</text>
+  <text x="92" y="784" class="mono sub">ready → running</text>
+  <text x="260" y="784" class="cell">dispatcher claims in priority order</text>
+  <text x="640" y="784" class="cell">dispatcher; admission guard may park at claim</text>
+  <line x1="40" y1="796" x2="960" y2="796" stroke="rgba(45,49,66,0.10)" stroke-width="0.8"/>
+  <circle cx="60" cy="808" r="12" fill="#ffffff" stroke="#4f5d75" stroke-width="1"/>
+  <text x="60" y="812" class="mono num" text-anchor="middle">6</text>
+  <text x="92" y="812" class="mono sub">ready → scheduled</text>
+  <text x="260" y="812" class="cell">parked by a gate, or until a moment</text>
+  <text x="640" y="812" class="cell">admission or conflict-debt gate; kanban schedule</text>
+  <line x1="40" y1="824" x2="960" y2="824" stroke="rgba(45,49,66,0.10)" stroke-width="0.8"/>
+  <circle cx="60" cy="836" r="12" fill="#ffffff" stroke="#4f5d75" stroke-width="1"/>
+  <text x="60" y="840" class="mono num" text-anchor="middle">7</text>
+  <text x="92" y="840" class="mono sub">scheduled → ready</text>
+  <text x="260" y="840" class="cell">gate releases, or SCHEDULED_UNTIL passes</text>
+  <text x="640" y="840" class="cell">board-watchdog; worker-api-watchdog</text>
+  <line x1="40" y1="852" x2="960" y2="852" stroke="rgba(45,49,66,0.10)" stroke-width="0.8"/>
+  <circle cx="60" cy="864" r="12" fill="#ffffff" stroke="#4f5d75" stroke-width="1"/>
+  <text x="60" y="868" class="mono num" text-anchor="middle">8</text>
+  <text x="92" y="868" class="mono sub">running → review</text>
+  <text x="260" y="868" class="cell">kanban_request_review with the reviewer named</text>
+  <text x="640" y="868" class="cell">worker (the card that owns the PR)</text>
+  <line x1="40" y1="880" x2="960" y2="880" stroke="rgba(45,49,66,0.10)" stroke-width="0.8"/>
+  <circle cx="60" cy="892" r="12" fill="#ffffff" stroke="#4f5d75" stroke-width="1"/>
+  <text x="60" y="896" class="mono num" text-anchor="middle">9</text>
+  <text x="92" y="896" class="mono sub">running → blocked</text>
+  <text x="260" y="896" class="cell">needs_input, dependency or transient block</text>
+  <text x="640" y="896" class="cell">worker</text>
+  <line x1="40" y1="908" x2="960" y2="908" stroke="rgba(45,49,66,0.10)" stroke-width="0.8"/>
+  <circle cx="60" cy="920" r="12" fill="#ffffff" stroke="#4f5d75" stroke-width="1"/>
+  <text x="60" y="924" class="mono num" text-anchor="middle">10</text>
+  <text x="92" y="924" class="mono sub">running → ready</text>
+  <text x="260" y="924" class="cell">run crashed or timed out, retried</text>
+  <text x="640" y="924" class="cell">dispatcher; watchdog reclaims orphaned claims</text>
+  <line x1="40" y1="936" x2="960" y2="936" stroke="rgba(45,49,66,0.10)" stroke-width="0.8"/>
+  <circle cx="60" cy="948" r="12" fill="#ffffff" stroke="#4f5d75" stroke-width="1"/>
+  <text x="60" y="952" class="mono num" text-anchor="middle">11</text>
+  <text x="92" y="952" class="mono sub">review → ready</text>
+  <text x="260" y="952" class="cell">changes requested: rework on the same card</text>
+  <text x="640" y="952" class="cell">reviewer, kanban_request_changes</text>
+  <line x1="40" y1="964" x2="960" y2="964" stroke="rgba(45,49,66,0.10)" stroke-width="0.8"/>
+  <circle cx="60" cy="976" r="12" fill="#ffffff" stroke="#4f5d75" stroke-width="1"/>
+  <text x="60" y="980" class="mono num" text-anchor="middle">12</text>
+  <text x="92" y="980" class="mono sub">review → done</text>
+  <text x="260" y="980" class="cell">verdict accepted</text>
+  <text x="640" y="980" class="cell">reviewer, kanban_complete</text>
+  <line x1="40" y1="992" x2="960" y2="992" stroke="rgba(45,49,66,0.10)" stroke-width="0.8"/>
+  <circle cx="60" cy="1004" r="12" fill="#ffffff" stroke="#4f5d75" stroke-width="1"/>
+  <text x="60" y="1008" class="mono num" text-anchor="middle">13</text>
+  <text x="92" y="1008" class="mono sub">blocked → ready</text>
+  <text x="260" y="1008" class="cell">condition met, card unblocked</text>
+  <text x="640" y="1008" class="cell">owner answer; watchdog when the PR merges</text>
+  <line x1="40" y1="1020" x2="960" y2="1020" stroke="rgba(45,49,66,0.10)" stroke-width="0.8"/>
+  <circle cx="60" cy="1032" r="12" fill="#ffffff" stroke="#4f5d75" stroke-width="1"/>
+  <text x="60" y="1036" class="mono num" text-anchor="middle">14</text>
+  <text x="92" y="1036" class="mono sub">blocked → triage</text>
+  <text x="260" y="1036" class="cell">block loop detected, or review loop stopped</text>
+  <text x="640" y="1036" class="cell">Hermes loop breaker; review-loop guard</text>
+  <line x1="40" y1="1068" x2="960" y2="1068" stroke="rgba(45,49,66,0.10)" stroke-width="0.8"/>
+  <text x="40" y="1092" class="mono stage">LEGEND</text>
+  <rect x="40" y="1108" width="16" height="12" rx="2" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+  <text x="64" y="1118" class="leg">Card status (native Hermes)</text>
+  <rect x="272" y="1108" width="16" height="12" rx="2" fill="rgba(235,108,54,0.08)" stroke="#eb6c36" stroke-width="1"/>
+  <text x="296" y="1118" class="leg">Owner decides</text>
+  <path d="M412 1114 H440" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+  <text x="448" y="1118" class="leg">Transition</text>
+  <path d="M544 1114 H572" fill="none" stroke="#4f5d75" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#arrow)"/>
+  <text x="580" y="1118" class="leg">Return or retry</text>
+  <path d="M708 1114 H736" fill="none" stroke="#eb6c36" stroke-width="1.4" marker-end="url(#arrow-accent)"/>
+  <text x="744" y="1118" class="leg">Owner go</text>
+</svg>

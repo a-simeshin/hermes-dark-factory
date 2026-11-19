@@ -1,0 +1,193 @@
+<svg viewBox="0 0 1000 1144" xmlns="http://www.w3.org/2000/svg" font-family="Geist, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#4f5d75"/></marker>
+    <marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#eb6c36"/></marker>
+    <marker id="arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#2e5aa8"/></marker>
+    <style>
+      .mono { font-family: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+      .serif { font-family: 'Instrument Serif', Georgia, 'Times New Roman', serif; }
+      .eye { fill: #4f5d75; font-size: 12px; letter-spacing: 0.12em; }
+      .name { fill: #2d3142; font-size: 15px; font-weight: 600; }
+      .name16 { fill: #2d3142; font-size: 16px; font-weight: 600; }
+      .sub { fill: #4f5d75; font-size: 12px; }
+      .txt { fill: #2d3142; font-size: 13px; }
+      .mut { fill: #4f5d75; font-size: 12px; }
+      .lnk { fill: #2e5aa8; font-size: 12px; }
+      .acc { fill: #eb6c36; font-size: 12px; }
+      .hdr { fill: #4f5d75; font-size: 12px; letter-spacing: 0.01em; }
+      .lbl { fill: #4f5d75; font-size: 12px; letter-spacing: 0.06em; }
+      .lbl-link { fill: #2e5aa8; font-size: 12px; letter-spacing: 0.06em; }
+      .lbl-acc { fill: #eb6c36; font-size: 12px; letter-spacing: 0.06em; }
+    </style>
+  </defs>
+  <rect width="100%" height="100%" fill="#f5f5f5"/>
+  <text x="40" y="36" class="mono eye">HERMES DARK FACTORY · ROLES</text>
+  <text x="40" y="72" class="serif" fill="#2d3142" font-size="28">Six profiles: the cost of a mistake decides the model</text>
+  <rect x="40" y="104" width="288" height="424" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+  <text x="56" y="132" class="name16">default</text>
+  <text x="312" y="132" class="mono sub" text-anchor="end">orchestrator.SOUL.md</text>
+  <text x="56" y="156" class="txt">Owner's chat front desk and triage;</text>
+  <text x="56" y="172" class="txt">webhook handler for owner reviews;</text>
+  <text x="56" y="192" class="txt">home of most cron jobs</text>
+  <line x1="56" y1="208" x2="312" y2="208" stroke="rgba(45,49,66,0.1)" stroke-width="1"/>
+  <text x="56" y="228" class="mono eye">MODEL</text>
+  <text x="56" y="248" class="name">strong</text>
+  <text x="144" y="228" class="mono eye">EFFORT</text>
+  <text x="144" y="248" class="name">medium</text>
+  <text x="232" y="228" class="mono eye">TURN CAP</text>
+  <text x="232" y="248" class="name">200</text>
+  <line x1="56" y1="264" x2="312" y2="264" stroke="rgba(45,49,66,0.1)" stroke-width="1"/>
+  <text x="56" y="284" class="mono eye">WHY</text>
+  <text x="56" y="304" class="mut">Owner chat and triage need</text>
+  <text x="56" y="320" class="mut">judgement; medium is close to low</text>
+  <text x="56" y="336" class="mut">on some models</text>
+  <text x="56" y="360" class="mono eye">READS BEFORE WORK</text>
+  <text x="56" y="376" class="mut">the project list (hermes project list)</text>
+  <text x="56" y="392" class="mut">the project named in the message;</text>
+  <text x="56" y="408" class="mut">ask the owner when it is ambiguous</text>
+  <text x="56" y="448" class="mono eye">MAIN SKILLS</text>
+  <text x="56" y="464" class="mono sub">issue-mirror, pr-deliverable,</text>
+  <text x="56" y="480" class="mono sub">kanban-discipline,</text>
+  <text x="56" y="496" class="mono sub">debugging-discipline,</text>
+  <text x="56" y="512" class="mono sub">worker-run-discipline</text>
+  <rect x="356" y="104" width="288" height="424" rx="6" fill="rgba(235,108,54,0.08)" stroke="#eb6c36" stroke-width="1"/>
+  <text x="372" y="132" class="name16">architect</text>
+  <text x="628" y="132" class="mono sub" text-anchor="end">architect.SOUL.md</text>
+  <text x="372" y="156" class="txt">Orchestrator: decomposes triage</text>
+  <text x="372" y="172" class="txt">cards into self-contained children,</text>
+  <text x="372" y="192" class="txt">writes plans, reworks them on review</text>
+  <line x1="372" y1="208" x2="628" y2="208" stroke="rgba(45,49,66,0.1)" stroke-width="1"/>
+  <text x="372" y="228" class="mono eye">MODEL</text>
+  <text x="372" y="248" class="name">strong</text>
+  <text x="460" y="228" class="mono eye">EFFORT</text>
+  <text x="460" y="248" class="name">max</text>
+  <text x="548" y="228" class="mono eye">TURN CAP</text>
+  <text x="548" y="248" class="name">120</text>
+  <line x1="372" y1="264" x2="628" y2="264" stroke="rgba(45,49,66,0.1)" stroke-width="1"/>
+  <text x="372" y="284" class="mono eye">WHY</text>
+  <text x="372" y="304" class="mut">A plan mistake multiplies across</text>
+  <text x="372" y="320" class="mut">every child card</text>
+  <text x="372" y="360" class="mono eye">READS BEFORE WORK</text>
+  <text x="372" y="376" class="mut">the whole card with its comments</text>
+  <text x="372" y="392" class="mut">project conventions</text>
+  <text x="372" y="408" class="mut">the project list</text>
+  <text x="372" y="448" class="mono eye">MAIN SKILLS</text>
+  <text x="372" y="464" class="mono sub">decomposition-contract,</text>
+  <text x="372" y="480" class="mono sub">issue-mirror, serena-lsp,</text>
+  <text x="372" y="496" class="mono sub">kanban-discipline</text>
+  <rect x="672" y="104" width="288" height="424" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+  <text x="688" y="132" class="name16">coder</text>
+  <text x="944" y="132" class="mono sub" text-anchor="end">coder.SOUL.md</text>
+  <text x="688" y="156" class="txt">Implements cards in a workspace,</text>
+  <text x="688" y="172" class="txt">opens PRs as the bot account,</text>
+  <text x="688" y="192" class="txt">never merges</text>
+  <line x1="688" y1="208" x2="944" y2="208" stroke="rgba(45,49,66,0.1)" stroke-width="1"/>
+  <text x="688" y="228" class="mono eye">MODEL</text>
+  <text x="688" y="248" class="name">cheap</text>
+  <text x="776" y="228" class="mono eye">EFFORT</text>
+  <text x="776" y="248" class="name">high</text>
+  <text x="864" y="228" class="mono eye">TURN CAP</text>
+  <text x="864" y="248" class="name">200</text>
+  <line x1="688" y1="264" x2="944" y2="264" stroke="rgba(45,49,66,0.1)" stroke-width="1"/>
+  <text x="688" y="284" class="mono eye">WHY</text>
+  <text x="688" y="304" class="mut">Code is checked by reviewer and</text>
+  <text x="688" y="320" class="mut">tester; strong model as fallback;</text>
+  <text x="688" y="336" class="mut">high is set as a per-model override</text>
+  <text x="688" y="360" class="mono eye">READS BEFORE WORK</text>
+  <text x="688" y="376" class="mut">the whole card and its criteria</text>
+  <text x="688" y="392" class="mut">issue and PR discussion</text>
+  <text x="688" y="408" class="mut">project conventions</text>
+  <text x="688" y="424" class="mut">standards for the card's Stack keys</text>
+  <text x="688" y="448" class="mono eye">MAIN SKILLS</text>
+  <text x="688" y="464" class="mono sub">serena-lsp, pr-deliverable,</text>
+  <text x="688" y="480" class="mono sub">worker-run-discipline,</text>
+  <text x="688" y="496" class="mono sub">kanban-discipline,</text>
+  <text x="688" y="512" class="mono sub">debugging-discipline</text>
+  <rect x="40" y="552" width="288" height="424" rx="6" fill="rgba(235,108,54,0.08)" stroke="#eb6c36" stroke-width="1"/>
+  <text x="56" y="580" class="name16">reviewer</text>
+  <text x="312" y="580" class="mono sub" text-anchor="end">reviewer.SOUL.md</text>
+  <text x="56" y="604" class="txt">Adversarial reviewer of plans and</text>
+  <text x="56" y="620" class="txt">PRs: tries to refute the work,</text>
+  <text x="56" y="640" class="txt">every finding with evidence</text>
+  <line x1="56" y1="656" x2="312" y2="656" stroke="rgba(45,49,66,0.1)" stroke-width="1"/>
+  <text x="56" y="676" class="mono eye">MODEL</text>
+  <text x="56" y="696" class="name">strong</text>
+  <text x="144" y="676" class="mono eye">EFFORT</text>
+  <text x="144" y="696" class="name">high</text>
+  <text x="232" y="676" class="mono eye">TURN CAP</text>
+  <text x="232" y="696" class="name">120</text>
+  <line x1="56" y1="712" x2="312" y2="712" stroke="rgba(45,49,66,0.1)" stroke-width="1"/>
+  <text x="56" y="732" class="mono eye">WHY</text>
+  <text x="56" y="752" class="mut">Missed defects reach the owner;</text>
+  <text x="56" y="768" class="mut">high instead of max keeps</text>
+  <text x="56" y="784" class="mut">reviews fast</text>
+  <text x="56" y="808" class="mono eye">READS BEFORE WORK</text>
+  <text x="56" y="824" class="mut">card, issue mirror, discussion</text>
+  <text x="56" y="840" class="mut">project conventions</text>
+  <text x="56" y="856" class="mut">last 10 entries of the misses journal</text>
+  <text x="56" y="896" class="mono eye">MAIN SKILLS</text>
+  <text x="56" y="912" class="mono sub">adversarial-review,</text>
+  <text x="56" y="928" class="mono sub">tester-verdict-checklist,</text>
+  <text x="56" y="944" class="mono sub">decomposition-contract,</text>
+  <text x="56" y="960" class="mono sub">serena-lsp</text>
+  <rect x="356" y="552" width="288" height="424" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+  <text x="372" y="580" class="name16">tester</text>
+  <text x="628" y="580" class="mono sub" text-anchor="end">tester.SOUL.md</text>
+  <text x="372" y="604" class="txt">Verifies the real diff and behaviour</text>
+  <text x="372" y="620" class="txt">of the PR head; runs hidden</text>
+  <text x="372" y="640" class="txt">acceptance scenarios</text>
+  <line x1="372" y1="656" x2="628" y2="656" stroke="rgba(45,49,66,0.1)" stroke-width="1"/>
+  <text x="372" y="676" class="mono eye">MODEL</text>
+  <text x="372" y="696" class="name">cheap</text>
+  <text x="460" y="676" class="mono eye">EFFORT</text>
+  <text x="460" y="696" class="name">low</text>
+  <text x="548" y="676" class="mono eye">TURN CAP</text>
+  <text x="548" y="696" class="name">200</text>
+  <line x1="372" y1="712" x2="628" y2="712" stroke="rgba(45,49,66,0.1)" stroke-width="1"/>
+  <text x="372" y="732" class="mono eye">WHY</text>
+  <text x="372" y="752" class="mut">Commands with verifiable results</text>
+  <text x="372" y="808" class="mono eye">READS BEFORE WORK</text>
+  <text x="372" y="824" class="mut">the whole card and its criteria</text>
+  <text x="372" y="840" class="mut">issue and PR discussion</text>
+  <text x="372" y="856" class="mut">project conventions</text>
+  <text x="372" y="896" class="mono eye">MAIN SKILLS</text>
+  <text x="372" y="912" class="mono sub">tester-verdict-checklist,</text>
+  <text x="372" y="928" class="mono sub">pr-deliverable, serena-lsp,</text>
+  <text x="372" y="944" class="mono sub">debugging-discipline</text>
+  <rect x="672" y="552" width="288" height="424" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+  <text x="688" y="580" class="name16">ops</text>
+  <text x="944" y="580" class="mono sub" text-anchor="end">ops.SOUL.md</text>
+  <text x="688" y="604" class="txt">Host and service operations,</text>
+  <text x="688" y="620" class="txt">incident cards, the peak-pause tick</text>
+  <line x1="688" y1="656" x2="944" y2="656" stroke="rgba(45,49,66,0.1)" stroke-width="1"/>
+  <text x="688" y="676" class="mono eye">MODEL</text>
+  <text x="688" y="696" class="name">cheap</text>
+  <text x="776" y="676" class="mono eye">EFFORT</text>
+  <text x="776" y="696" class="name">low</text>
+  <text x="864" y="676" class="mono eye">TURN CAP</text>
+  <text x="864" y="696" class="name">120</text>
+  <line x1="688" y1="712" x2="944" y2="712" stroke="rgba(45,49,66,0.1)" stroke-width="1"/>
+  <text x="688" y="732" class="mono eye">WHY</text>
+  <text x="688" y="752" class="mut">Mechanical operations</text>
+  <text x="688" y="808" class="mono eye">READS BEFORE WORK</text>
+  <text x="688" y="824" class="mut">the whole card with its comments</text>
+  <text x="688" y="840" class="mut">project conventions</text>
+  <text x="688" y="896" class="mono eye">MAIN SKILLS</text>
+  <text x="688" y="912" class="mono sub">debugging-discipline,</text>
+  <text x="688" y="928" class="mono sub">worker-run-discipline,</text>
+  <text x="688" y="944" class="mono sub">kanban-discipline, serena-lsp</text>
+  <rect x="40" y="1000" width="452" height="56" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+  <text x="56" y="1024" class="name">Every role, before closing a card</text>
+  <text x="56" y="1044" class="mono sub">save-lesson-before-complete</text>
+  <rect x="508" y="1000" width="452" height="56" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+  <text x="524" y="1024" class="name">Auxiliary calls: cheap model, low effort</text>
+  <text x="524" y="1044" class="mono sub">compression, titles, vision</text>
+  <line x1="40" y1="1084" x2="960" y2="1084" stroke="rgba(45,49,66,0.22)" stroke-width="1"/>
+  <rect x="40" y="1092" width="28" height="16" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+  <text x="76" y="1104" class="mut">profile</text>
+  <rect x="152" y="1092" width="28" height="16" rx="6" fill="rgba(235,108,54,0.08)" stroke="#eb6c36" stroke-width="1"/>
+  <text x="188" y="1104" class="mut">judge on the strong model</text>
+  <rect x="384" y="1092" width="28" height="16" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+  <text x="420" y="1104" class="mut">applies to every profile</text>
+  <text x="40" y="1128" class="mut">Strong model where a mistake multiplies or reaches the owner; cheap model where later stages check the work.</text>
+</svg>

@@ -1,0 +1,259 @@
+<svg viewBox="0 0 1000 1568" width="1000" height="1568" xmlns="http://www.w3.org/2000/svg" font-family="Geist, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#4f5d75"/></marker>
+    <marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#eb6c36"/></marker>
+    <marker id="arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#2e5aa8"/></marker>
+    <style>
+      .mono { font-family: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+      .serif { font-family: 'Instrument Serif', Georgia, 'Times New Roman', serif; }
+      .stage { fill: #4f5d75; font-size: 12px; letter-spacing: 0.14em; }
+      .name { fill: #2d3142; font-size: 15px; font-weight: 600; }
+      .sub { fill: #4f5d75; font-size: 12px; }
+      .desc { fill: #2d3142; font-size: 12px; }
+      .tag { fill: #7a8399; font-size: 12px; letter-spacing: 0.06em; }
+      .lbl { fill: #4f5d75; font-size: 12px; letter-spacing: 0.06em; }
+      .lbl-accent { fill: #eb6c36; font-size: 12px; letter-spacing: 0.06em; }
+      .lbl-link { fill: #2e5aa8; font-size: 12px; letter-spacing: 0.06em; }
+      .leg { fill: #4f5d75; font-size: 12px; }
+      .cell { fill: #2d3142; font-size: 13px; }
+      .num { fill: #2d3142; font-size: 12px; font-weight: 600; }
+    </style>
+  </defs>
+
+  <rect width="100%" height="100%" fill="#f5f5f5"/>
+
+  <text x="40" y="36" class="mono stage">HERMES DARK FACTORY · PULL REQUEST PATH</text>
+  <text x="40" y="72" class="serif" fill="#2d3142" font-size="28">From a branch to the owner's merge, with every check on the way</text>
+  <text x="160" y="120" class="mono stage" text-anchor="middle">AGENTS · BOARD</text>
+  <text x="388" y="120" class="mono stage" text-anchor="middle">CHECKS</text>
+  <text x="616" y="120" class="mono stage" text-anchor="middle">GITHUB · HERMES</text>
+  <text x="844" y="120" class="mono stage" text-anchor="middle">OWNER</text>
+  <line x1="40" y1="132" x2="960" y2="132" stroke="rgba(45,49,66,0.22)" stroke-width="1"/>
+  <line x1="274" y1="132" x2="274" y2="1452" stroke="rgba(45,49,66,0.06)" stroke-width="1"/>
+  <line x1="502" y1="132" x2="502" y2="1452" stroke="rgba(45,49,66,0.06)" stroke-width="1"/>
+  <line x1="730" y1="132" x2="730" y2="1452" stroke="rgba(45,49,66,0.06)" stroke-width="1"/>
+
+  <!-- Arrows (drawn before boxes) -->
+  <path d="M264 180 H640 V236" fill="none" stroke="#2e5aa8" stroke-width="1.2" marker-end="url(#arrow-link)"/>
+  <path d="M616 300 V324" fill="none" stroke="#2e5aa8" stroke-width="1.2" marker-end="url(#arrow-link)"/>
+  <path d="M616 388 V412" fill="none" stroke="#2e5aa8" stroke-width="1.2" marker-end="url(#arrow-link)"/>
+  <path d="M616 476 V532 H264" fill="none" stroke="#2e5aa8" stroke-width="1.2" marker-end="url(#arrow-link)"/>
+  <path d="M160 564 V588" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+  <path d="M264 620 H512" fill="none" stroke="#2e5aa8" stroke-width="1.2" marker-end="url(#arrow-link)"/>
+  <path d="M160 652 V676" fill="none" stroke="#4f5d75" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#arrow)"/>
+  <path d="M56 708 H44 V224 H592 V236" fill="none" stroke="#4f5d75" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#arrow)"/>
+  <path d="M616 652 V796 H264" fill="none" stroke="#2e5aa8" stroke-width="1.2" marker-end="url(#arrow-link)"/>
+  <path d="M160 828 V872 H512" fill="none" stroke="#2e5aa8" stroke-width="1.2" marker-end="url(#arrow-link)"/>
+  <path d="M512 896 H208 V940" fill="none" stroke="#2e5aa8" stroke-width="1.2" marker-end="url(#arrow-link)"/>
+  <path d="M160 1004 V1016 H616 V1028" fill="none" stroke="#2e5aa8" stroke-width="1.2" marker-end="url(#arrow-link)"/>
+  <path d="M720 1060 H740" fill="none" stroke="#2e5aa8" stroke-width="1.2" marker-end="url(#arrow-link)"/>
+  <path d="M892 1092 V1380" fill="none" stroke="#eb6c36" stroke-width="1.4" marker-end="url(#arrow-accent)"/>
+  <path d="M796 1092 V1368 H160 V1268" fill="none" stroke="#2e5aa8" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#arrow-link)"/>
+  <line x1="492" y1="268" x2="512" y2="268" stroke="#7a8399" stroke-width="1.2" stroke-dasharray="2,3"/>
+  <line x1="492" y1="356" x2="512" y2="356" stroke="#7a8399" stroke-width="1.2" stroke-dasharray="2,3"/>
+  <line x1="264" y1="708" x2="284" y2="708" stroke="#7a8399" stroke-width="1.2" stroke-dasharray="2,3"/>
+  <line x1="264" y1="972" x2="284" y2="972" stroke="#7a8399" stroke-width="1.2" stroke-dasharray="2,3"/>
+  <line x1="492" y1="1060" x2="512" y2="1060" stroke="#7a8399" stroke-width="1.2" stroke-dasharray="2,3"/>
+  <line x1="492" y1="1148" x2="512" y2="1148" stroke="#7a8399" stroke-width="1.2" stroke-dasharray="2,3"/>
+  <line x1="492" y1="1236" x2="512" y2="1236" stroke="#7a8399" stroke-width="1.2" stroke-dasharray="2,3"/>
+  <line x1="492" y1="1324" x2="512" y2="1324" stroke="#7a8399" stroke-width="1.2" stroke-dasharray="2,3"/>
+
+  <!-- Arrow labels -->
+  <rect class="mask" x="292" y="216" width="188" height="16" rx="2" fill="#f5f5f5"/>
+  <text x="388" y="228" class="mono lbl" text-anchor="middle">FIX ON THE SAME BRANCH</text>
+  <rect class="mask" x="332" y="612" width="108" height="16" rx="2" fill="#f5f5f5"/>
+  <text x="388" y="624" class="mono lbl-link" text-anchor="middle">POST VERDICT</text>
+  <text x="168" y="668" class="mono lbl" text-anchor="start">BLOCKING</text>
+  <text x="624" y="712" class="mono lbl-link" text-anchor="start">PASS</text>
+  <text x="900" y="1240" class="mono lbl-accent" text-anchor="start">APPROVED</text>
+  <rect class="mask" x="272" y="1360" width="228" height="16" rx="2" fill="#f5f5f5"/>
+  <text x="388" y="1372" class="mono lbl-link" text-anchor="middle">CHANGES REQUESTED · WEBHOOK</text>
+
+  <!-- Steps -->
+  <g class="node">
+    <rect x="56" y="148" width="208" height="64" rx="6" fill="#f5f5f5"/>
+    <rect x="56" y="148" width="208" height="64" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+    <text x="160" y="168" class="name" text-anchor="middle">1 Worktree and branch</text>
+    <text x="160" y="184" class="mono sub" text-anchor="middle">coder, own workspace</text>
+    <text x="160" y="200" class="mono sub" text-anchor="middle">branch hermes/&lt;name&gt;</text>
+  </g>
+  <g class="node">
+    <rect x="512" y="236" width="208" height="64" rx="6" fill="#f5f5f5"/>
+    <rect x="512" y="236" width="208" height="64" rx="6" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.30)" stroke-width="1"/>
+    <text x="616" y="256" class="name" text-anchor="middle">2 Push as bot account</text>
+    <text x="616" y="272" class="mono sub" text-anchor="middle">GitHub App token</text>
+    <text x="616" y="288" class="mono sub" text-anchor="middle">plain git push</text>
+  </g>
+  <g class="node">
+    <rect x="284" y="236" width="208" height="64" rx="6" fill="#f5f5f5"/>
+    <rect x="284" y="236" width="208" height="64" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+    <text x="388" y="256" class="name" text-anchor="middle">pre-push hook</text>
+    <text x="388" y="272" class="mono sub" text-anchor="middle">identity, links, static</text>
+    <text x="388" y="288" class="mono sub" text-anchor="middle">githooks/pre-push</text>
+  </g>
+  <g class="node">
+    <rect x="512" y="324" width="208" height="64" rx="6" fill="#f5f5f5"/>
+    <rect x="512" y="324" width="208" height="64" rx="6" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.30)" stroke-width="1"/>
+    <text x="616" y="344" class="name" text-anchor="middle">3 PR opened</text>
+    <text x="616" y="360" class="mono sub" text-anchor="middle">Closes #N or Refs #N</text>
+    <text x="616" y="376" class="mono sub" text-anchor="middle">base from conventions</text>
+  </g>
+  <g class="node">
+    <rect x="284" y="324" width="208" height="64" rx="6" fill="#f5f5f5"/>
+    <rect x="284" y="324" width="208" height="64" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+    <text x="388" y="344" class="name" text-anchor="middle">gh-link-guard.py</text>
+    <text x="388" y="360" class="mono sub" text-anchor="middle">links must resolve,</text>
+    <text x="388" y="376" class="mono sub" text-anchor="middle">comment anchors too</text>
+  </g>
+  <g class="node">
+    <rect x="512" y="412" width="208" height="64" rx="6" fill="#f5f5f5"/>
+    <rect x="512" y="412" width="208" height="64" rx="6" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.30)" stroke-width="1"/>
+    <text x="616" y="432" class="name" text-anchor="middle">4 What changes for you</text>
+    <text x="616" y="448" class="mono sub" text-anchor="middle">WCFY comment on the head</text>
+    <text x="616" y="464" class="mono sub" text-anchor="middle">before review request</text>
+  </g>
+  <g class="node">
+    <rect x="56" y="500" width="208" height="64" rx="6" fill="#f5f5f5"/>
+    <rect x="56" y="500" width="208" height="64" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+    <text x="160" y="520" class="name" text-anchor="middle">5 Request review</text>
+    <text x="160" y="536" class="mono sub" text-anchor="middle">kanban_request_review</text>
+    <text x="160" y="552" class="mono sub" text-anchor="middle">reviewer named</text>
+  </g>
+  <g class="node">
+    <rect x="56" y="588" width="208" height="64" rx="6" fill="#f5f5f5"/>
+    <rect x="56" y="588" width="208" height="64" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+    <text x="160" y="608" class="name" text-anchor="middle">6 Adversarial review</text>
+    <text x="160" y="624" class="mono sub" text-anchor="middle">reviewer, exact head sha</text>
+    <text x="160" y="640" class="mono sub" text-anchor="middle">calibration, mutants</text>
+  </g>
+  <g class="node">
+    <rect x="512" y="588" width="208" height="64" rx="6" fill="#f5f5f5"/>
+    <rect x="512" y="588" width="208" height="64" rx="6" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.30)" stroke-width="1"/>
+    <text x="616" y="608" class="name" text-anchor="middle">7 ## Review verdict</text>
+    <text x="616" y="624" class="mono sub" text-anchor="middle">comment on the head sha</text>
+    <text x="616" y="640" class="mono sub" text-anchor="middle">PASS or blocking findings</text>
+  </g>
+  <g class="node">
+    <rect x="284" y="676" width="208" height="64" rx="6" fill="#f5f5f5"/>
+    <rect x="284" y="676" width="208" height="64" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+    <text x="388" y="696" class="name" text-anchor="middle">review-loop guard</text>
+    <text x="388" y="712" class="mono sub" text-anchor="middle">3rd return: needs_input</text>
+    <text x="388" y="728" class="mono sub" text-anchor="middle">kanban-review-loop-guard</text>
+  </g>
+  <g class="node">
+    <rect x="512" y="852" width="208" height="64" rx="6" fill="#f5f5f5"/>
+    <rect x="512" y="852" width="208" height="64" rx="6" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.30)" stroke-width="1"/>
+    <text x="616" y="872" class="name" text-anchor="middle">9 CI green on the head</text>
+    <text x="616" y="888" class="mono sub" text-anchor="middle">gh pr checks</text>
+    <text x="616" y="904" class="mono sub" text-anchor="middle">all required checks</text>
+  </g>
+  <g class="node">
+    <rect x="56" y="940" width="208" height="64" rx="6" fill="#f5f5f5"/>
+    <rect x="56" y="940" width="208" height="64" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+    <text x="160" y="960" class="name" text-anchor="middle">10 Approval closes card</text>
+    <text x="160" y="976" class="mono sub" text-anchor="middle">reviewer kanban_complete</text>
+    <text x="160" y="992" class="mono sub" text-anchor="middle">remaining: owner merge</text>
+  </g>
+  <g class="node">
+    <rect x="284" y="940" width="208" height="64" rx="6" fill="#f5f5f5"/>
+    <rect x="284" y="940" width="208" height="64" rx="6" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.30)" stroke-width="1"/>
+    <text x="388" y="960" class="name" text-anchor="middle">Completion contract</text>
+    <text x="388" y="976" class="mono sub" text-anchor="middle">native, green checks</text>
+    <text x="388" y="992" class="mono sub" text-anchor="middle">published_pr = full URL</text>
+  </g>
+  <g class="node">
+    <rect x="284" y="1028" width="208" height="64" rx="6" fill="#f5f5f5"/>
+    <rect x="284" y="1028" width="208" height="64" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+    <text x="388" y="1048" class="name" text-anchor="middle">owner-merge hold</text>
+    <text x="388" y="1064" class="mono sub" text-anchor="middle">finding until merged</text>
+    <text x="388" y="1080" class="mono sub" text-anchor="middle">board-watchdog.py</text>
+  </g>
+  <g class="node">
+    <rect x="284" y="1116" width="208" height="64" rx="6" fill="#f5f5f5"/>
+    <rect x="284" y="1116" width="208" height="64" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+    <text x="388" y="1136" class="name" text-anchor="middle">WCFY hold</text>
+    <text x="388" y="1152" class="mono sub" text-anchor="middle">no fresh WCFY: task card</text>
+    <text x="388" y="1168" class="mono sub" text-anchor="middle">board-watchdog.py</text>
+  </g>
+  <g class="node">
+    <rect x="284" y="1204" width="208" height="64" rx="6" fill="#f5f5f5"/>
+    <rect x="284" y="1204" width="208" height="64" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+    <text x="388" y="1224" class="name" text-anchor="middle">pr-hygiene.py</text>
+    <text x="388" y="1240" class="mono sub" text-anchor="middle">conflicts, merge, stale</text>
+    <text x="388" y="1256" class="mono sub" text-anchor="middle">rebase to the owner card</text>
+  </g>
+  <g class="node">
+    <rect x="284" y="1292" width="208" height="64" rx="6" fill="#f5f5f5"/>
+    <rect x="284" y="1292" width="208" height="64" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+    <text x="388" y="1312" class="name" text-anchor="middle">pr-risk.py</text>
+    <text x="388" y="1328" class="mono sub" text-anchor="middle">risk:* label from paths</text>
+    <text x="388" y="1344" class="mono sub" text-anchor="middle">rules in pr-risk.yaml</text>
+  </g>
+  <g class="node">
+    <rect x="740" y="1028" width="208" height="64" rx="6" fill="#f5f5f5"/>
+    <rect x="740" y="1028" width="208" height="64" rx="6" fill="rgba(79,93,117,0.10)" stroke="#7a8399" stroke-width="1"/>
+    <text x="844" y="1048" class="name" text-anchor="middle">12 Owner formal review</text>
+    <text x="844" y="1064" class="mono sub" text-anchor="middle">approve or request changes</text>
+    <text x="844" y="1080" class="mono sub" text-anchor="middle">via GitHub review</text>
+  </g>
+  <g class="node">
+    <rect x="740" y="1380" width="208" height="64" rx="6" fill="#f5f5f5"/>
+    <rect x="740" y="1380" width="208" height="64" rx="6" fill="rgba(235,108,54,0.08)" stroke="#eb6c36" stroke-width="1"/>
+    <text x="844" y="1400" class="name" text-anchor="middle">13 Owner squash merge</text>
+    <text x="844" y="1416" class="mono sub" text-anchor="middle">gh pr merge --squash</text>
+    <text x="844" y="1432" class="mono sub" text-anchor="middle">--match-head-commit</text>
+  </g>
+  <g class="node">
+    <rect x="56" y="676" width="208" height="64" rx="6" fill="#f5f5f5"/>
+    <rect x="56" y="676" width="208" height="64" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1" stroke-dasharray="4,3"/>
+    <text x="160" y="696" class="name" text-anchor="middle">Changes requested</text>
+    <text x="160" y="712" class="mono sub" text-anchor="middle">kanban_request_changes</text>
+    <text x="160" y="728" class="mono sub" text-anchor="middle">rework on the same card</text>
+  </g>
+  <g class="node">
+    <rect x="56" y="764" width="208" height="64" rx="6" fill="#f5f5f5"/>
+    <rect x="56" y="764" width="208" height="64" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1" stroke-dasharray="4,3"/>
+    <text x="160" y="784" class="name" text-anchor="middle">8 Tester QA</text>
+    <text x="160" y="800" class="mono sub" text-anchor="middle">## QA verdict on the head</text>
+    <text x="160" y="816" class="mono sub" text-anchor="middle">where the plan has QA</text>
+  </g>
+  <g class="node">
+    <rect x="56" y="1204" width="208" height="64" rx="6" fill="#f5f5f5"/>
+    <rect x="56" y="1204" width="208" height="64" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1" stroke-dasharray="4,3"/>
+    <text x="160" y="1224" class="name" text-anchor="middle">Rework, new cycle</text>
+    <text x="160" y="1240" class="mono sub" text-anchor="middle">live card, else one card</text>
+    <text x="160" y="1256" class="mono sub" text-anchor="middle">github-pr-filter.sh</text>
+  </g>
+  <g class="node">
+    <rect x="512" y="1028" width="208" height="328" rx="6" fill="#f5f5f5"/>
+    <rect x="512" y="1028" width="208" height="328" rx="6" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.30)" stroke-width="1"/>
+    <text x="616" y="1172" class="name" text-anchor="middle">11 PR awaits the owner</text>
+    <text x="616" y="1188" class="mono sub" text-anchor="middle">card closed, PR open</text>
+    <text x="616" y="1204" class="mono sub" text-anchor="middle">checks keep running</text>
+    <text x="616" y="1220" class="mono sub" text-anchor="middle">until the owner merges</text>
+  </g>
+  <line x1="40" y1="1476" x2="960" y2="1476" stroke="rgba(45,49,66,0.10)" stroke-width="0.8"/>
+  <text x="40" y="1500" class="mono stage">LEGEND</text>
+  <rect x="40" y="1516" width="16" height="12" rx="2" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+  <text x="64" y="1526" class="leg">Agent step</text>
+  <rect x="160" y="1516" width="16" height="12" rx="2" fill="#ffffff" stroke="#2d3142" stroke-width="1" stroke-dasharray="4,3"/>
+  <text x="184" y="1526" class="leg">Optional or loop</text>
+  <rect x="320" y="1516" width="16" height="12" rx="2" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+  <text x="344" y="1526" class="leg">Pack gate</text>
+  <rect x="432" y="1516" width="16" height="12" rx="2" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.30)" stroke-width="1"/>
+  <text x="456" y="1526" class="leg">GitHub or native</text>
+  <rect x="592" y="1516" width="16" height="12" rx="2" fill="rgba(79,93,117,0.10)" stroke="#7a8399" stroke-width="1"/>
+  <text x="616" y="1526" class="leg">Owner input</text>
+  <rect x="716" y="1516" width="16" height="12" rx="2" fill="rgba(235,108,54,0.08)" stroke="#eb6c36" stroke-width="1"/>
+  <text x="740" y="1526" class="leg">Owner decision</text>
+  <path d="M40 1550 H68" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+  <text x="76" y="1554" class="leg">Handoff</text>
+  <path d="M152 1550 H180" fill="none" stroke="#2e5aa8" stroke-width="1.2" marker-end="url(#arrow-link)"/>
+  <text x="188" y="1554" class="leg">Via GitHub</text>
+  <path d="M284 1550 H312" fill="none" stroke="#4f5d75" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#arrow)"/>
+  <text x="320" y="1554" class="leg">Rework loop</text>
+  <path d="M420 1550 H448" fill="none" stroke="#eb6c36" stroke-width="1.4" marker-end="url(#arrow-accent)"/>
+  <text x="456" y="1554" class="leg">To the merge</text>
+  <line x1="564" y1="1550" x2="592" y2="1550" stroke="#7a8399" stroke-width="1.2" stroke-dasharray="2,3"/>
+  <text x="600" y="1554" class="leg">Check on that step</text>
+</svg>

@@ -1,0 +1,231 @@
+<svg viewBox="0 0 1000 1084" xmlns="http://www.w3.org/2000/svg" font-family="Geist, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#4f5d75"/></marker>
+    <marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#eb6c36"/></marker>
+    <marker id="arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#2e5aa8"/></marker>
+    <style>
+      .mono { font-family: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+      .serif { font-family: 'Instrument Serif', Georgia, 'Times New Roman', serif; }
+      .eye { fill: #4f5d75; font-size: 12px; letter-spacing: 0.12em; }
+      .name { fill: #2d3142; font-size: 15px; font-weight: 600; }
+      .name16 { fill: #2d3142; font-size: 16px; font-weight: 600; }
+      .sub { fill: #4f5d75; font-size: 12px; }
+      .txt { fill: #2d3142; font-size: 13px; }
+      .mut { fill: #4f5d75; font-size: 12px; }
+      .lnk { fill: #2e5aa8; font-size: 12px; }
+      .acc { fill: #eb6c36; font-size: 12px; }
+      .hdr { fill: #4f5d75; font-size: 12px; letter-spacing: 0.01em; }
+      .lbl { fill: #4f5d75; font-size: 12px; letter-spacing: 0.06em; }
+      .lbl-link { fill: #2e5aa8; font-size: 12px; letter-spacing: 0.06em; }
+      .lbl-acc { fill: #eb6c36; font-size: 12px; letter-spacing: 0.06em; }
+    </style>
+  </defs>
+  <rect width="100%" height="100%" fill="#f5f5f5"/>
+  <text x="40" y="36" class="mono eye">HERMES DARK FACTORY · CRON</text>
+  <text x="40" y="72" class="serif" fill="#2d3142" font-size="28">What runs on a schedule, and where it reports</text>
+  <text x="40" y="112" class="mono eye">FREQUENCY</text>
+  <text x="168" y="112" class="mono eye">JOB · PROFILE · SCHEDULE</text>
+  <text x="452" y="112" class="mono hdr" text-anchor="middle">BOARD</text>
+  <text x="528" y="112" class="mono hdr" text-anchor="middle">GITHUB</text>
+  <text x="604" y="112" class="mono hdr" text-anchor="middle">PROVIDER</text>
+  <text x="680" y="112" class="mono hdr" text-anchor="middle">WORKTREES</text>
+  <text x="756" y="112" class="mono hdr" text-anchor="middle">STANDS</text>
+  <text x="796" y="112" class="mono eye">OUTPUT GOES TO</text>
+  <line x1="40" y1="124" x2="960" y2="124" stroke="rgba(45,49,66,0.22)" stroke-width="1"/>
+  <text x="40" y="164" class="mono eye">EVERY 5 MIN</text>
+  <rect x="168" y="140" width="232" height="40" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+  <text x="180" y="156" class="name">rework-gate</text>
+  <text x="180" y="176" class="mono sub">default · */5 * * * *</text>
+  <circle cx="452" cy="160" r="6" fill="#4f5d75"/>
+  <circle cx="528" cy="160" r="2" fill="rgba(45,49,66,0.18)"/>
+  <circle cx="604" cy="160" r="2" fill="rgba(45,49,66,0.18)"/>
+  <circle cx="680" cy="160" r="2" fill="rgba(45,49,66,0.18)"/>
+  <circle cx="756" cy="160" r="2" fill="rgba(45,49,66,0.18)"/>
+  <text x="796" y="156" class="mut">rework gates on fresh</text>
+  <text x="796" y="172" class="mut">rework cards</text>
+  <rect x="168" y="188" width="232" height="40" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+  <text x="180" y="204" class="name">issue-executor-poll</text>
+  <text x="180" y="224" class="mono sub">default · */5 * * * *</text>
+  <circle cx="452" cy="208" r="6" fill="#4f5d75"/>
+  <circle cx="528" cy="208" r="6" fill="#4f5d75"/>
+  <circle cx="604" cy="208" r="2" fill="rgba(45,49,66,0.18)"/>
+  <circle cx="680" cy="208" r="2" fill="rgba(45,49,66,0.18)"/>
+  <circle cx="756" cy="208" r="2" fill="rgba(45,49,66,0.18)"/>
+  <text x="796" y="204" class="lnk">chat only when it</text>
+  <text x="796" y="220" class="lnk">creates an executor card</text>
+  <line x1="40" y1="236" x2="960" y2="236" stroke="rgba(45,49,66,0.1)" stroke-width="1"/>
+  <text x="40" y="268" class="mono eye">EVERY 10 MIN</text>
+  <rect x="168" y="244" width="232" height="40" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+  <text x="180" y="260" class="name">hermes-health</text>
+  <text x="180" y="280" class="mono sub">default · */10 * * * *</text>
+  <circle cx="452" cy="264" r="6" fill="#4f5d75"/>
+  <circle cx="528" cy="264" r="2" fill="rgba(45,49,66,0.18)"/>
+  <circle cx="604" cy="264" r="6" fill="#4f5d75"/>
+  <circle cx="680" cy="264" r="2" fill="rgba(45,49,66,0.18)"/>
+  <circle cx="756" cy="264" r="6" fill="#4f5d75"/>
+  <text x="796" y="260" class="lnk">chat only on problems:</text>
+  <text x="796" y="276" class="lnk">quota stop and recovery</text>
+  <rect x="168" y="292" width="232" height="40" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+  <text x="180" y="308" class="name">worker-api-watchdog</text>
+  <text x="180" y="328" class="mono sub">default · every 10 min</text>
+  <circle cx="452" cy="312" r="6" fill="#4f5d75"/>
+  <circle cx="528" cy="312" r="6" fill="#4f5d75"/>
+  <circle cx="604" cy="312" r="2" fill="rgba(45,49,66,0.18)"/>
+  <circle cx="680" cy="312" r="2" fill="rgba(45,49,66,0.18)"/>
+  <circle cx="756" cy="312" r="2" fill="rgba(45,49,66,0.18)"/>
+  <text x="796" y="308" class="txt">findings go to the card,</text>
+  <text x="796" y="324" class="mut">delivered locally</text>
+  <line x1="40" y1="340" x2="960" y2="340" stroke="rgba(45,49,66,0.1)" stroke-width="1"/>
+  <text x="40" y="372" class="mono eye">EVERY 15 MIN</text>
+  <rect x="168" y="348" width="232" height="40" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+  <text x="180" y="364" class="name">peak-pause-tick</text>
+  <text x="180" y="384" class="mono sub">ops · every 15 min</text>
+  <circle cx="452" cy="368" r="6" fill="#4f5d75"/>
+  <circle cx="528" cy="368" r="2" fill="rgba(45,49,66,0.18)"/>
+  <circle cx="604" cy="368" r="2" fill="rgba(45,49,66,0.18)"/>
+  <circle cx="680" cy="368" r="2" fill="rgba(45,49,66,0.18)"/>
+  <circle cx="756" cy="368" r="2" fill="rgba(45,49,66,0.18)"/>
+  <text x="796" y="364" class="mut">holds dispatch in the</text>
+  <text x="796" y="380" class="mut">peak window; else silent</text>
+  <line x1="40" y1="396" x2="960" y2="396" stroke="rgba(45,49,66,0.1)" stroke-width="1"/>
+  <text x="40" y="428" class="mono eye">EVERY 30 MIN</text>
+  <rect x="168" y="404" width="232" height="40" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+  <text x="180" y="420" class="name">pr-risk-labels</text>
+  <text x="180" y="440" class="mono sub">default · */30 * * * *</text>
+  <circle cx="452" cy="424" r="2" fill="rgba(45,49,66,0.18)"/>
+  <circle cx="528" cy="424" r="6" fill="#4f5d75"/>
+  <circle cx="604" cy="424" r="2" fill="rgba(45,49,66,0.18)"/>
+  <circle cx="680" cy="424" r="2" fill="rgba(45,49,66,0.18)"/>
+  <circle cx="756" cy="424" r="2" fill="rgba(45,49,66,0.18)"/>
+  <text x="796" y="420" class="mut">risk:&lt;class&gt; label on PRs,</text>
+  <text x="796" y="436" class="mut">quiet digest</text>
+  <line x1="40" y1="452" x2="960" y2="452" stroke="rgba(45,49,66,0.1)" stroke-width="1"/>
+  <text x="40" y="484" class="mono eye">HOURLY</text>
+  <rect x="168" y="460" width="232" height="40" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+  <text x="180" y="476" class="name">board-watchdog</text>
+  <text x="180" y="496" class="mono sub">default · 0 * * * *</text>
+  <circle cx="452" cy="480" r="6" fill="#4f5d75"/>
+  <circle cx="528" cy="480" r="6" fill="#4f5d75"/>
+  <circle cx="604" cy="480" r="2" fill="rgba(45,49,66,0.18)"/>
+  <circle cx="680" cy="480" r="2" fill="rgba(45,49,66,0.18)"/>
+  <circle cx="756" cy="480" r="2" fill="rgba(45,49,66,0.18)"/>
+  <text x="796" y="476" class="lnk">chat only on problems,</text>
+  <text x="796" y="492" class="mut">routine: quiet digest</text>
+  <rect x="168" y="508" width="232" height="40" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+  <text x="180" y="524" class="name">worktree-gc</text>
+  <text x="180" y="544" class="mono sub">default · 0 * * * *</text>
+  <circle cx="452" cy="528" r="2" fill="rgba(45,49,66,0.18)"/>
+  <circle cx="528" cy="528" r="6" fill="#4f5d75"/>
+  <circle cx="604" cy="528" r="2" fill="rgba(45,49,66,0.18)"/>
+  <circle cx="680" cy="528" r="6" fill="#4f5d75"/>
+  <circle cx="756" cy="528" r="2" fill="rgba(45,49,66,0.18)"/>
+  <text x="796" y="524" class="mut">removes finished worktrees,</text>
+  <text x="796" y="540" class="mut">quiet digest</text>
+  <line x1="40" y1="556" x2="960" y2="556" stroke="rgba(45,49,66,0.1)" stroke-width="1"/>
+  <text x="40" y="588" class="mono eye">EVERY 2 H</text>
+  <rect x="168" y="564" width="232" height="40" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+  <text x="180" y="580" class="name">pr-hygiene</text>
+  <text x="180" y="600" class="mono sub">default · 0 */2 * * *</text>
+  <circle cx="452" cy="584" r="6" fill="#4f5d75"/>
+  <circle cx="528" cy="584" r="6" fill="#4f5d75"/>
+  <circle cx="604" cy="584" r="2" fill="rgba(45,49,66,0.18)"/>
+  <circle cx="680" cy="584" r="2" fill="rgba(45,49,66,0.18)"/>
+  <circle cx="756" cy="584" r="2" fill="rgba(45,49,66,0.18)"/>
+  <text x="796" y="580" class="txt">comment on owner card,</text>
+  <text x="796" y="596" class="mut">quiet digest</text>
+  <line x1="40" y1="612" x2="960" y2="612" stroke="rgba(45,49,66,0.1)" stroke-width="1"/>
+  <text x="40" y="644" class="mono eye">DAILY</text>
+  <rect x="168" y="620" width="232" height="40" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+  <text x="180" y="636" class="name">nightly-backup</text>
+  <text x="180" y="656" class="mono sub">default · 23 4 * * *</text>
+  <circle cx="452" cy="640" r="2" fill="rgba(45,49,66,0.18)"/>
+  <circle cx="528" cy="640" r="2" fill="rgba(45,49,66,0.18)"/>
+  <circle cx="604" cy="640" r="2" fill="rgba(45,49,66,0.18)"/>
+  <circle cx="680" cy="640" r="2" fill="rgba(45,49,66,0.18)"/>
+  <circle cx="756" cy="640" r="2" fill="rgba(45,49,66,0.18)"/>
+  <text x="796" y="636" class="mut">hermes backup to a dated</text>
+  <text x="796" y="652" class="mut">zip, log-based verdict</text>
+  <rect x="168" y="668" width="232" height="40" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+  <text x="180" y="684" class="name">ux-tick</text>
+  <text x="180" y="704" class="mono sub">default · 0 9 * * * · cheap</text>
+  <circle cx="452" cy="688" r="2" fill="rgba(45,49,66,0.18)"/>
+  <circle cx="528" cy="688" r="6" fill="#4f5d75"/>
+  <circle cx="604" cy="688" r="2" fill="rgba(45,49,66,0.18)"/>
+  <circle cx="680" cy="688" r="2" fill="rgba(45,49,66,0.18)"/>
+  <circle cx="756" cy="688" r="2" fill="rgba(45,49,66,0.18)"/>
+  <text x="796" y="684" class="txt">GitHub issues awaiting</text>
+  <text x="796" y="700" class="txt">the owner’s triage</text>
+  <rect x="168" y="716" width="232" height="40" rx="6" fill="rgba(235,108,54,0.08)" stroke="#eb6c36" stroke-width="1"/>
+  <text x="180" y="732" class="name">metrics-evening</text>
+  <text x="180" y="752" class="mono sub">default · 0 14 * * *</text>
+  <circle cx="452" cy="736" r="6" fill="#4f5d75"/>
+  <circle cx="528" cy="736" r="6" fill="#4f5d75"/>
+  <circle cx="604" cy="736" r="2" fill="rgba(45,49,66,0.18)"/>
+  <circle cx="680" cy="736" r="2" fill="rgba(45,49,66,0.18)"/>
+  <circle cx="756" cy="736" r="2" fill="rgba(45,49,66,0.18)"/>
+  <text x="796" y="732" class="lnk">chat: evening report,</text>
+  <text x="796" y="748" class="lnk">prints the quiet digest</text>
+  <rect x="168" y="764" width="232" height="40" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+  <text x="180" y="780" class="name">holdout-nightly</text>
+  <text x="180" y="800" class="mono sub">tester · 0 20 * * * · cheap</text>
+  <circle cx="452" cy="784" r="6" fill="#4f5d75"/>
+  <circle cx="528" cy="784" r="6" fill="#4f5d75"/>
+  <circle cx="604" cy="784" r="2" fill="rgba(45,49,66,0.18)"/>
+  <circle cx="680" cy="784" r="6" fill="#4f5d75"/>
+  <circle cx="756" cy="784" r="6" fill="#4f5d75"/>
+  <text x="796" y="780" class="txt">report file; a card only</text>
+  <text x="796" y="796" class="txt">for a product defect</text>
+  <rect x="168" y="812" width="232" height="40" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+  <text x="180" y="828" class="name">holdout-stands-kill</text>
+  <text x="180" y="848" class="mono sub">tester · 0 23 * * *</text>
+  <circle cx="452" cy="832" r="2" fill="rgba(45,49,66,0.18)"/>
+  <circle cx="528" cy="832" r="2" fill="rgba(45,49,66,0.18)"/>
+  <circle cx="604" cy="832" r="2" fill="rgba(45,49,66,0.18)"/>
+  <circle cx="680" cy="832" r="2" fill="rgba(45,49,66,0.18)"/>
+  <circle cx="756" cy="832" r="6" fill="#4f5d75"/>
+  <text x="796" y="828" class="mut">stops stands left by</text>
+  <text x="796" y="844" class="mut">the holdout run</text>
+  <rect x="168" y="860" width="232" height="40" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+  <text x="180" y="876" class="name">usage-ledger</text>
+  <text x="180" y="896" class="mono sub">default · 50 23 * * *</text>
+  <circle cx="452" cy="880" r="6" fill="#4f5d75"/>
+  <circle cx="528" cy="880" r="2" fill="rgba(45,49,66,0.18)"/>
+  <circle cx="604" cy="880" r="2" fill="rgba(45,49,66,0.18)"/>
+  <circle cx="680" cy="880" r="2" fill="rgba(45,49,66,0.18)"/>
+  <circle cx="756" cy="880" r="2" fill="rgba(45,49,66,0.18)"/>
+  <text x="796" y="876" class="txt">spend comment on each</text>
+  <text x="796" y="892" class="txt">finished card</text>
+  <line x1="40" y1="908" x2="960" y2="908" stroke="rgba(45,49,66,0.1)" stroke-width="1"/>
+  <text x="40" y="940" class="mono eye">WEEKLY</text>
+  <rect x="168" y="916" width="232" height="40" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+  <text x="180" y="932" class="name">ceo-tick</text>
+  <text x="180" y="952" class="mono sub">default · 0 7 * * 0 · strong</text>
+  <circle cx="452" cy="936" r="2" fill="rgba(45,49,66,0.18)"/>
+  <circle cx="528" cy="936" r="6" fill="#4f5d75"/>
+  <circle cx="604" cy="936" r="2" fill="rgba(45,49,66,0.18)"/>
+  <circle cx="680" cy="936" r="2" fill="rgba(45,49,66,0.18)"/>
+  <circle cx="756" cy="936" r="2" fill="rgba(45,49,66,0.18)"/>
+  <text x="796" y="932" class="txt">1 to 3 issues awaiting</text>
+  <text x="796" y="948" class="txt">the owner’s triage</text>
+  <rect x="168" y="964" width="232" height="40" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+  <text x="180" y="980" class="name">cto-tick</text>
+  <text x="180" y="1000" class="mono sub">default · 0 8 * * 0 · strong</text>
+  <circle cx="452" cy="984" r="2" fill="rgba(45,49,66,0.18)"/>
+  <circle cx="528" cy="984" r="6" fill="#4f5d75"/>
+  <circle cx="604" cy="984" r="2" fill="rgba(45,49,66,0.18)"/>
+  <circle cx="680" cy="984" r="2" fill="rgba(45,49,66,0.18)"/>
+  <circle cx="756" cy="984" r="2" fill="rgba(45,49,66,0.18)"/>
+  <text x="796" y="980" class="txt">1 to 3 issues and a</text>
+  <text x="796" y="996" class="lnk">summary to owner’s chat</text>
+  <line x1="40" y1="1024" x2="960" y2="1024" stroke="rgba(45,49,66,0.22)" stroke-width="1"/>
+  <rect x="40" y="1032" width="28" height="16" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+  <text x="76" y="1044" class="mut">script job (no-agent)</text>
+  <rect x="244" y="1032" width="28" height="16" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+  <text x="280" y="1044" class="mut">agent job</text>
+  <rect x="368" y="1032" width="28" height="16" rx="6" fill="rgba(235,108,54,0.08)" stroke="#eb6c36" stroke-width="1"/>
+  <text x="404" y="1044" class="mut">daily report</text>
+  <circle cx="520" cy="1040" r="6" fill="#4f5d75"/>
+  <text x="536" y="1044" class="mut">touches</text>
+  <text x="612" y="1044" class="lnk">blue text: reaches the owner’s chat</text>
+  <text x="40" y="1068" class="mut">Script jobs print nothing when healthy: empty stdout is a quiet tick. Routine events go to the quiet digest (cron_quiet).</text>
+</svg>

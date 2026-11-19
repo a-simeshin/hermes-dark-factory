@@ -1,0 +1,132 @@
+<svg viewBox="0 0 1000 728" xmlns="http://www.w3.org/2000/svg" font-family="Geist, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#4f5d75"/></marker>
+    <marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#eb6c36"/></marker>
+    <marker id="arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#2e5aa8"/></marker>
+    <style>
+      .mono { font-family: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+      .serif { font-family: 'Instrument Serif', Georgia, 'Times New Roman', serif; }
+      .eye { fill: #4f5d75; font-size: 12px; letter-spacing: 0.12em; }
+      .name { fill: #2d3142; font-size: 15px; font-weight: 600; }
+      .name16 { fill: #2d3142; font-size: 16px; font-weight: 600; }
+      .sub { fill: #4f5d75; font-size: 12px; }
+      .txt { fill: #2d3142; font-size: 13px; }
+      .mut { fill: #4f5d75; font-size: 12px; }
+      .lnk { fill: #2e5aa8; font-size: 12px; }
+      .acc { fill: #eb6c36; font-size: 12px; }
+      .hdr { fill: #4f5d75; font-size: 12px; letter-spacing: 0.01em; }
+      .lbl { fill: #4f5d75; font-size: 12px; letter-spacing: 0.06em; }
+      .lbl-link { fill: #2e5aa8; font-size: 12px; letter-spacing: 0.06em; }
+      .lbl-acc { fill: #eb6c36; font-size: 12px; letter-spacing: 0.06em; }
+    </style>
+  </defs>
+  <rect width="100%" height="100%" fill="#f5f5f5"/>
+  <text x="40" y="36" class="mono eye">HERMES DARK FACTORY · KNOWLEDGE</text>
+  <text x="40" y="72" class="serif" fill="#2d3142" font-size="28">Where the agents keep what they learn, and how the owner teaches</text>
+  <text x="40" y="112" class="mono eye">OWNER TEACHING ROUND, THROUGH THE AGENT'S OWN CHAT</text>
+  <line x1="216" y1="156" x2="232" y2="156" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+  <line x1="408" y1="156" x2="424" y2="156" stroke="#2e5aa8" stroke-width="1.2" marker-end="url(#arrow-link)"/>
+  <line x1="600" y1="156" x2="616" y2="156" stroke="#2e5aa8" stroke-width="1.2" marker-end="url(#arrow-link)"/>
+  <line x1="792" y1="156" x2="808" y2="156" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+  <line x1="896" y1="188" x2="896" y2="220" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+  <line x1="808" y1="252" x2="792" y2="252" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+  <line x1="616" y1="252" x2="600" y2="252" stroke="#eb6c36" stroke-width="1.2" marker-end="url(#arrow-accent)"/>
+  <line x1="424" y1="252" x2="408" y2="252" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+  <line x1="232" y1="252" x2="216" y2="252" stroke="#4f5d75" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#arrow)"/>
+  <line x1="128" y1="220" x2="128" y2="188" stroke="#4f5d75" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#arrow)"/>
+  <text x="136" y="208" class="mono lbl">NEXT ROUND</text>
+  <line x1="896" y1="284" x2="896" y2="364" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+  <text x="884" y="332" class="mono lbl" text-anchor="end">COMMITS THE LAYERS</text>
+  <rect x="40" y="124" width="176" height="64" rx="6" fill="rgba(79,93,117,0.10)" stroke="#7a8399" stroke-width="1"/>
+  <text x="52" y="148" class="name">Owner: facts</text>
+  <text x="52" y="168" class="mut">links, file:line, effect</text>
+  <rect x="232" y="124" width="176" height="64" rx="6" fill="rgba(79,93,117,0.10)" stroke="#7a8399" stroke-width="1"/>
+  <text x="244" y="148" class="name">Check decisions</text>
+  <text x="244" y="168" class="mut">conflict: change or drop</text>
+  <rect x="424" y="124" width="176" height="64" rx="6" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.30)" stroke-width="1"/>
+  <text x="436" y="148" class="name">Orchestrator chat</text>
+  <text x="436" y="168" class="mut">Telegram or hermes -z</text>
+  <rect x="616" y="124" width="176" height="64" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+  <text x="628" y="148" class="name">Finds root cause</text>
+  <text x="628" y="168" class="mut">in its own session</text>
+  <rect x="808" y="124" width="176" height="64" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+  <text x="820" y="148" class="name">Fixes one layer</text>
+  <text x="820" y="168" class="mut">the agent picks which</text>
+  <rect x="808" y="220" width="176" height="64" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+  <text x="820" y="244" class="name">Snapshot commit</text>
+  <text x="820" y="264" class="mono sub">teach-snapshot.sh</text>
+  <rect x="616" y="220" width="176" height="64" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+  <text x="628" y="244" class="name">Fixed handover</text>
+  <text x="628" y="264" class="mut">diff --stat, hash, DONE</text>
+  <rect x="424" y="220" width="176" height="64" rx="6" fill="rgba(235,108,54,0.08)" stroke="#eb6c36" stroke-width="1"/>
+  <text x="436" y="244" class="name">Verify artifact</text>
+  <text x="436" y="264" class="mut">snapshot diff, red test</text>
+  <rect x="232" y="220" width="176" height="64" rx="6" fill="rgba(79,93,117,0.10)" stroke="#7a8399" stroke-width="1"/>
+  <text x="244" y="244" class="name">Next real case</text>
+  <text x="244" y="264" class="mut">rule applied: closed</text>
+  <rect x="40" y="220" width="176" height="64" rx="6" fill="#ffffff" stroke="#7a8399" stroke-width="1" stroke-dasharray="4,3"/>
+  <text x="52" y="244" class="name">Not applied?</text>
+  <text x="52" y="264" class="mut">fix scope or form</text>
+  <text x="512" y="312" class="mono lbl-acc" text-anchor="middle">VERIFY THE ARTIFACT, NOT THE REPORT</text>
+  <text x="40" y="352" class="mono eye">KNOWLEDGE LAYERS IN THE HERMES HOME, UNDER GIT</text>
+  <rect x="28" y="364" width="968" height="112" rx="6" fill="none" stroke="rgba(45,49,66,0.22)" stroke-width="1" stroke-dasharray="4,3"/>
+  <line x1="320" y1="544" x2="320" y2="464" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+  <text x="328" y="516" class="mono lbl">ENV FACT</text>
+  <line x1="512" y1="544" x2="512" y2="464" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+  <text x="520" y="516" class="mono lbl">PROCEDURE</text>
+  <line x1="704" y1="544" x2="704" y2="464" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+  <text x="712" y="516" class="mono lbl">PROJECT FACT</text>
+  <line x1="216" y1="576" x2="232" y2="576" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+  <line x1="776" y1="576" x2="808" y2="576" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+  <rect x="40" y="376" width="176" height="88" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+  <text x="52" y="400" class="name">SOUL.md persona</text>
+  <text x="52" y="416" class="mono sub">always loaded</text>
+  <text x="52" y="432" class="mut">identity, read-first list,</text>
+  <text x="52" y="448" class="mut">skill table, prohibitions</text>
+  <rect x="232" y="376" width="176" height="88" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+  <text x="244" y="400" class="name">Profile memory</text>
+  <text x="244" y="416" class="mono sub">always, 2200 chars</text>
+  <text x="244" y="432" class="mut">one-line environment</text>
+  <text x="244" y="448" class="mut">facts, no project facts</text>
+  <rect x="424" y="376" width="176" height="88" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+  <text x="436" y="400" class="name">Shared skills</text>
+  <text x="436" y="416" class="mono sub">skills.external_dirs</text>
+  <text x="436" y="432" class="mut">procedures; the pack is</text>
+  <text x="436" y="448" class="mut">read-only for agents</text>
+  <rect x="616" y="376" width="176" height="88" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+  <text x="628" y="400" class="name">Conventions skill</text>
+  <text x="628" y="416" class="mono sub">skills.auto_load</text>
+  <text x="628" y="432" class="mut">project facts, rules</text>
+  <text x="628" y="448" class="mut">and owner decisions</text>
+  <rect x="808" y="376" width="176" height="88" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+  <text x="820" y="400" class="name">lessons.md</text>
+  <text x="820" y="416" class="mono sub">skill references/</text>
+  <text x="820" y="432" class="mut">rule, cause, application;</text>
+  <text x="820" y="448" class="mut">read on demand</text>
+  <text x="40" y="512" class="mono eye">WORKER, BEFORE KANBAN_COMPLETE</text>
+  <rect x="40" y="544" width="176" height="64" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+  <text x="52" y="568" class="name">Card run ends</text>
+  <text x="52" y="584" class="mut">one turn per run</text>
+  <rect x="232" y="544" width="544" height="64" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+  <text x="244" y="568" class="name">save-lesson-before-complete</text>
+  <text x="244" y="584" class="mut">Learned something that saves time next time? No: write nothing.</text>
+  <text x="244" y="600" class="mut">Yes: pick the layer by the nature of the knowledge.</text>
+  <rect x="808" y="544" width="176" height="64" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+  <text x="820" y="568" class="name">Hash in summary</text>
+  <text x="820" y="584" class="mut">or "no snapshot taken"</text>
+  <text x="40" y="640" class="mut">Background self-review never fires in a card run (one turn), so saving the lesson is an explicit step.</text>
+  <text x="40" y="656" class="mut">teach-snapshot.sh commits a whitelist of paths (never git add -A) and runs the whole suite; a red suite marks the commit RED.</text>
+  <line x1="40" y1="688" x2="960" y2="688" stroke="rgba(45,49,66,0.22)" stroke-width="1"/>
+  <rect x="40" y="696" width="28" height="16" rx="6" fill="rgba(79,93,117,0.10)" stroke="#7a8399" stroke-width="1"/>
+  <text x="76" y="708" class="mut">owner</text>
+  <rect x="140" y="696" width="28" height="16" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+  <text x="176" y="708" class="mut">agent step or layer</text>
+  <rect x="332" y="696" width="28" height="16" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+  <text x="368" y="708" class="mut">pack script or skill</text>
+  <rect x="528" y="696" width="28" height="16" rx="6" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.30)" stroke-width="1"/>
+  <text x="564" y="708" class="mut">chat channel</text>
+  <rect x="672" y="696" width="28" height="16" rx="6" fill="rgba(235,108,54,0.08)" stroke="#eb6c36" stroke-width="1"/>
+  <text x="708" y="708" class="mut">owner check</text>
+  <rect x="808" y="696" width="28" height="16" rx="6" fill="#ffffff" stroke="#7a8399" stroke-width="1" stroke-dasharray="4,3"/>
+  <text x="844" y="708" class="mut">when needed</text>
+</svg>

@@ -1,0 +1,111 @@
+<svg viewBox="0 0 1000 704" xmlns="http://www.w3.org/2000/svg" font-family="Geist, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#4f5d75"/></marker>
+    <marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#eb6c36"/></marker>
+    <marker id="arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#2e5aa8"/></marker>
+    <style>
+      .mono { font-family: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+      .serif { font-family: 'Instrument Serif', Georgia, 'Times New Roman', serif; }
+      .eye { fill: #4f5d75; font-size: 12px; letter-spacing: 0.12em; }
+      .name { fill: #2d3142; font-size: 15px; font-weight: 600; }
+      .name16 { fill: #2d3142; font-size: 16px; font-weight: 600; }
+      .sub { fill: #4f5d75; font-size: 12px; }
+      .txt { fill: #2d3142; font-size: 13px; }
+      .mut { fill: #4f5d75; font-size: 12px; }
+      .lnk { fill: #2e5aa8; font-size: 12px; }
+      .acc { fill: #eb6c36; font-size: 12px; }
+      .hdr { fill: #4f5d75; font-size: 12px; letter-spacing: 0.01em; }
+      .lbl { fill: #4f5d75; font-size: 12px; letter-spacing: 0.06em; }
+      .lbl-link { fill: #2e5aa8; font-size: 12px; letter-spacing: 0.06em; }
+      .lbl-acc { fill: #eb6c36; font-size: 12px; letter-spacing: 0.06em; }
+    </style>
+  </defs>
+  <rect width="100%" height="100%" fill="#f5f5f5"/>
+  <text x="40" y="36" class="mono eye">HERMES DARK FACTORY · NOTIFICATIONS</text>
+  <text x="40" y="72" class="serif" fill="#2d3142" font-size="28">What reaches the owner's phone, and what to do with it</text>
+  <text x="40" y="112" class="mono eye">SOURCE</text>
+  <text x="312" y="112" class="mono eye">DELIVERY</text>
+  <text x="520" y="112" class="mono eye">WHAT ARRIVES</text>
+  <text x="760" y="112" class="mono eye">WHAT YOU DO</text>
+  <line x1="264" y1="160" x2="312" y2="160" stroke="#2e5aa8" stroke-width="1.2" marker-end="url(#arrow-link)"/>
+  <line x1="472" y1="160" x2="520" y2="160" stroke="#2e5aa8" stroke-width="1.2" marker-end="url(#arrow-link)"/>
+  <line x1="720" y1="160" x2="760" y2="160" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+  <line x1="264" y1="248" x2="312" y2="248" stroke="#2e5aa8" stroke-width="1.2" marker-end="url(#arrow-link)"/>
+  <line x1="472" y1="248" x2="520" y2="248" stroke="#2e5aa8" stroke-width="1.2" marker-end="url(#arrow-link)"/>
+  <line x1="720" y1="248" x2="760" y2="248" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+  <line x1="264" y1="336" x2="312" y2="336" stroke="#2e5aa8" stroke-width="1.2" marker-end="url(#arrow-link)"/>
+  <line x1="472" y1="336" x2="520" y2="336" stroke="#2e5aa8" stroke-width="1.2" marker-end="url(#arrow-link)"/>
+  <line x1="720" y1="336" x2="760" y2="336" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+  <line x1="264" y1="424" x2="312" y2="424" stroke="#2e5aa8" stroke-width="1.2" marker-end="url(#arrow-link)"/>
+  <line x1="472" y1="424" x2="520" y2="424" stroke="#2e5aa8" stroke-width="1.2" marker-end="url(#arrow-link)"/>
+  <line x1="720" y1="424" x2="760" y2="424" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+  <line x1="152" y1="496" x2="152" y2="456" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+  <rect x="312" y="128" width="160" height="328" rx="6" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.30)" stroke-width="1"/>
+  <text x="392" y="196" class="name" text-anchor="middle">Telegram</text>
+  <text x="392" y="216" class="name" text-anchor="middle">gateway</text>
+  <text x="392" y="236" class="mut" text-anchor="middle">to the owner's chat</text>
+  <rect x="40" y="128" width="224" height="64" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+  <text x="52" y="152" class="name">Card events</text>
+  <text x="52" y="176" class="mono sub">native notify subscription</text>
+  <rect x="520" y="128" width="200" height="64" rx="6" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.30)" stroke-width="1"/>
+  <text x="532" y="156" class="txt">completed, blocked,</text>
+  <text x="532" y="172" class="txt">review requested, crashed</text>
+  <rect x="760" y="128" width="200" height="64" rx="6" fill="rgba(79,93,117,0.10)" stroke="#7a8399" stroke-width="1"/>
+  <text x="772" y="152" class="name">Answer needs_input</text>
+  <text x="772" y="168" class="mut">noisy: change the</text>
+  <text x="772" y="184" class="mut">delivery mode</text>
+  <rect x="40" y="216" width="224" height="64" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+  <text x="52" y="240" class="name">board-watchdog.py</text>
+  <text x="52" y="264" class="mono sub">hourly, only on problems</text>
+  <rect x="520" y="216" width="200" height="64" rx="6" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.30)" stroke-width="1"/>
+  <text x="532" y="236" class="txt">stuck dispatch, cards</text>
+  <text x="532" y="252" class="txt">blocked on you, PRs</text>
+  <text x="532" y="268" class="txt">waiting for your merge</text>
+  <rect x="760" y="216" width="200" height="64" rx="6" fill="rgba(235,108,54,0.08)" stroke="#eb6c36" stroke-width="1"/>
+  <text x="772" y="240" class="name">Review and merge</text>
+  <text x="772" y="256" class="mut">squash, pinned to the</text>
+  <text x="772" y="272" class="mut">head you approved</text>
+  <rect x="40" y="304" width="224" height="64" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+  <text x="52" y="328" class="name">hermes-health.py</text>
+  <text x="52" y="352" class="mono sub">every 10 min, on problems</text>
+  <rect x="520" y="304" width="200" height="64" rx="6" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.30)" stroke-width="1"/>
+  <text x="532" y="324" class="txt">quota gone: dispatch</text>
+  <text x="532" y="340" class="txt">stopped; later a</text>
+  <text x="532" y="356" class="txt">"quota is back" signal</text>
+  <rect x="760" y="304" width="200" height="64" rx="6" fill="rgba(79,93,117,0.10)" stroke="#7a8399" stroke-width="1"/>
+  <text x="772" y="328" class="name">Nothing to press</text>
+  <text x="772" y="344" class="mut">recovery is automatic;</text>
+  <text x="772" y="360" class="mut">your own stop: by hand</text>
+  <rect x="40" y="392" width="224" height="64" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+  <text x="52" y="416" class="name">metrics-evening.py</text>
+  <text x="52" y="440" class="mono sub">daily evening report</text>
+  <rect x="520" y="392" width="200" height="64" rx="6" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.30)" stroke-width="1"/>
+  <text x="532" y="412" class="txt">spend, cards closed,</text>
+  <text x="532" y="428" class="txt">path to merge,</text>
+  <text x="532" y="444" class="txt">merge-ready PRs</text>
+  <rect x="760" y="392" width="200" height="64" rx="6" fill="rgba(79,93,117,0.10)" stroke="#7a8399" stroke-width="1"/>
+  <text x="772" y="416" class="name">Read the report</text>
+  <text x="772" y="432" class="mut">cost per card, pick</text>
+  <text x="772" y="448" class="mut">merge candidates</text>
+  <rect x="40" y="496" width="224" height="64" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+  <text x="52" y="520" class="name">cron_quiet digest</text>
+  <text x="52" y="544" class="mono sub">routine events, no push</text>
+  <text x="160" y="480" class="mono lbl">PRINTED IN</text>
+  <text x="280" y="520" class="mut">Card recreations, parking, worktree cleanup, label changes and</text>
+  <text x="280" y="536" class="mut">hygiene with no changes go to the daily digest file; the evening</text>
+  <text x="280" y="552" class="mut">report prints it. Nothing is pushed for them.</text>
+  <text x="40" y="600" class="txt">Silence means healthy: every watchdog prints nothing when there is nothing to say.</text>
+  <text x="40" y="616" class="mut">Cards created from a chat are subscribed to that chat; the watchdog subscribes cards created without a chat anchor.</text>
+  <text x="40" y="632" class="mut">A notification you learn to ignore is worse than none: change the subscription instead.</text>
+  <line x1="40" y1="664" x2="960" y2="664" stroke="rgba(45,49,66,0.22)" stroke-width="1"/>
+  <rect x="40" y="672" width="28" height="16" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+  <text x="76" y="684" class="mut">native Hermes</text>
+  <rect x="192" y="672" width="28" height="16" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+  <text x="228" y="684" class="mut">pack script</text>
+  <rect x="328" y="672" width="28" height="16" rx="6" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.30)" stroke-width="1"/>
+  <text x="364" y="684" class="mut">Telegram</text>
+  <rect x="444" y="672" width="28" height="16" rx="6" fill="rgba(79,93,117,0.10)" stroke="#7a8399" stroke-width="1"/>
+  <text x="480" y="684" class="mut">owner action</text>
+  <rect x="588" y="672" width="28" height="16" rx="6" fill="rgba(235,108,54,0.08)" stroke="#eb6c36" stroke-width="1"/>
+  <text x="624" y="684" class="mut">only the owner merges</text>
+</svg>

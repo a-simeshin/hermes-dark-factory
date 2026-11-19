@@ -1,0 +1,185 @@
+<svg viewBox="0 0 1000 852" width="1000" height="852" xmlns="http://www.w3.org/2000/svg" font-family="Geist, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#4f5d75"/></marker>
+    <marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#eb6c36"/></marker>
+    <marker id="arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#2e5aa8"/></marker>
+    <style>
+      .mono { font-family: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+      .serif { font-family: 'Instrument Serif', Georgia, 'Times New Roman', serif; }
+      .stage { fill: #4f5d75; font-size: 12px; letter-spacing: 0.14em; }
+      .name { fill: #2d3142; font-size: 15px; font-weight: 600; }
+      .sub { fill: #4f5d75; font-size: 12px; }
+      .desc { fill: #2d3142; font-size: 12px; }
+      .tag { fill: #7a8399; font-size: 12px; letter-spacing: 0.06em; }
+      .lbl { fill: #4f5d75; font-size: 12px; letter-spacing: 0.06em; }
+      .lbl-accent { fill: #eb6c36; font-size: 12px; letter-spacing: 0.06em; }
+      .lbl-link { fill: #2e5aa8; font-size: 12px; letter-spacing: 0.06em; }
+      .leg { fill: #4f5d75; font-size: 12px; }
+      .cell { fill: #2d3142; font-size: 13px; }
+      .num { fill: #2d3142; font-size: 12px; font-weight: 600; }
+    </style>
+  </defs>
+
+  <rect width="100%" height="100%" fill="#f5f5f5"/>
+
+  <text x="40" y="36" class="mono stage">HERMES DARK FACTORY · GATES MAP 2 OF 2</text>
+  <text x="40" y="72" class="serif" fill="#2d3142" font-size="28">Gates around a pull request: push, publish, review</text>
+  <rect x="40" y="112" width="136" height="28" rx="14" fill="#f5f5f5" stroke="#7a8399" stroke-width="1" stroke-dasharray="4,3"/>
+  <text x="108" y="130" class="mono lbl" text-anchor="middle">1 · CREATED</text>
+  <path d="M178 126 H194" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+  <rect x="196" y="112" width="136" height="28" rx="14" fill="#f5f5f5" stroke="#7a8399" stroke-width="1" stroke-dasharray="4,3"/>
+  <text x="264" y="130" class="mono lbl" text-anchor="middle">2 · RUN WORKS</text>
+  <path d="M334 126 H350" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+  <rect x="352" y="112" width="136" height="28" rx="14" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+  <text x="420" y="130" class="mono num" text-anchor="middle">3 · PUSH</text>
+  <path d="M490 126 H506" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+  <rect x="508" y="112" width="136" height="28" rx="14" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+  <text x="576" y="130" class="mono num" text-anchor="middle">4 · ON THE PR</text>
+  <path d="M646 126 H662" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+  <rect x="664" y="112" width="136" height="28" rx="14" fill="#f5f5f5" stroke="#7a8399" stroke-width="1" stroke-dasharray="4,3"/>
+  <text x="732" y="130" class="mono lbl" text-anchor="middle">5 · CLOSES</text>
+  <rect x="820" y="112" width="136" height="28" rx="14" fill="#f5f5f5" stroke="#7a8399" stroke-width="1" stroke-dasharray="4,3"/>
+  <text x="888" y="130" class="mono lbl" text-anchor="middle">6 · BOARD-WIDE</text>
+  <text x="40" y="176" class="mono stage">3 · ON COMMIT, PUSH AND PUBLISH</text>
+  <text x="960" y="176" class="leg" text-anchor="end">git hooks and the gh wrapper, fail closed</text>
+  <line x1="40" y1="186" x2="968" y2="186" stroke="rgba(45,49,66,0.16)" stroke-width="1"/>
+  <g class="node">
+    <rect x="40" y="200" width="220" height="112" rx="6" fill="#f5f5f5"/>
+    <rect x="40" y="200" width="220" height="112" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+    <text x="150" y="224" class="name" text-anchor="middle">commit-msg hook</text>
+    <text x="150" y="244" class="mono tag" text-anchor="middle">GIT HOOK · COMMIT</text>
+    <text x="150" y="264" class="desc" text-anchor="middle">no em dash in the</text>
+    <text x="150" y="280" class="desc" text-anchor="middle">commit message</text>
+    <text x="150" y="300" class="mono sub" text-anchor="middle">githooks/commit-msg</text>
+  </g>
+  <g class="node">
+    <rect x="276" y="200" width="220" height="112" rx="6" fill="#f5f5f5"/>
+    <rect x="276" y="200" width="220" height="112" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+    <text x="386" y="224" class="name" text-anchor="middle">pre-commit hook</text>
+    <text x="386" y="244" class="mono tag" text-anchor="middle">GIT HOOK · COMMIT</text>
+    <text x="386" y="264" class="desc" text-anchor="middle">no silent source deletion,</text>
+    <text x="386" y="280" class="desc" text-anchor="middle">no em dash in our text</text>
+    <text x="386" y="300" class="mono sub" text-anchor="middle">githooks/pre-commit</text>
+  </g>
+  <g class="node">
+    <rect x="512" y="200" width="220" height="112" rx="6" fill="#f5f5f5"/>
+    <rect x="512" y="200" width="220" height="112" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+    <text x="622" y="224" class="name" text-anchor="middle">Identity guard</text>
+    <text x="622" y="244" class="mono tag" text-anchor="middle">GIT HOOK · PRE-PUSH</text>
+    <text x="622" y="264" class="desc" text-anchor="middle">no commit under the stock</text>
+    <text x="622" y="280" class="desc" text-anchor="middle">Hermes identity, no bypass</text>
+    <text x="622" y="300" class="mono sub" text-anchor="middle">prepush-identity-guard.py</text>
+  </g>
+  <g class="node">
+    <rect x="748" y="200" width="220" height="112" rx="6" fill="#f5f5f5"/>
+    <rect x="748" y="200" width="220" height="112" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+    <text x="858" y="224" class="name" text-anchor="middle">Push link guard</text>
+    <text x="858" y="244" class="mono tag" text-anchor="middle">GIT HOOK · PRE-PUSH</text>
+    <text x="858" y="264" class="desc" text-anchor="middle">every github.com link in</text>
+    <text x="858" y="280" class="desc" text-anchor="middle">pushed text must exist</text>
+    <text x="858" y="300" class="mono sub" text-anchor="middle">prepush-link-guard.py</text>
+  </g>
+  <g class="node">
+    <rect x="40" y="328" width="220" height="112" rx="6" fill="#f5f5f5"/>
+    <rect x="40" y="328" width="220" height="112" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+    <text x="150" y="352" class="name" text-anchor="middle">Static gate</text>
+    <text x="150" y="372" class="mono tag" text-anchor="middle">GIT HOOK · PRE-PUSH</text>
+    <text x="150" y="392" class="desc" text-anchor="middle">your fastest static check</text>
+    <text x="150" y="408" class="desc" text-anchor="middle">against the branch base</text>
+    <text x="150" y="428" class="mono sub" text-anchor="middle">githooks/pre-push</text>
+  </g>
+  <g class="node">
+    <rect x="276" y="328" width="220" height="112" rx="6" fill="#f5f5f5"/>
+    <rect x="276" y="328" width="220" height="112" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+    <text x="386" y="352" class="name" text-anchor="middle">gh-link-guard</text>
+    <text x="386" y="372" class="mono tag" text-anchor="middle">GH WRAPPER · BEFORE POST</text>
+    <text x="386" y="392" class="desc" text-anchor="middle">links in comments and bodies,</text>
+    <text x="386" y="408" class="desc" text-anchor="middle">#issuecomment anchors too</text>
+    <text x="386" y="428" class="mono sub" text-anchor="middle">gh-link-guard.py</text>
+  </g>
+  <text x="40" y="484" class="mono stage">4 · ON THE PULL REQUEST</text>
+  <text x="960" y="484" class="leg" text-anchor="end">reviewer and tester rules, cron checks, webhook</text>
+  <line x1="40" y1="494" x2="968" y2="494" stroke="rgba(45,49,66,0.16)" stroke-width="1"/>
+  <g class="node">
+    <rect x="40" y="508" width="220" height="112" rx="6" fill="#f5f5f5"/>
+    <rect x="40" y="508" width="220" height="112" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+    <text x="150" y="532" class="name" text-anchor="middle">Reviewer verdict rules</text>
+    <text x="150" y="552" class="mono tag" text-anchor="middle">SKILL · EVERY REVIEW</text>
+    <text x="150" y="572" class="desc" text-anchor="middle">exact head sha, calibration,</text>
+    <text x="150" y="588" class="desc" text-anchor="middle">a mutant per closed blocker</text>
+    <text x="150" y="608" class="mono sub" text-anchor="middle">adversarial-review</text>
+  </g>
+  <g class="node">
+    <rect x="276" y="508" width="220" height="112" rx="6" fill="#f5f5f5"/>
+    <rect x="276" y="508" width="220" height="112" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+    <text x="386" y="532" class="name" text-anchor="middle">QA verdict rules</text>
+    <text x="386" y="552" class="mono tag" text-anchor="middle">SKILL · QA STEP</text>
+    <text x="386" y="572" class="desc" text-anchor="middle">own test run on the real head,</text>
+    <text x="386" y="588" class="desc" text-anchor="middle">no PASS over open changes</text>
+    <text x="386" y="608" class="mono sub" text-anchor="middle">tester-verdict-checklist</text>
+  </g>
+  <g class="node">
+    <rect x="512" y="508" width="220" height="112" rx="6" fill="#f5f5f5"/>
+    <rect x="512" y="508" width="220" height="112" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+    <text x="622" y="532" class="name" text-anchor="middle">CI on the head</text>
+    <text x="622" y="552" class="mono tag" text-anchor="middle">SKILL · BEFORE PASS</text>
+    <text x="622" y="572" class="desc" text-anchor="middle">gh pr checks: all required</text>
+    <text x="622" y="588" class="desc" text-anchor="middle">checks green on the head</text>
+    <text x="622" y="608" class="mono sub" text-anchor="middle">adversarial-review</text>
+  </g>
+  <g class="node">
+    <rect x="748" y="508" width="220" height="112" rx="6" fill="#f5f5f5"/>
+    <rect x="748" y="508" width="220" height="112" rx="6" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.30)" stroke-width="1"/>
+    <text x="858" y="532" class="name" text-anchor="middle">PR completion contract</text>
+    <text x="858" y="552" class="mono tag" text-anchor="middle">NATIVE · ON COMPLETE</text>
+    <text x="858" y="572" class="desc" text-anchor="middle">green checks; published_pr</text>
+    <text x="858" y="588" class="desc" text-anchor="middle">holds the full PR URL</text>
+    <text x="858" y="608" class="mono sub" text-anchor="middle">kanban_pr_acceptance.py</text>
+  </g>
+  <g class="node">
+    <rect x="40" y="636" width="220" height="112" rx="6" fill="#f5f5f5"/>
+    <rect x="40" y="636" width="220" height="112" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+    <text x="150" y="660" class="name" text-anchor="middle">Risk labels</text>
+    <text x="150" y="680" class="mono tag" text-anchor="middle">CRON · EVERY 30 MIN</text>
+    <text x="150" y="700" class="desc" text-anchor="middle">risk:critical, normal or</text>
+    <text x="150" y="716" class="desc" text-anchor="middle">trivial from path rules</text>
+    <text x="150" y="736" class="mono sub" text-anchor="middle">pr-risk.py, pr-risk.yaml</text>
+  </g>
+  <g class="node">
+    <rect x="276" y="636" width="220" height="112" rx="6" fill="#f5f5f5"/>
+    <rect x="276" y="636" width="220" height="112" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+    <text x="386" y="660" class="name" text-anchor="middle">PR hygiene</text>
+    <text x="386" y="680" class="mono tag" text-anchor="middle">CRON · EVERY 2 HOURS</text>
+    <text x="386" y="700" class="desc" text-anchor="middle">conflicts, mergeability, stale</text>
+    <text x="386" y="716" class="desc" text-anchor="middle">PRs; rebase to owner card</text>
+    <text x="386" y="736" class="mono sub" text-anchor="middle">pr-hygiene.py</text>
+  </g>
+  <g class="node">
+    <rect x="512" y="636" width="220" height="112" rx="6" fill="#f5f5f5"/>
+    <rect x="512" y="636" width="220" height="112" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+    <text x="622" y="660" class="name" text-anchor="middle">Owner review webhook</text>
+    <text x="622" y="680" class="mono tag" text-anchor="middle">WEBHOOK FILTER</text>
+    <text x="622" y="700" class="desc" text-anchor="middle">owner events only; card</text>
+    <text x="622" y="716" class="desc" text-anchor="middle">deduplicated by PR + head</text>
+    <text x="622" y="736" class="mono sub" text-anchor="middle">github-pr-filter.sh</text>
+  </g>
+  <g class="node">
+    <rect x="748" y="636" width="220" height="112" rx="6" fill="#f5f5f5"/>
+    <rect x="748" y="636" width="220" height="112" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+    <text x="858" y="660" class="name" text-anchor="middle">Reviewer misses</text>
+    <text x="858" y="680" class="mono tag" text-anchor="middle">CRON · EVENING</text>
+    <text x="858" y="700" class="desc" text-anchor="middle">PASS the owner overturned,</text>
+    <text x="858" y="716" class="desc" text-anchor="middle">journal for the review skill</text>
+    <text x="858" y="736" class="mono sub" text-anchor="middle">reviewer-misses.py</text>
+  </g>
+  <line x1="40" y1="780" x2="960" y2="780" stroke="rgba(45,49,66,0.10)" stroke-width="0.8"/>
+  <text x="40" y="804" class="mono stage">LEGEND</text>
+  <rect x="40" y="820" width="16" height="12" rx="2" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+  <text x="64" y="830" class="leg">Pack script, hook or plugin</text>
+  <rect x="272" y="820" width="16" height="12" rx="2" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+  <text x="296" y="830" class="leg">Skill rule an agent applies</text>
+  <rect x="504" y="820" width="16" height="12" rx="2" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.30)" stroke-width="1"/>
+  <text x="528" y="830" class="leg">Native Hermes or GitHub</text>
+  <rect x="708" y="820" width="16" height="12" rx="2" fill="#ffffff" stroke="#2d3142" stroke-width="1" stroke-dasharray="4,3"/>
+  <text x="732" y="830" class="leg">Moment not in this map</text>
+</svg>
