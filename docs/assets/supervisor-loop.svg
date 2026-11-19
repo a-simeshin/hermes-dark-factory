@@ -1,0 +1,127 @@
+<svg viewBox="0 0 1000 800" xmlns="http://www.w3.org/2000/svg" font-family="Geist, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#4f5d75"/></marker>
+    <marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#eb6c36"/></marker>
+    <marker id="arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#2e5aa8"/></marker>
+    <style>
+      .mono { font-family: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+      .serif { font-family: 'Instrument Serif', Georgia, 'Times New Roman', serif; }
+      .eyebrow { fill: #4f5d75; font-size: 12px; letter-spacing: 0.16em; }
+      .name { fill: #2d3142; font-size: 15px; font-weight: 600; }
+      .sub { fill: #4f5d75; font-size: 12px; }
+      .lbl { fill: #4f5d75; font-size: 12px; letter-spacing: 0.06em; }
+      .lbl-link { fill: #2e5aa8; font-size: 12px; letter-spacing: 0.06em; }
+      .lbl-accent { fill: #eb6c36; font-size: 12px; letter-spacing: 0.06em; }
+      .leg { fill: #4f5d75; font-size: 12px; }
+    </style>
+  </defs>
+
+  <rect width="100%" height="100%" fill="#f5f5f5"/>
+
+  <text x="40" y="32" class="mono eyebrow">HERMES DARK FACTORY · SUPERVISION</text>
+  <text x="40" y="68" class="serif" fill="#2d3142" font-size="28">A stronger agent checks, controls, directs and teaches</text>
+
+  <!-- Zone headers -->
+  <text x="40" y="180" class="mono eyebrow">SUPERVISOR · CLAUDE CODE</text>
+  <text x="592" y="180" class="mono eyebrow">FACTORY · HERMES</text>
+
+  <!-- Boundary -->
+  <line x1="500" y1="188" x2="500" y2="688" stroke="rgba(235,108,54,0.50)" stroke-width="1.2" stroke-dasharray="4,4"/>
+
+  <!-- Arrows (before boxes) -->
+  <path d="M380 116 H268 V196" fill="none" stroke="#eb6c36" stroke-width="1.4" marker-end="url(#arrow-accent)"/>
+  <line x1="408" y1="228" x2="588" y2="228" stroke="#4f5d75" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#arrow)"/>
+  <path d="M408 388 H500 V340 H588" fill="none" stroke="#2e5aa8" stroke-width="1.2" marker-end="url(#arrow-link)"/>
+  <line x1="752" y1="368" x2="752" y2="420" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+  <line x1="752" y1="480" x2="752" y2="532" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+  <path d="M592 564 H540 V468 H412" fill="none" stroke="#4f5d75" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#arrow)"/>
+  <path d="M408 548 H472 V644 H588" fill="none" stroke="#2e5aa8" stroke-width="1.2" marker-end="url(#arrow-link)"/>
+  <path d="M268 656 V680 H72 V228 H124" fill="none" stroke="#4f5d75" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#arrow)"/>
+
+  <!-- Arrow labels -->
+  <rect x="284" y="104" width="84" height="16" rx="2" fill="#f5f5f5"/>
+  <text x="326" y="116" class="mono lbl-accent" text-anchor="middle">DELEGATES</text>
+  <rect x="468" y="216" width="64" height="16" rx="2" fill="#f5f5f5"/>
+  <text x="500" y="228" class="mono lbl" text-anchor="middle">READ</text>
+  <rect x="424" y="376" width="56" height="16" rx="2" fill="#f5f5f5"/>
+  <text x="452" y="388" class="mono lbl-link" text-anchor="middle">ROUND</text>
+  <rect x="420" y="456" width="88" height="16" rx="2" fill="#f5f5f5"/>
+  <text x="464" y="468" class="mono lbl" text-anchor="middle">READ DIFF</text>
+  <rect x="484" y="632" width="92" height="16" rx="2" fill="#f5f5f5"/>
+  <text x="530" y="644" class="mono lbl-link" text-anchor="middle">VERDICT</text>
+  <rect x="120" y="668" width="104" height="16" rx="2" fill="#f5f5f5"/>
+  <text x="172" y="680" class="mono lbl" text-anchor="middle">EVERY 30 MIN</text>
+
+  <!-- Owner -->
+  <rect x="380" y="88" width="240" height="56" rx="6" fill="rgba(235,108,54,0.08)" stroke="#eb6c36" stroke-width="1"/>
+  <text x="500" y="112" class="name" text-anchor="middle">Owner</text>
+  <text x="500" y="132" class="mono sub" text-anchor="middle">merge, release, scope</text>
+
+  <!-- Supervisor steps -->
+  <rect x="128" y="200" width="280" height="56" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+  <text x="268" y="224" class="name" text-anchor="middle">1 Check</text>
+  <text x="268" y="244" class="mono sub" text-anchor="middle">board, crons, gateway, PRs</text>
+
+  <rect x="128" y="280" width="280" height="56" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+  <text x="268" y="304" class="name" text-anchor="middle">2 Control</text>
+  <text x="268" y="324" class="mono sub" text-anchor="middle">design and owner decisions</text>
+
+  <rect x="128" y="360" width="280" height="56" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+  <text x="268" y="384" class="name" text-anchor="middle">3 Teach</text>
+  <text x="268" y="404" class="mono sub" text-anchor="middle">one round per new kind</text>
+
+  <rect x="128" y="440" width="280" height="56" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+  <text x="268" y="464" class="name" text-anchor="middle">4 Verify</text>
+  <text x="268" y="484" class="mono sub" text-anchor="middle">rerun tests, read the diff</text>
+
+  <rect x="128" y="520" width="280" height="56" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+  <text x="268" y="544" class="name" text-anchor="middle">5 Direct</text>
+  <text x="268" y="564" class="mono sub" text-anchor="middle">review; merge if delegated</text>
+
+  <rect x="128" y="600" width="280" height="56" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+  <text x="268" y="624" class="name" text-anchor="middle">6 Report</text>
+  <text x="268" y="644" class="mono sub" text-anchor="middle">what waits for the owner</text>
+
+  <!-- Factory side -->
+  <rect x="592" y="200" width="320" height="56" rx="6" fill="#f5f5f5"/>
+  <rect x="592" y="200" width="320" height="56" rx="6" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.30)" stroke-width="1"/>
+  <text x="752" y="224" class="name" text-anchor="middle">Board, logs, cron output</text>
+  <text x="752" y="244" class="mono sub" text-anchor="middle">read-only queries</text>
+
+  <rect x="592" y="312" width="320" height="56" rx="6" fill="#f5f5f5"/>
+  <rect x="592" y="312" width="320" height="56" rx="6" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.30)" stroke-width="1"/>
+  <text x="752" y="336" class="name" text-anchor="middle">Orchestrator chat</text>
+  <text x="752" y="356" class="mono sub" text-anchor="middle">hermes -z, answer ends with DONE</text>
+
+  <rect x="592" y="424" width="320" height="56" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+  <text x="752" y="448" class="name" text-anchor="middle">Agents fix their own layers</text>
+  <text x="752" y="468" class="mono sub" text-anchor="middle">skills, scripts, plugins, config</text>
+
+  <rect x="592" y="536" width="320" height="56" rx="6" fill="#f5f5f5"/>
+  <rect x="592" y="536" width="320" height="56" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+  <text x="752" y="560" class="name" text-anchor="middle">Knowledge snapshot, tests</text>
+  <text x="752" y="580" class="mono sub" text-anchor="middle">git diff, run-tests.py, mutants</text>
+
+  <rect x="592" y="616" width="320" height="56" rx="6" fill="#f5f5f5"/>
+  <rect x="592" y="616" width="320" height="56" rx="6" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.30)" stroke-width="1"/>
+  <text x="752" y="640" class="name" text-anchor="middle">GitHub pull requests</text>
+  <text x="752" y="660" class="mono sub" text-anchor="middle">verdict, CI, squash merge</text>
+
+  <!-- Boundary statement -->
+  <text x="500" y="716" class="mono lbl-accent" text-anchor="middle">NO EDITS ACROSS THE LINE: THE FACTORY MAKES EVERY CHANGE</text>
+
+  <!-- Legend -->
+  <line x1="40" y1="736" x2="960" y2="736" stroke="rgba(45,49,66,0.10)" stroke-width="0.8"/>
+  <rect x="40" y="756" width="16" height="12" rx="2" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+  <text x="64" y="766" class="leg">Agent step</text>
+  <rect x="160" y="756" width="16" height="12" rx="2" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.30)" stroke-width="1"/>
+  <text x="184" y="766" class="leg">Hermes or GitHub</text>
+  <rect x="320" y="756" width="16" height="12" rx="2" fill="rgba(235,108,54,0.08)" stroke="#eb6c36" stroke-width="1"/>
+  <text x="344" y="766" class="leg">Owner</text>
+  <line x1="420" y1="762" x2="448" y2="762" stroke="#4f5d75" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#arrow)"/>
+  <text x="456" y="766" class="leg">Read only</text>
+  <line x1="552" y1="762" x2="580" y2="762" stroke="#2e5aa8" stroke-width="1.2" marker-end="url(#arrow-link)"/>
+  <text x="588" y="766" class="leg">Words: round, verdict</text>
+  <line x1="756" y1="762" x2="784" y2="762" stroke="rgba(235,108,54,0.50)" stroke-width="1.2" stroke-dasharray="4,4"/>
+  <text x="792" y="766" class="leg">No-edit boundary</text>
+</svg>

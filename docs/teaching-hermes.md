@@ -33,3 +33,5 @@ The knowledge layer (personas, skills, project context, scripts, plugins, config
 ## Measuring that it worked
 
 Track misses in a journal the reviewer reads (see the adversarial-review skill's misses template) and compare owner verdicts with agent verdicts on the same heads. Fewer owner reversals of agent approvals over the following days is the real signal; a growing skill file is not.
+
+To run these rounds without the owner in the loop, see [supervisor-agent.md](supervisor-agent.md): a stronger agent that runs the same round on a schedule and verifies the artifact, without ever editing the factory itself.

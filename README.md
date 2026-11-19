@@ -75,6 +75,12 @@ Where the agents keep what they learn, and how the owner teaches them through th
 
 ![Knowledge layers from persona to lessons, save-lesson-before-complete, teach-snapshot and the owner's teaching round](docs/assets/knowledge-and-teaching.svg)
 
+### Lights out: a supervising agent
+
+The last step towards a dark factory: a second, stronger agent (Claude Code in our case) watches the factory every half hour, turns each bad behaviour into a teaching round through the agents' own channel, verifies the result in the repository, and leaves the owner only merges, releases and scope. It checks, controls, directs and teaches; it never edits Hermes, the agents' files or the product's code. The factory makes every change itself, so every lesson lands where the acting agent will read it next time. See [docs/supervisor-agent.md](docs/supervisor-agent.md) and the templates in [pack/supervisor/](pack/supervisor/).
+
+![The supervisor's six-step loop (check, control, teach, verify, direct, report) on one side of a no-edit boundary, the factory's board, orchestrator chat, agents, knowledge snapshot and pull requests on the other](docs/assets/supervisor-loop.svg)
+
 ## What is inside
 
 | Path | Contents |
@@ -85,6 +91,7 @@ Where the agents keep what they learn, and how the owner teaches them through th
 | `pack/config/` | A config overlay with the settings that cut model spend roughly in half. |
 | `pack/scripts/` | The mechanical layer: watchdogs, gates, guards and metrics, configured through one `factory.env` file, with their tests and a hermetic test runner. |
 | `pack/cron/` | The scheduled jobs the factory runs, as a reference list, and the prompts of the agent jobs. |
+| `pack/supervisor/` | Templates for a stronger supervising agent: the scheduled loop prompt, the teaching round and read-only verification commands. |
 | `reference/githooks/` | Git hooks the agents' commits pass through (identity, link and style guards). |
 | `docs/` | How it all works. |
 
@@ -100,6 +107,7 @@ Where the agents keep what they learn, and how the owner teaches them through th
 8. [docs/separation-and-adoption.md](docs/separation-and-adoption.md): generic versus project-specific, and moving an existing setup onto the pack.
 9. [docs/lessons-learned.md](docs/lessons-learned.md) and [docs/install.md](docs/install.md).
 10. [docs/adapting-to-your-project.md](docs/adapting-to-your-project.md): adapting, verifying, debugging and changing the pack for your own project (the agents' procedure is the `factory-adoption` skill).
+11. [docs/supervisor-agent.md](docs/supervisor-agent.md): lights-out operation with a stronger agent that checks, controls, directs and teaches, and never edits.
 
 ## Status
 
