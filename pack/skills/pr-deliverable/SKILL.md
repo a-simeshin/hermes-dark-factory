@@ -149,9 +149,11 @@ do not write it.
   head of the PR.
 - The owner's acceptance is quoted in the owner's words, not paraphrased.
 
-Edit a body or comment with PATCH and a JSON payload (`--input file.json`):
-`--field body=@file` fails as multipart, `-f body=@file` inserts the literal
-path. Do not carry the trailing `\n` from `--jq .body`.
+Edit a PR body with `gh pr edit N --body-file file` (a gh wrapper in front of
+the agents may not pass `--input`); edit a comment with PATCH and a JSON
+payload (`--input file.json`). `--field body=@file` fails as multipart,
+`-f body=@file` inserts the literal path. Do not carry the trailing `\n` from
+`--jq .body`.
 
 ## A mutation for every closed blocker
 

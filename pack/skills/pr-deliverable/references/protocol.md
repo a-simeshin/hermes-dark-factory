@@ -257,9 +257,8 @@ visible; a registry entry saying "4 tests" for 5.
 
 Machine check: `gh pr view <N> --json body --jq .body` plus
 `git log origin/<base>..HEAD --oneline` plus `gh pr checks <N>`. Fix a body
-with a JSON payload: `json.dumps({"body": ...})` into a file and
-`gh api repos/<org>/<repo>/pulls/N --method PATCH --input payload.json`,
-then compare the read-back byte for byte. (`--field body=@file` sends
+with `gh pr edit N --body-file body.md` (a gh wrapper in front of the agents
+may not pass `--input`), then compare the read-back byte for byte. (`--field body=@file` sends
 multipart and fails with "unexpected end of JSON input".) Capturing
 `--jq .body` adds one trailing newline: do not carry it into the upload. An
 outdated WCFY is fixed by PATCHing its comment, not with a new comment or an

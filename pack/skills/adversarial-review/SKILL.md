@@ -156,6 +156,17 @@ means RETURN, however green the full run is.
 - Do not build the artifact for live checks in the same tree while mutation
   runs are going: the bundle can carry the mutant. Verify the key expression
   inside the built artifact itself.
+- A recipe for restoring a removed pin, in a verdict or a rework card, is
+  written as an acceptance criterion (the mutant is red on the full suite of
+  the new head), not as the literal steps of the old test. The old test may
+  have passed for a different reason, and a simulated click on a disabled
+  button never reaches the framework's handlers. Pinning through a reachable
+  attempt (for example a valid draft plus a failing server) is a legitimate
+  adaptation by the executor.
+- A test that stays green under a single mutant of one of several redundant
+  mechanisms may still pin the promise against total loss. Before calling a
+  pin weak or a promise unpinned, run a COMBINED mutant that disables every
+  mechanism producing the promised behaviour.
 - The equal alternative to a mutation: a red run of the new test on the base
   without the fix.
 
