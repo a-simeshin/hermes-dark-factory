@@ -23,7 +23,12 @@ PR or issue):
 Rule: every github.com link in the published text must exist.
   - owner/repo: the request repos/{owner}/{repo} answers 200 (404 = broken);
   - blob/tree: the path exists at the given ref (contents API);
-  - commit: the SHA exists in the repository (commits API).
+  - commit: the SHA exists in the repository (commits API);
+  - issues|pull + #issuecomment-N: the comment exists (issues/comments/{N}
+    API) and its html_url points to the same page (owner/repo and the
+    issue/PR number match). A link like /issues/10#issuecomment-N whose
+    comment lives in /pull/20 opens the issue without the anchor, and the
+    reader never finds the comment.
 No github.com links = the publication goes through unchecked. A failed check
 (network, 401, 403) = refusal: fail closed. Outside Hermes sessions the gate
 is off: a publication by the owner's own hands bypasses the check.
@@ -64,6 +69,21 @@ GITHUB_LINK_RE = re.compile(
     r"(?:/(blob|tree|commit)/([^\s\)\]\"'<>#?]+))?"  # ref(+path) or SHA
 )
 TRAILING_PUNCT = ".,;:!"
+
+# link to an issue/PR page with a comment anchor
+ISSUECOMMENT_LINK_RE = re.compile(
+    r"https?://(?:www\.)?github\.com/"
+    r"([A-Za-z0-9][A-Za-z0-9_.-]*)"        # owner
+    r"/([A-Za-z0-9_.-]+)"                  # repo
+    r"/(issues|pull)/(\d+)"                # page: issue or PR
+    r"#issuecomment-(\d+)"                 # comment anchor
+)
+
+HTML_URL_RE = re.compile(
+    r"https?://(?:www\.)?github\.com/"
+    r"([A-Za-z0-9][A-Za-z0-9_.-]*)/([A-Za-z0-9_.-]+)"
+    r"/(issues|pull)/(\d+)(?:#|$)"
+)
 
 
 class GuardError(Exception):
@@ -200,12 +220,70 @@ def gh_api_ok(api_path):
     raise GuardError("gh api %s: %s" % (api_path, tail))
 
 
-def validate_text(text, check=None):
+def gh_comment_html_url(api_path):
+    """html_url of a comment (str), None on 404, GuardError otherwise.
+
+    A #issuecomment-N anchor is valid only on the page the comment belongs
+    to; that page is known from the comment's html_url.
+    """
+    try:
+        r = subprocess.run(
+            [GH, "api", api_path, "--jq", ".html_url"],
+            capture_output=True, text=True, timeout=30,
+        )
+    except (subprocess.TimeoutExpired, OSError) as e:
+        raise GuardError("gh api %s: %s" % (api_path, e))
+    if r.returncode == 0:
+        return (r.stdout or "").strip() or None
+    err = r.stderr or ""
+    if "404" in err or "Not Found" in err:
+        return None
+    tail = err.strip().splitlines()[-1] if err.strip() else "rc=%s" % r.returncode
+    raise GuardError("gh api %s: %s" % (api_path, tail))
+
+
+def validate_text(text, check=None, fetch_comment=None):
     """[(link, reason)] for every github.com link in the text. Empty = clean."""
     check = check or gh_api_ok
+    fetch_comment = fetch_comment or gh_comment_html_url
     bad = []
     cache = {}
-    for m in GITHUB_LINK_RE.finditer(text):
+    # #issuecomment-N anchors: the comment exists and lies on the page the
+    # link points to. They are cut out of the general pass below so they are
+    # not checked again as bare owner/repo links.
+    anchor_links = list(ISSUECOMMENT_LINK_RE.finditer(text))
+    stripped = ISSUECOMMENT_LINK_RE.sub(" ", text)
+    for m in anchor_links:
+        owner = m.group(1).rstrip(TRAILING_PUNCT)
+        repo = m.group(2).rstrip(TRAILING_PUNCT)
+        num, cid = m.group(4), m.group(5)
+        api = "repos/%s/%s" % (owner, repo)
+        try:
+            if api not in cache:
+                cache[api] = check(api)
+        except GuardError as e:
+            return [(m.group(0), "check unavailable: %s" % e)]
+        if not cache[api]:
+            why = "repository %s/%s does not exist (404)" % (owner, repo)
+            bad.append((m.group(0), why))
+            continue
+        api = "repos/%s/%s/issues/comments/%s" % (owner, repo, cid)
+        try:
+            if api not in cache:
+                cache[api] = fetch_comment(api)
+        except GuardError as e:
+            return [(m.group(0), "check unavailable: %s" % e)]
+        html = cache[api]
+        if html is None:
+            why = "comment issuecomment-%s does not exist (404)" % cid
+            bad.append((m.group(0), why))
+            continue
+        mm = HTML_URL_RE.match(html)
+        if (mm is None or mm.group(1).lower() != owner.lower()
+                or mm.group(2).lower() != repo.lower() or mm.group(4) != num):
+            why = "anchor #issuecomment-%s belongs to another page: %s" % (cid, html)
+            bad.append((m.group(0), why))
+    for m in GITHUB_LINK_RE.finditer(stripped):
         owner = m.group(1).rstrip(TRAILING_PUNCT)
         repo = m.group(2).rstrip(TRAILING_PUNCT)
         kind = m.group(3)

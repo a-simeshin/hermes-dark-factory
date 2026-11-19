@@ -43,7 +43,11 @@ posted, merged, reported) is written only with a link to the artifact: issue
 or PR number, card id, comment URL, sha. No link means no claim: create the
 artifact or write "not verified". A link is not proof either: if the claim
 can be checked with a live call (`gh pr view`, `gh run list`, `gh search
-issues`), check it in this session BEFORE writing.
+issues`), check it in this session BEFORE writing. Take a comment link
+(`issuecomment-N`) from the comment's own `html_url` (`gh api
+repos/OWNER/REPO/issues/comments/N --jq .html_url`), never build it by hand:
+the gh-link-guard gate refuses an anchor that belongs to another page (a
+comment in a PR linked as an issue page).
 
 ## Parking and sandboxes
 

@@ -105,6 +105,50 @@ bad = mod.validate_text("see https://github.com/acme/widget.",
 check("trailing dot stripped from repo", bad == [], str(bad))
 
 
+# --- a comment anchor belongs to its own page --------------------------------
+CMT_ID = "7001"
+CMT_API = "repos/acme/widget/issues/comments/%s" % CMT_ID
+PR_CMT_URL = "https://github.com/acme/widget/pull/20#issuecomment-%s" % CMT_ID
+WRONG_PAGE_URL = "https://github.com/acme/widget/issues/10#issuecomment-%s" % CMT_ID
+
+
+def fake_fetch(html):
+    def _fetch(api):
+        if api == CMT_API:
+            return html
+        raise mod.GuardError("unexpected comment request: %s" % api)
+    return _fetch
+
+
+# the comment lives in pull/20, the link points to issues/10: refused
+bad = mod.validate_text("Verdict: %s" % WRONG_PAGE_URL,
+                        check=fake_check([REPO_OK]), fetch_comment=fake_fetch(PR_CMT_URL))
+check("anchor on wrong page is rejected", bad and "another page" in bad[0][1], str(bad))
+
+# the link taken from the comment's own html_url passes
+bad = mod.validate_text("Verdict: %s" % PR_CMT_URL,
+                        check=fake_check([REPO_OK]), fetch_comment=fake_fetch(PR_CMT_URL))
+check("anchor from html_url passes", bad == [], str(bad))
+
+# GitHub redirects issues <-> pull: owner/repo/number match, page kind is not compared
+bad = mod.validate_text("https://github.com/acme/widget/issues/20#issuecomment-%s" % CMT_ID,
+                        check=fake_check([REPO_OK]), fetch_comment=fake_fetch(PR_CMT_URL))
+check("issues/pull page kind is normalized", bad == [], str(bad))
+
+# the comment does not exist: 404
+bad = mod.validate_text(PR_CMT_URL, check=fake_check([REPO_OK]), fetch_comment=fake_fetch(None))
+check("missing comment anchor is rejected", bad and "does not exist (404)" in bad[0][1], str(bad))
+
+# the comment lookup fails: fail closed
+bad = mod.validate_text(PR_CMT_URL, check=fake_check([REPO_OK]), fetch_comment=boom)
+check("comment fetch error fails closed", bad and "unavailable" in bad[0][1], str(bad))
+
+# typo owner in a comment link: 404 before the comment is requested
+bad = mod.validate_text("https://github.com/acmee/widget/pull/20#issuecomment-%s" % CMT_ID,
+                        check=fake_check([], [REPO_404]))
+check("anchor link with typo owner is rejected", bad and "404" in bad[0][1], str(bad))
+
+
 # --- command classification and text extraction ----------------------------
 check("cli issue comment is publish", mod.is_publish_command(
     ["issue", "comment", "305", "--body", "x"]))
@@ -181,6 +225,14 @@ mod.in_hermes_session = lambda env=None: True
 mod.gh_api_ok = boom
 rc = mod.main(["issue", "comment", "305", "--body", GOOD_URL])
 check("main fails closed on api error", rc == 1, rc)
+
+# full main() path with a comment anchor on another page
+mod.gh_api_ok = fake_check([REPO_OK])
+mod.gh_comment_html_url = fake_fetch(PR_CMT_URL)
+rc = mod.main(["pr", "comment", "20", "--body", "Verdict: %s" % WRONG_PAGE_URL])
+check("main blocks anchor on wrong page", rc == 1, rc)
+rc = mod.main(["pr", "comment", "20", "--body", "Verdict: %s" % PR_CMT_URL])
+check("main allows anchor from html_url", rc == 0, rc)
 
 print()
 if FAILS:
