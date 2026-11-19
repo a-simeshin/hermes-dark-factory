@@ -1,7 +1,7 @@
 ---
 name: kanban-discipline
 description: Creating, blocking, prioritising and handing off board cards.
-version: 2.1.0
+version: 2.2.0
 author: maintainer, Hermes Agent
 license: MIT
 metadata:
@@ -125,6 +125,15 @@ rebase that meets one blocks with a question).
   forever;
 - a `dependency` block does NOT hold a card whose parents are done: it
   auto-promotes and loops.
+
+## A new rule goes into the layer the worker always loads
+
+A rule that changes worker behaviour must land in the profile's always
+loaded layer (the skills listed in `skills.auto_load`, usually the project
+conventions skill), not only in on-demand skills. A worker opens an
+on-demand skill only when its card triggers it, while its system prompt
+keeps teaching the old way. After recording such a rule, grep the
+always-loaded skills of every profile for the old wording and replace it.
 
 ## One PR = one card
 

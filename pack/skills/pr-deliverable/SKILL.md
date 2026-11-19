@@ -1,7 +1,7 @@
 ---
 name: pr-deliverable
 description: What a PR must contain for the work to count as delivered.
-version: 2.1.0
+version: 2.2.0
 author: maintainer, Hermes Agent
 license: MIT
 metadata:
@@ -161,6 +161,14 @@ test does not count; the reviewer repeats the mutation.
   Telegram or the card alone do not count.
 - A selector fails: read the component source first (how the test id is
   really attached), then probe the DOM; the other order is a lottery.
+- Evidence is checked against its claim BEFORE it is published. Three
+  checks: files with different captions have different hashes (run
+  `sha256sum` on every file you post; the same hash under two captions is a
+  mistake, not a coincidence); the frame shows what the caption says
+  (connected state, badge, value); the file name matches the scenario in
+  the caption. Write the short sha256 next to each file in the evidence
+  comment, so the reviewer can recompute it from the raw link with one
+  command.
 - The final screenshot of an E2E test is the test's artifact. Where the
   project keeps the visual delta in the issue, the PR gets no separate
   Before/After shoot (references/visual-delta.md).

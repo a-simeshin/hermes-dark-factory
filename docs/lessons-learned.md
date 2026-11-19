@@ -100,6 +100,16 @@ This document collects the lessons from running the factory that were expensive 
 **Rule.** When a native gate reads a field your agents fill in, write it in the exact format the gate parses. For the PR completion contract, `metadata.published_pr` is the full PR URL, not a number.
 **Why.** A value the gate cannot parse is not reported as a format error; it surfaces later as a completion that does not behave as the contract promises.
 
+## A new rule goes where the worker always reads
+
+**Rule.** When a lesson changes how workers behave, update the always-loaded layer (the profile's auto-loaded conventions skill) as well as the on-demand skills, and search the always-loaded layers for the old wording.
+**Why.** A rule moved to four on-demand skills while the auto-loaded conventions skill still described the old order. The worker followed its system prompt, and only the reviewer's check caught the missing step.
+
+## Evidence is checked against its claim before it is posted
+
+**Rule.** Every screenshot, log or file posted as evidence is checked before publishing: distinct files have distinct hashes, the frame shows what the caption claims, the file name matches the scenario. The short hash goes next to each file so the reviewer can recompute it.
+**Why.** Two screenshots captioned as two different stacks were the same file byte for byte, and a third showed the state before the claimed one. A reviewer caught it by hashing; making the hash part of the evidence turns that improvisation into a protocol.
+
 ## A mandatory step goes where the actor surely has a turn
 
 **Rule.** Place every mandatory step at a point where the actor who owns it is guaranteed a turn, and have the next actor check it there. A step in a gap that a native mechanism closes in one transition never runs.
