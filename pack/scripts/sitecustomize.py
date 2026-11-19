@@ -24,6 +24,9 @@ _ALLOWED_ROOTS = tuple(os.path.realpath(p) for p in (
     _tempfile.gettempdir(),      # test sandboxes
     "/usr", "/lib", "/lib64", "/etc", "/proc", "/sys", "/dev",
     "/var/tmp",
+    # macOS system locations: the interpreter reads SystemVersion.plist and
+    # git/gh come from Command Line Tools or Homebrew.
+    "/System", "/Library/Developer/CommandLineTools", "/opt/homebrew",
     os.path.expanduser("~/.local"),          # user site-packages
     sys.prefix, sys.base_prefix,             # interpreter or venv of the run
     "/nonexistent",                          # "file is missing" stubs in tests
