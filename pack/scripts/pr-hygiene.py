@@ -1698,8 +1698,24 @@ def stale_rebase_gate(info, dry_run=False):
     mergeable UNKNOWN are conservatively not quenched. Called on EVERY run,
     regardless of base movement: a card can go stale at any moment between
     create and claim.
+
+    MERGEABLE reached by the card's OWN push is not "met without it" but an
+    unfinished delivery cycle. A real case: a rebase card pushed the rebased
+    head, reported, parked itself until CI, and this gate archived it as
+    "met without it". After a rebase the CI snapshot, a fresh "What changes
+    for you" comment and the review request of the new head remain, and the
+    review lives in the owner card's native review lane: with the card gone
+    nobody requests it. Two shields, both conservative (an extra read run is
+    cheaper than a lost owner):
+      a) the card claims the live head in its own text (comment, run
+         summary or parking reason with the sha): that is its own push;
+      b) the live head has no accept verdict (review_state is not ok):
+         the step "request review of the new head" is still owed.
+    The card is quenched only when the criterion is met IN FULL: MERGEABLE
+    plus an accept verdict on the exact current head.
     """
     findings = []
+    claims_head = getattr(board_watchdog, "_card_claims_head", None)
     for number, (task_id, key, status) in sorted(
             live_rebase_cards().items()):
         if number not in info:
@@ -1708,10 +1724,39 @@ def stale_rebase_gate(info, dry_run=False):
             mergeable = (info[number].get("detail") or {}).get("mergeable")
             if mergeable != "MERGEABLE":
                 continue
-            why = ("PR #%d is already MERGEABLE: the card's acceptance "
-                   "criterion (gh pr view --json mergeable = MERGEABLE) is "
-                   "met without it, any push would reset the green CI and "
-                   "the verdict on the head" % number)
+            # Shield a: the card claims the live head (its own push).
+            try:
+                head7 = ((pr_payload(number) or {}).get("headRefOid")
+                         or "")[:7].lower()
+            except Exception:
+                head7 = ""
+            if head7 and claims_head \
+                    and claims_head(BOARD_DB, task_id, head7):
+                findings.append((
+                    "mergeflow-stale-rebase-shield:%d" % number,
+                    "  REBASE KEPT (own push) %s [%s] key %s: the card"
+                    " claims the live head %s of PR #%d in its own text,"
+                    " MERGEABLE was reached by ITS push, the delivery cycle"
+                    " is not finished (CI snapshot, What changes for you,"
+                    " review request of the new head)"
+                    % (task_id, status, key, head7, number)))
+                continue
+            # Shield b: no accept verdict on the current head.
+            verdict_state, _ = review_state(number)
+            if verdict_state != "ok":
+                findings.append((
+                    "mergeflow-stale-rebase-noverdict:%d" % number,
+                    "  REBASE KEPT (no verdict on the head) %s [%s] key %s:"
+                    " PR #%d is MERGEABLE but review_state=%s: the review"
+                    " request of the new head is still owed, quenching"
+                    " would leave the PR without an owner"
+                    % (task_id, status, key, number, verdict_state)))
+                continue
+            why = ("PR #%d is already MERGEABLE with an accept verdict on"
+                   " the current head: the card's acceptance criterion"
+                   " (gh pr view --json mergeable = MERGEABLE) is met"
+                   " without it, any push would reset the green CI and the"
+                   " verdict on the head" % number)
         if dry_run:
             findings.append(("mergeflow-stale-rebase-would:%d" % number,
                              "  REBASE QUENCH (dry-run) %s [%s] key %s:"
@@ -1742,6 +1787,151 @@ def stale_rebase_gate(info, dry_run=False):
                "archived" if done.returncode == 0
                else "NOT archived: %s"
                % (done.stderr or done.stdout).strip()[:120])))
+    return findings
+
+# A fresh head gets time to settle: CI catches up and GitHub computes
+# mergeable lazily, and the owner's delivery cycle may still run by itself.
+DELIVER_GRACE_S = int(float(cfg("FACTORY_DELIVER_GRACE_HOURS", "2")) * 3600)
+
+DELIVER_KEY_TMPL = "coder-pr%d-deliver-%s"
+
+def deliver_card_body(number, url, head7, verdict_state):
+    lines = [
+        "PR #%d: head %s is MERGEABLE, review_state=%s (no accept verdict on"
+        " this head), and no live owner card was on the board."
+        % (number, head7, verdict_state),
+        "",
+        url,
+        "",
+        "Created by the watchdog (pr-hygiene): after a rebase the delivery"
+        " cycle remained, but its owner disappeared (a rebase card was"
+        " quenched or closed). The review lives in the owner card's native"
+        " review lane: without a card nobody requests it.",
+        "",
+        "Order (pr-deliverable skill):",
+        "- do NOT rebase and do NOT push: the head is already MERGEABLE on"
+        " the current base, any push resets the green CI;",
+        "- CI: one snapshot of gh pr checks %d (no polling); if runs are"
+        " still in flight, park with kanban schedule until the ETA and take"
+        " the snapshot on the next entry;" % number,
+        "- a fresh \"%s\" comment in the PR for the exact head %s (an old"
+        " one on a previous head does not count);" % (SUMMARY_MARKER, head7),
+        "- then kanban_request_review with reviewer=reviewer and leave the"
+        " run; before that, check for a live reviewer card on this head.",
+        "",
+        "Acceptance criterion: the head %s of PR #%d is in the native review"
+        " lane (the card is in review or a verdict is published) and the"
+        " \"%s\" comment is fresh." % (head7, number, SUMMARY_MARKER),
+    ]
+    return "\n".join(lines)
+
+def create_deliver_card(number, url, head7, verdict_state, prio):
+    # The native-or-live helper before create.
+    if board_native_guard is None:
+        return False, "native guard unavailable: card not created"
+    key = DELIVER_KEY_TMPL % (number, head7)
+    covered, guard = board_native_guard.native_or_live(
+        key, live_keys=_live_keys(),
+        native_checked=[board_native_guard.NATIVE_VERDICT,
+                        board_native_guard.NATIVE_TASK_LINKS],
+        why="PR #%d is MERGEABLE without an owner card and without an accept"
+        " verdict on head %s: the review is requested only by the owner"
+        " card" % (number, head7))
+    if covered:
+        return False, "native guard: card not created: %s" % guard
+    title = ("PR #%d: re-review of head %s (summary + request review)"
+             % (number, head7))
+    body = (board_native_guard.guard_section(guard)
+            + deliver_card_body(number, url, head7, verdict_state))
+    fd, path = tempfile.mkstemp(suffix=".md")
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write(body)
+    # Delivery mechanics without new code: the cheap pin when configured.
+    cheap = []
+    if cfg("FACTORY_CHEAP_MODEL", ""):
+        cheap += ["--model", cfg("FACTORY_CHEAP_MODEL", "")]
+    if cfg("FACTORY_CHEAP_PROVIDER", ""):
+        cheap += ["--provider", cfg("FACTORY_CHEAP_PROVIDER", "")]
+    done = subprocess.run(
+        [HERMES_BIN, "kanban", "--board", BOARD_SLUG, "create", title,
+         "--body-file", path, "--assignee", "coder",
+         "--priority", str(prio),
+         "--idempotency-key", key,
+         "--created-by", "pr-hygiene", "--skill", "pr-deliverable"]
+        + cheap + ["--json"],
+        capture_output=True, text=True, timeout=120)
+    os.unlink(path)
+    return done.returncode == 0, (done.stdout or done.stderr).strip()[:200]
+
+def unowned_deliver_gate(info, by_pr, dry_run=False, now=None):
+    """A MERGEABLE PR of the active milestone gets an owner card.
+
+    A real case: the stale-rebase gate archived the rebase card whose own
+    push made the PR MERGEABLE. The review lives in the owner card's native
+    review lane, so with no card nobody requested the re-review, and the PR
+    sat still on an empty board with only a report line. Any gate can quench
+    or close any owner card, so the class is systemic.
+
+    Rule: an open non-draft MERGEABLE PR with no live card of any rank
+    (live_cards_by_pr), no accept verdict on the current head (review_state
+    none/stale; rejected heads belong to the rework mechanics), a head older
+    than DELIVER_GRACE_S, and admitted by the admission gate (active
+    milestone) gets ONE owner card (key coder-pr<N>-deliver-<head7>): CI
+    snapshot, fresh summary, review request. A live card of any rank
+    silences the trigger (one PR = one card). A PR the admission gate
+    refuses gets only a report line.
+    """
+    findings = []
+    now = now if now is not None else time.time()
+    svc_priority = getattr(board_watchdog, "svc_priority", None)
+    gen_admission = getattr(board_watchdog, "gen_admission", None)
+    for number in sorted(info):
+        p = info[number]
+        if p.get("isDraft"):
+            continue
+        if (p.get("detail") or {}).get("mergeable") != "MERGEABLE":
+            continue                      # conflicts belong to the rebase flow
+        if by_pr.get(number):
+            continue                      # an owner is alive (any rank)
+        verdict_state, _ = review_state(number)
+        if verdict_state not in ("none", "stale"):
+            continue                      # ok/rejected: not this case
+        data = pr_payload(number) or {}
+        head7 = (data.get("headRefOid") or "")[:7].lower()
+        last_commit = ""
+        for c in data.get("commits") or []:
+            stamp = c.get("committedDate") or c.get("authoredDate") or ""
+            last_commit = max(last_commit, stamp)
+        head_ts = _iso_to_epoch(last_commit)
+        if not head7 or not head_ts:
+            continue                      # unknown head or time: silence
+        if now - head_ts < DELIVER_GRACE_S:
+            continue                      # the cycle may still run by itself
+        if gen_admission is not None:
+            admit, why = gen_admission(BOARD_SLUG, number)
+            if not admit:
+                findings.append((
+                    "mergeflow-unowned-noadmit:%d" % number,
+                    "  NO OWNER #%d: not admitted: %s" % (number, why)))
+                continue
+        prio = svc_priority(BOARD_SLUG, number, 90) if svc_priority else 90
+        key = DELIVER_KEY_TMPL % (number, head7)
+        if dry_run:
+            findings.append((
+                "mergeflow-unowned-would:%d" % number,
+                "  NO OWNER (dry-run) #%d head %s review_state=%s: an owner"
+                " card would be created (key %s)"
+                % (number, head7, verdict_state, key)))
+            continue
+        ok, out = create_deliver_card(number, p.get("url", ""), head7,
+                                      verdict_state, prio)
+        findings.append((
+            "mergeflow-unowned-new:%d" % number if ok
+            else "mergeflow-unowned-fail:%d" % number,
+            "  NO OWNER #%d head %s review_state=%s: owner card %s%s"
+            % (number, head7, verdict_state,
+               "created" if ok else "NOT created",
+               "" if ok else ": %s" % out)))
     return findings
 
 def _iso_to_epoch(value):
@@ -2513,6 +2703,9 @@ def check():
     # Quench rebase cards of already MERGEABLE PRs (every run, before
     # post_merge_watch: a card can go stale between create and claim).
     found.extend(stale_rebase_gate(info, dry_run=l5_dry))
+    # A MERGEABLE PR without a live card and without an accept verdict on
+    # its head gets an owner card (the review is requested only by one).
+    found.extend(unowned_deliver_gate(info, by_pr, dry_run=l5_dry))
     l5_findings, debt_count = post_merge_watch(info, ancestors, by_pr,
                                                dry_run=l5_dry)
     found.extend(l5_findings)

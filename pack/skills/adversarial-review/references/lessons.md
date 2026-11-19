@@ -106,3 +106,12 @@ is the companion that tells you which of them you actually failed recently.
 22. **A green gate goes stale when the base moves.** Why: a check that passed
     before another PR merged can be red on the head. How: re-read gate
     results on the exact head you are approving, not from an earlier run.
+23. **A headless tab without focus fires no focus events.** Why: in a tab
+    where document.hasFocus() is false, programmatic focus() and blur()
+    produce no focus, blur or focusout events, so checking an onBlur handler
+    with a programmatic blur reports a working mechanism as broken and
+    almost became a blocker. How: check document.hasFocus() first; drive the
+    check with real input (CDP Input.dispatchMouseEvent: click into the
+    field, then outside it) or dispatch a bubbling FocusEvent('focusout').
+    If the manual focusout works and the programmatic blur does not, it is
+    an artifact of the tab, not a defect in the code.

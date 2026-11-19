@@ -9,6 +9,11 @@ same class as a stale rework arm, but the check lives in pr-hygiene, which
 owns the life cycle of rebase cards, and runs on EVERY pass: a card can go
 stale between create and claim.
 
+Shields: a card whose own push made the PR mergeable (it names the live
+head in its own text) is kept, and so is a card while the current head has
+no accept verdict (the review request of the new head is still owed). In-test
+mutants of pr-hygiene.py (copies in a temp dir) must turn those cases red.
+
 Run: python3 test_pr_hygiene_stale_rebase.py
 """
 import importlib.util
@@ -48,8 +53,12 @@ def want(name, cond, detail=""):
         FAILS.append(name)
 
 
-def make_board(tasks):
-    """A mini board with live rebase cards. Returns (db, log, fake hermes)."""
+def make_board(tasks, claims=None):
+    """A mini board with live rebase cards. Returns (db, log, fake hermes).
+
+    claims maps a task id to a comment text: the card names a head in its
+    own words (the own-push shield reads comments, run summaries and
+    parking reasons)."""
     tmp = tempfile.mkdtemp(prefix="ph-stale-")
     db = os.path.join(tmp, "kanban.db")
     con = sqlite3.connect(db)
@@ -57,6 +66,15 @@ def make_board(tasks):
                 " idempotency_key text, status text)")
     for tid, key, status in tasks:
         con.execute("insert into tasks values (?,?,?)", (tid, key, status))
+    con.execute("create table task_comments"
+                " (id integer primary key, task_id text, body text)")
+    con.execute("create table task_runs (id integer primary key,"
+                " task_id text, summary text)")
+    con.execute("create table task_events (id integer primary key,"
+                " task_id text, kind text, payload text)")
+    for tid, body in (claims or {}).items():
+        con.execute("insert into task_comments (task_id, body)"
+                    " values (?,?)", (tid, body))
     con.commit()
     con.close()
     # a fake hermes: writes archive calls to a log
@@ -68,23 +86,130 @@ def make_board(tasks):
     return db, log, fake
 
 
-def run_gate(tasks, info, dry_run=False):
-    db, log, fake = make_board(tasks)
+def run_gate(tasks, info, dry_run=False, review="ok", head=None,
+             claims=None, m=None):
+    """review_state and pr_payload are stubbed: review "ok" (an accept
+    verdict on the head) keeps the plain quench cases; gh is never called."""
+    mod = m or globals()["mod"]
+    db, log, fake = make_board(tasks, claims)
     real_db, real_bin = mod.BOARD_DB, mod.HERMES_BIN
     comments = []
     real_comment = mod.comment_card
+    real_review, real_payload = mod.review_state, mod.pr_payload
     mod.BOARD_DB, mod.HERMES_BIN = db, fake
     mod.comment_card = lambda tid, text: comments.append((tid, text)) or True
+    mod.review_state = lambda n: (review, "")
+    mod.pr_payload = lambda n: {"headRefOid": head} if head else {}
     try:
         findings = mod.stale_rebase_gate(info, dry_run=dry_run)
     finally:
         mod.BOARD_DB, mod.HERMES_BIN = real_db, real_bin
         mod.comment_card = real_comment
+        mod.review_state, mod.pr_payload = real_review, real_payload
     archived = []
     if os.path.exists(log):
         with open(log) as fh:
             archived = [line.split() for line in fh.read().splitlines()]
     return findings, comments, archived
+
+
+def shield_battery(m, want):
+    """The own-push and no-verdict shields of the quench."""
+    head = "a24ff95b" * 5
+    mergeable = {408: {"detail": {"mergeable": "MERGEABLE"}}}
+
+    # 7. own push: the card claims the live head, MERGEABLE was reached by
+    #    its push; the delivery cycle is unfinished, the card lives.
+    findings, comments, archived = run_gate(
+        [("t_reb408", "coder-pr408-rebase-c8c4f24", "scheduled")],
+        mergeable, head=head, m=m,
+        claims={"t_reb408": "Rebase pushed, head a24ff95, waiting for CI."})
+    want("7 own push: the card lives, no actions",
+         not comments and not archived
+         and any(f[0] == "mergeflow-stale-rebase-shield:408"
+                 for f in findings),
+         "%s %s %s" % (comments, archived, [f[0] for f in findings]))
+
+    # 8. own push on a running card: no stop directive either.
+    findings, comments, archived = run_gate(
+        [("t_run", "coder-pr408-rebase-c8c4f24", "running")],
+        mergeable, head=head, m=m,
+        claims={"t_run": "Pushed the rebased head A24FF95B."})
+    want("8 running with its own push: no stop directive",
+         not comments and not archived
+         and any(f[0] == "mergeflow-stale-rebase-shield:408"
+                 for f in findings),
+         "%s %s %s" % (comments, archived, [f[0] for f in findings]))
+
+    # 9. a foreign head: the card names another sha, the shield is off and
+    #    the plain quench applies (accept verdict on the head).
+    findings, comments, archived = run_gate(
+        [("t_reb408", "coder-pr408-rebase-c8c4f24", "ready")],
+        mergeable, head=head, m=m,
+        claims={"t_reb408": "Rebase pushed, head 1234567."})
+    want("9 foreign head: quenched as before",
+         any("t_reb408" in a for a in archived)
+         and any(f[0] == "mergeflow-stale-rebase:408" for f in findings),
+         "%s %s" % (archived, [f[0] for f in findings]))
+
+    # 10. no accept verdict on the head: the review request is still owed,
+    #     the card lives.
+    for state in ("stale", "none"):
+        findings, comments, archived = run_gate(
+            [("t_reb408", "coder-pr408-rebase-c8c4f24", "ready")],
+            mergeable, review=state, head=head, m=m)
+        want("10 review_state=%s: the card lives" % state,
+             not comments and not archived
+             and any(f[0] == "mergeflow-stale-rebase-noverdict:408"
+                     for f in findings),
+             "%s %s %s" % (comments, archived, [f[0] for f in findings]))
+
+    # 11. the PR left OPEN: the shields do not apply.
+    findings, comments, archived = run_gate(
+        [("t_reb411", "coder-pr411-rebase-c8c4f24", "todo")],
+        {}, review="none", head=head, m=m,
+        claims={"t_reb411": "Rebase pushed, head a24ff95."})
+    want("11 PR not OPEN: archived despite the shields",
+         any("t_reb411" in a for a in archived), str(archived))
+
+
+# (name, old, new): each mutant of pr-hygiene.py must turn the shield
+# battery red. Copies live in a temp dir; this file is never re-run.
+MUTANTS = [
+    ("own-push shield removed",
+     "            if head7 and claims_head \\\n",
+     "            if False and claims_head \\\n"),
+    ("no-verdict shield removed",
+     '            if verdict_state != "ok":\n'
+     '                findings.append((\n'
+     '                    "mergeflow-stale-rebase-noverdict',
+     '            if False:\n'
+     '                findings.append((\n'
+     '                    "mergeflow-stale-rebase-noverdict'),
+]
+
+
+def run_mutants():
+    with open(SCRIPT, encoding="utf-8") as fh:
+        src = fh.read()
+    tmp = tempfile.mkdtemp(prefix="ph-stale-mut-")
+    for i, (name, old, new) in enumerate(MUTANTS):
+        if src.count(old) != 1:
+            want("mutant anchor present: %s" % name, False)
+            continue
+        path = os.path.join(tmp, "pr_hygiene_mut_%d.py" % i)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(src.replace(old, new))
+        sys.path.insert(0, HERE)        # factory_config for the copy
+        mspec = importlib.util.spec_from_file_location(
+            "pr_hygiene_stale_mut_%d" % i, path)
+        mutant = importlib.util.module_from_spec(mspec)
+        mspec.loader.exec_module(mutant)
+        # the copy has no sibling board-watchdog: lend it the real one
+        mutant.board_watchdog = mod.board_watchdog
+        failed = []
+        shield_battery(mutant, lambda n, c, d="": c or failed.append(n))
+        want("mutant red: %s" % name, bool(failed))
 
 
 def main():
@@ -152,6 +277,9 @@ def main():
          and any(f[0] == "mergeflow-stale-rebase-would:408"
                  for f in findings),
          "%s %s %s" % (comments, archived, [f[0] for f in findings]))
+
+    shield_battery(mod, want)
+    run_mutants()
 
     if FAILS:
         print("STALE REBASE (pr-hygiene): FAILURES: %s" % ", ".join(FAILS))

@@ -124,3 +124,8 @@ This document collects the lessons from running the factory that were expensive 
 
 **Rule.** A release fact (a tag, a version, what already shipped) is read from the remote, never from a local clone. Before release work or a changelog audit, compare the local tags with `git ls-remote --tags origin` (`tag-sync-check.sh`). In a review, "verified" counts only when the fact was checked against the source of truth.
 **Why.** A plain `git fetch` never overwrites a tag that already exists locally. The agents' clone kept a release tag that pointed at an older commit than the published one, a change already shipped was listed again in the next changelog, and the reviewer passed the release-prep PR: its "nothing already shipped" check followed the right procedure from the wrong starting point.
+
+## A cleanup gate must not retire the actor that achieved its criterion
+
+**Rule.** A gate that retires work because its goal is already met must check who met it and what is still owed. It must not retire the actor whose own action achieved the criterion, nor drop a step that actor still owes; it retires only when the criterion is met in full. When an owner disappears anyway, a safety net gives the orphaned artifact a new owner instead of only reporting it.
+**Why.** A rebase card pushed the rebased head, the PR became mergeable, and the card parked itself until CI. The cleanup gate saw "mergeable" and archived the card as done without it. The review request of the new head lived only in that card, so nobody made it, and the PR sat still on an empty board with a report line that no actor read.
