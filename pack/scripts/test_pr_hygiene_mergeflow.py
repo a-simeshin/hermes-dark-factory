@@ -71,6 +71,12 @@ def isolate(tmpdir, live=None):
     created = []
     mod.create_rebase_card = lambda *a, **k: (created.append(a) or (True, "ok"))
     mod.comment_card = lambda tid, text: True
+    # The admission gate before create (board-watchdog gen_admission) reads
+    # the boards: keep it inside the sandbox.
+    bw = getattr(mod, "board_watchdog", None)
+    if bw is not None and hasattr(bw, "BOARDS"):
+        bw.BOARDS = os.path.join(tmpdir, "boards")
+        os.makedirs(bw.BOARDS, exist_ok=True)
     return created
 
 

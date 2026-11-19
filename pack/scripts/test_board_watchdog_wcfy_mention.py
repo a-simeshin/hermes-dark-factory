@@ -11,8 +11,13 @@ without a WCFY and without a card for it.
 
 The rule: a WCFY is a comment that starts with the header line
 "## What changes for you". PR 243 has a real WCFY from long ago (it starts
-with the header), but it is OLDER than the head: the arm must be created and
-not silenced by a line from a verdict.
+with the header), but it is OLDER than the head: a line from a verdict must
+not make it look fresh.
+
+Since the switch to "one PR = one card" the watchdog no longer arms a WCFY
+card per head: the review-layer scenarios below check that no card is created
+for these heads, and that a PASS head without a live card and without a
+formal owner review gives only the "milestone PR without a card" finding.
 
 Fixed dates rot (the arm window is 14 days): the bodies are verbatim-style,
 the dates are shifted relative to "now" keeping the live intervals (offsets
@@ -187,28 +192,24 @@ def fake_run(prs, calls, new_ids=None, protection=None, checks=None):
     return _run
 
 
-def with_scenario(prs, tasks=(), comments=(), hold35=False,
-                  protection=None, checks=None):
+def with_scenario(prs, tasks=(), comments=(),
+                  protection=None, checks=None, keep_orphans=False):
+    """Run review_layer_check on the fixture; gh/hermes calls go to calls."""
     slug, tmp, old = make_board(tasks, comments)
     calls = []
     real_run, real_repo = mod.run, mod.board_repo
     mod.run = fake_run(prs, calls, protection=protection, checks=checks)
     mod.board_repo = lambda s: "acme/repo"
-    # PAIR_WCFY_HOLD is pinned into tmp: a real hold file of the host must not
-    # affect the tests; hold35=True turns on the dry-run of the pair/WCFY
-    # branches.
-    old_hold = mod.PAIR_WCFY_HOLD
-    hold_path = os.path.join(tmp, "pair-wcfy-hold")
-    if hold35:
-        open(hold_path, "w").close()
-    mod.PAIR_WCFY_HOLD = hold_path
     try:
         found = mod.review_layer_check(slug)
     finally:
         mod.run = real_run
         mod.board_repo = real_repo
         mod.BOARDS = old
-        mod.PAIR_WCFY_HOLD = old_hold
+    # "A PR of the active milestone without a card" is a legitimate finding
+    # in mock scenarios; it has its own tests.
+    if not keep_orphans:
+        found = [f for f in found if ":r36:ms-orphan:" not in f[0]]
     return found, calls, tmp
 
 
@@ -419,48 +420,38 @@ def comments_243():
     ]
 
 
-def test_243_pass_arms_wcfy_card():
+def test_243_pass_no_wcfy_arm():
     """Accept on the head, CI green (the scenario default), the real WCFY is
-    stale, the mention in the verdict does not count: the card is created."""
+    stale, the mention in the verdict does not count. The WCFY arm is gone
+    (one PR = one card): nothing is created."""
     found, calls, tmp = with_scenario(
         {243: pr_json(HEAD243, HEAD_AGE, comments=comments_243())})
-    made = creates(calls)
-    assert len(made) == 1, calls
-    cmd = made[0]
-    assert cmd[cmd.index("--assignee") + 1] == "coder", cmd
-    assert cmd[cmd.index("--priority") + 1] == "95", cmd
-    key = cmd[cmd.index("--idempotency-key") + 1]
-    assert key == "coder-pr243-wcfy-f9897fe", key
-    assert "What changes for you" in cmd[5] and "f9897fe" in cmd[5], cmd[5]
-    assert any(f[0].endswith("revlayer:wcfy:243:f9897fe") and "t_new1" in f[2]
-               for f in found), found
+    assert creates(calls) == [], calls
     shutil.rmtree(tmp)
-    print("OK test_243_pass_arms_wcfy_card")
+    print("OK test_243_pass_no_wcfy_arm")
 
 
-def test_317_pass_arms_wcfy_card():
+def test_317_pass_no_wcfy_arm():
     found, calls, tmp = with_scenario(
         {317: pr_json(HEAD317, HEAD_AGE, comments=[
             {"body": VERDICT_317, "createdAt": at(OFF_VERDICT_317)}])})
-    made = creates(calls)
-    assert len(made) == 1, calls
-    cmd = made[0]
-    key = cmd[cmd.index("--idempotency-key") + 1]
-    assert key == "coder-pr317-wcfy-819e741", key
-    assert cmd[cmd.index("--assignee") + 1] == "coder", cmd
-    assert cmd[cmd.index("--priority") + 1] == "95", cmd
+    assert creates(calls) == [], calls
     shutil.rmtree(tmp)
-    print("OK test_317_pass_arms_wcfy_card")
+    print("OK test_317_pass_no_wcfy_arm")
 
 
 def test_317_real_wcfy_after_head_no_arm():
-    """Negative: a real "## What changes for you" AFTER the head silences the arm."""
+    """Negative: a real "## What changes for you" AFTER the head. A PASS head
+    without a live card and without a formal owner review legitimately gives
+    ONLY the finding r36:ms-orphan (no cards created): the PR work fell off
+    the board."""
     found, calls, tmp = with_scenario(
         {317: pr_json(HEAD317, HEAD_AGE, comments=[
             {"body": VERDICT_317, "createdAt": at(OFF_VERDICT_317)},
-            wcfy_comment(HEAD_AGE)])})
+            wcfy_comment(HEAD_AGE)])},
+        keep_orphans=True)
     assert creates(calls) == [], calls
-    assert found == [], found
+    assert [f[0] for f in found] == ["testboard:r36:ms-orphan:317"], found
     shutil.rmtree(tmp)
     print("OK test_317_real_wcfy_after_head_no_arm")
 
@@ -469,8 +460,8 @@ def main():
     test_verdict_mention_is_not_wcfy_243()
     test_verdict_mention_is_not_wcfy_317()
     test_stale_real_wcfy_recognized_but_old()
-    test_243_pass_arms_wcfy_card()
-    test_317_pass_arms_wcfy_card()
+    test_243_pass_no_wcfy_arm()
+    test_317_pass_no_wcfy_arm()
     test_317_real_wcfy_after_head_no_arm()
     print("OK: a WCFY mention in a verdict is not a WCFY, tests are green")
 

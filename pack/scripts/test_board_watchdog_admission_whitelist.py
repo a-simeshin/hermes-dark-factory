@@ -197,7 +197,7 @@ if hasattr(mod, "admission_gate"):
         tasks=[
             # (1) a live card: specify wiped #86 from the body
             {"id": "t_3288bfb5", "status": "ready", "priority": 5,
-             "title": ("Gate-hold check: UI inspector origin/warnings "
+             "title": ("Gate-hold check: UI origin/warnings "
                        "feature pending owner approval"),
              "body": ("This is a HOLD/GATE card. Do NOT implement. "
                       "Verify owner approval and issue mirror.")},
@@ -311,7 +311,7 @@ if hasattr(mod, "admission_gate"):
     # milestone is assigned it returns by itself
     slug2, db2, old2 = make_board(
         tasks=[{"id": "t_3288bfb5", "status": "ready", "priority": 5,
-                "title": "Gate-hold check: UI inspector origin/warnings",
+                "title": "Gate-hold check: UI origin/warnings",
                 "body": "the body was rewritten by specify, no references"}],
         comments=[("t_3288bfb5", "issue-link: #86 (restored)")])
     mod.run = make_run(db2, [])

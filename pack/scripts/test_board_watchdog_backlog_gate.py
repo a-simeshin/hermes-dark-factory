@@ -1,6 +1,13 @@
 #!/usr/bin/env python3
 """Tests of the backlog owner gate in board-watchdog.py (backlog_gate).
 
+Rule 2 of the gate (parking ready cards outside the milestones) and the lift
+by an owner review were removed: admission is done by admission_gate (see
+test_board_watchdog_admission_merge.py). What stays here: rule 1 (the
+digest), rule 3 (archiving stale p0 cards), the hold file and the board slug,
+the dry run, the review layer, the CLI hints, the linkage format, and the
+cache reset when milestones change.
+
 Run: python3 test_board_watchdog_backlog_gate.py
 Mutant runs: copy board-watchdog.py (with the mutation) next to the other
 scripts and run BOARD_WATCHDOG_SCRIPT=<copy> python3 test_board_watchdog_backlog_gate.py
@@ -51,7 +58,7 @@ def load_mod():
     return mod
 
 
-def make_board(tmp, tasks=(), runs=(), events=()):
+def make_board(tmp, tasks=(), runs=(), events=(), comments=()):
     os.makedirs(os.path.join(tmp, SLUG), exist_ok=True)
     db = os.path.join(tmp, SLUG, "kanban.db")
     con = sqlite3.connect(db)
@@ -76,6 +83,9 @@ def make_board(tmp, tasks=(), runs=(), events=()):
     con.executemany(
         "insert into task_events (task_id,kind,created_at) values (?,?,?)",
         events)
+    con.executemany(
+        "insert into task_comments (task_id,author,body,created_at)"
+        " values (?,?,?,?)", comments)
     con.commit()
     con.close()
     return db
@@ -87,44 +97,18 @@ LINKAGE = {
     "ms_issues": {229: "open", 262: "closed"},
     "open_pr_refs": {245: [229], 202: [190], 166: []},
     "direct_ms_prs": [166],
-}
-
-
-# Only milestone 2.3.0 (number 3) is open: the issues of the closed
-# milestones are absent from the linkage altogether, so their cards get parked.
-LINKAGE_ONE_OPEN = {
-    "ts": time.time(),
-    "ms_titles": {3: "2.3.0"},
-    "ms_issues": {251: "open"},
-    "open_pr_refs": {292: [251], 202: [190]},
-    "direct_ms_prs": [],
-    "owner_review_prs": [],
-}
-
-LINKAGE_EMPTY = {
-    "ts": time.time(),
-    "ms_titles": {},
-    "ms_issues": {},
-    "open_pr_refs": {},
-    "direct_ms_prs": [],
     "owner_review_prs": [],
 }
 
 
 class Env:
-    """Patches the module to a temporary board and a CLI stub.
+    """Patches the module to a temporary board and a CLI stub."""
 
-    The stub reproduces the kanban core semantics: comment changes nothing,
-    block blocks, a repeated block of the same kind after unblock routes to
-    triage (BLOCK_RECURRENCE_LIMIT=2), archive archives.
-    """
-
-    def __init__(self, mod, tasks=(), runs=(), events=()):
+    def __init__(self, mod, tasks=(), runs=(), events=(), comments=()):
         self.mod = mod
         self.tmp = tempfile.mkdtemp(prefix="wd-backlog-")
-        self.db = make_board(self.tmp, tasks, runs, events)
+        self.db = make_board(self.tmp, tasks, runs, events, comments)
         self.runs = []
-        self.blocks = {}
         self._old = (mod.BOARDS, mod.BACKLOG_HOLD, mod.BACKLOG_CACHE,
                      mod.run, mod.backlog_fetch_linkage)
         mod.BOARDS = self.tmp
@@ -142,25 +126,13 @@ class Env:
         verb = cmd[4] if len(cmd) > 4 else ""
         tid = cmd[5] if len(cmd) > 5 else ""
         con = sqlite3.connect(self.db)
-        if verb == "block":
-            con.execute("update tasks set status='blocked' where id=?",
-                        (tid,))
-        elif verb == "unblock":
+        if verb == "unblock":
             con.execute("update tasks set status='ready' where id=?", (tid,))
-        elif verb == "schedule":
-            reason = " ".join(cmd[6:]) if len(cmd) > 6 else ""
-            con.execute("update tasks set status='scheduled' where id=?",
-                        (tid,))
-            con.execute("insert into task_comments (task_id, author, body,"
-                        " created_at) values (?,?,?,?)",
-                        (tid, "watchdog", reason, int(time.time())))
         elif verb == "archive":
             con.execute("update tasks set status='archived' where id=?",
                         (tid,))
         con.commit()
         con.close()
-        if verb == "schedule":
-            return "Scheduled %s" % tid
         return ""
 
     def statuses(self):
@@ -174,9 +146,10 @@ class Env:
          self.mod.run, self.mod.backlog_fetch_linkage) = self._old
 
 
-def classify_case(mod, title, body, assignee="coder"):
-    return mod.backlog_classify({"title": title, "body": body,
-                                 "assignee": assignee}, LINKAGE)
+PARK_COMMENT = ("backlog: outside milestone (backlog gate, rule 2, category:"
+                " issue_not_milestone): no linkage to the open milestones"
+                " (2.3.0); back to ready with unblock after the owner"
+                " decides")
 
 
 def main():
@@ -184,23 +157,24 @@ def main():
     mod = load_mod()
     print("module: %s" % SCRIPT)
 
-    print("[1] classification, rule 2")
-    check("ops", classify_case(mod, "check nodes", "", assignee="ops")
-          == ("keep", "ops", None))
-    check("ms issue open", classify_case(mod, "#229 task", "")
-          [0:2] == ("keep", "milestone"))
-    check("ms issue closed", classify_case(mod, "#262 task", "")
-          == ("keep", "milestone_stale_closed", [262]))
-    check("pr via refs", classify_case(mod, "PR #245", "")
-          == ("keep", "milestone", [245]))
-    check("no refs", classify_case(mod, "estimate the cost", "")
-          == ("demote", "no_ref", None))
-    check("pr not ms", classify_case(mod, "PR #202", "")
-          == ("demote", "pr_not_milestone", [202]))
-    check("pr ms direct = keep", classify_case(mod, "PR #166", "")
-          == ("keep", "milestone", [166]))
-    check("issue not ms", classify_case(mod, "#999 task", "")
-          == ("demote", "issue_not_milestone", [999]))
+    print("[1] rule 2 is removed")
+    check("classify removed", not hasattr(mod, "backlog_classify"))
+    check("park_backlog removed", not hasattr(mod, "backlog_park_backlog"))
+    check("raise removed", not hasattr(mod, "backlog_raise_owner_reviewed"))
+    # behaviour: a card outside the milestones is NOT parked any more,
+    # admission is done by admission_gate
+    env = Env(mod, tasks=[
+        ("t_bad", "#999 out of scope", "", "coder", "ready", 70, now,
+         "agent"),
+    ])
+    mod.backlog_gate(SLUG, {}, now=now)
+    stt = env.statuses()
+    check("ready without a milestone is not parked",
+          stt.get("t_bad") == "ready", str(stt))
+    check("no schedule at all",
+          not any(c[4] == "schedule" for c in env.runs),
+          str([c[4:] for c in env.runs]))
+    env.restore()
 
     print("[2] p0 without movement: comments are not movement")
     env = Env(mod, tasks=[
@@ -225,7 +199,7 @@ def main():
     check("a run is movement", "t_run" not in ids)
     check("a status change is movement", "t_move" not in ids)
     check("young is skipped", "t_young" not in ids)
-    check("non-p0 is skipped", "t_p5" not in ids)
+    check("not p0 is skipped", "t_p5" not in ids)
     check("blocked is skipped", "t_bl" not in ids)
     env.restore()
 
@@ -233,54 +207,13 @@ def main():
     env = Env(mod, tasks=[("t_a", "#229 work", "", "coder", "ready", 80,
                            now, "agent")])
     open(mod.BACKLOG_HOLD, "w").close()
-    check("hold keeps it silent",
-          mod.backlog_gate(SLUG, {}, now=now) == [])
+    check("hold is silent", mod.backlog_gate(SLUG, {}, now=now) == [])
     os.remove(mod.BACKLOG_HOLD)
     check("another slug is silent",
-          mod.backlog_gate("other-board", {}, now=now) == [])
+          mod.backlog_gate("product", {}, now=now) == [])
     env.restore()
 
-    print("[4] parking ready through schedule")
-    env = Env(mod, tasks=[
-        ("t_keep", "#229 work", "", "coder", "ready", 80, now, "agent"),
-        ("t_ops", "check nodes", "", "ops", "ready", 60, now, "agent"),
-        ("t_bad", "#999 out of scope", "", "coder", "ready", 70, now,
-         "agent"),
-    ])
-    st = {}
-    out = mod.backlog_gate(SLUG, st, now=now)
-    keys = [k for k, _ in out]
-    stt = env.statuses()
-    check("parked to scheduled", stt.get("t_bad") == "scheduled", str(stt))
-    check("milestone card stays", stt.get("t_keep") == "ready", str(stt))
-    check("ops stays", stt.get("t_ops") == "ready", str(stt))
-    check("sweep key", any(k.startswith("backlog-sweep:") for k in keys),
-          str(keys))
-    check("schedule without block",
-          any(c[4] == "schedule" and c[5] == "t_bad" for c in env.runs)
-          and not any(c[4] == "block" for c in env.runs),
-          str([c[4:] for c in env.runs]))
-    check("marker in the parking reason",
-          any(c[4] == "schedule" and any(
-              mod.BACKLOG_PARK_MARKER in str(x) for x in c)
-              for c in env.runs))
-    check("category in state",
-          (st.get("backlog_swept") or {}).get("t_bad", {}).get("cat")
-          == "issue_not_milestone")
-    env.restore()
-
-    print("[5] cap of 40 per run")
-    tasks = [("t_b%02d" % i, "#999 junk", "", "coder", "ready", 80, now,
-              "agent") for i in range(45)]
-    env = Env(mod, tasks=tasks)
-    st = {}
-    mod.backlog_gate(SLUG, st, now=now)
-    n_sched = sum(1 for s in env.statuses().values() if s == "scheduled")
-    check("no more than 40 per run", n_sched == 40, str(n_sched))
-    check("swept in state is 40", len(st.get("backlog_swept") or {}) == 40)
-    env.restore()
-
-    print("[6] p0 archive")
+    print("[4] p0 archive")
     env = Env(mod, tasks=[
         ("t_p0old", "old p0", "", "coder", "todo", 0, now - 20 * D,
          "user"),
@@ -288,49 +221,40 @@ def main():
     st = {}
     out = mod.backlog_gate(SLUG, st, now=now)
     stt = env.statuses()
-    check("archived", stt.get("t_p0old") == "archived", str(stt))
+    check("archive done", stt.get("t_p0old") == "archived", str(stt))
     check("p0 key", any(k.startswith("backlog-p0:") for k, _ in out))
-    check("comment before the archive",
+    check("comment before archive",
           any(c[4] == "comment" and c[5] == "t_p0old" for c in env.runs))
-    check("archive recorded in state",
-          "t_p0old" in (st.get("backlog_archived") or {}))
+    check("archive in state", "t_p0old" in (st.get("backlog_archived") or {}))
     check("archive in the digest",
           any("archived in the last day" in t and "t_p0old" in t
               for _, t in out))
     env.restore()
 
-    print("[7] digest once a day")
+    print("[5] digest once a day, parkings by the marker")
     env = Env(mod, tasks=[
-        ("t_d1", "#999 junk", "", "coder", "ready", 80, now, "agent"),
-    ])
+        ("t_d1", "#999 junk", "", "coder", "scheduled", 80, now, "agent"),
+    ], comments=[("t_d1", "watchdog", PARK_COMMENT, int(now))])
     st = {}
     first = [k for k, _ in mod.backlog_gate(SLUG, st, now=now)]
     second = [k for k, _ in mod.backlog_gate(SLUG, st, now=now)]
-    check("first run carries a digest",
+    check("first run with a digest",
           any(k.startswith("backlog-digest:") for k in first), str(first))
-    check("second run the same day has no digest",
+    check("second run the same day without a digest",
           not any(k.startswith("backlog-digest:") for k in second),
           str(second))
     check("digest_day in state",
           (st.get("backlog") or {}).get("digest_day") is not None)
     st2 = json.loads(json.dumps(st))
     st2.setdefault("backlog", {}).pop("digest_day", None)
-    check("digest text carries the id and the category",
+    check("digest by the marker, not by state",
           any("t_d1" in t and "issue_not_milestone" in t
               for _, t in mod.backlog_gate(
                   SLUG, st2, now=now + 3600, apply=False,
                   ignore_hold=True)))
-    st3 = json.loads(json.dumps(st))
-    st3["backlog_swept"] = {}
-    st3.setdefault("backlog", {}).pop("digest_day", None)
-    check("digest comes from the marker, not from state",
-          any("t_d1" in t and "issue_not_milestone" in t
-              for _, t in mod.backlog_gate(
-                  SLUG, st3, now=now + 3600, apply=False,
-                  ignore_hold=True)))
     env.restore()
 
-    print("[8] a dry run does not mutate")
+    print("[6] the dry run does not mutate")
     env = Env(mod, tasks=[
         ("t_d2", "#999 junk", "", "coder", "ready", 80, now, "agent"),
         ("t_p0d", "old p0", "", "coder", "todo", 0, now - 20 * D, "user"),
@@ -346,24 +270,24 @@ def main():
     check("state untouched", st == {}, str(st))
     env.restore()
 
-    print("[9] a dry run goes through hold, apply stays silent")
+    print("[7] dry-run goes through the hold, apply is silent")
     env = Env(mod, tasks=[
-        ("t_d3", "#999 junk", "", "coder", "ready", 80, now, "agent"),
+        ("t_p0h", "old p0", "", "coder", "todo", 0, now - 20 * D,
+         "user"),
     ])
     open(mod.BACKLOG_HOLD, "w").close()
     check("apply under hold is silent",
           mod.backlog_gate(SLUG, {}, now=now) == [])
-    dry = mod.backlog_gate(SLUG, {}, now=now, apply=False,
-                           ignore_hold=True)
-    check("dry run through hold sees the sweep",
-          any(k.startswith("backlog-sweep:") for k, _ in dry), str(dry))
-    check("dry run did not mutate", env.runs == [])
+    dry = mod.backlog_gate(SLUG, {}, now=now, apply=False, ignore_hold=True)
+    check("dry-run through the hold sees p0",
+          any(k.startswith("backlog-p0:") for k, _ in dry), str(dry)[:120])
+    check("dry-run did not mutate", env.runs == [])
     os.remove(mod.BACKLOG_HOLD)
     env.restore()
 
-    print("[10] the review layer does not re-arm a scheduled card")
+    print("[8] the review layer does not recreate a scheduled card")
     env = Env(mod, tasks=[
-        ("t_rev", "review of PR #202", "#202 head", "reviewer", "scheduled",
+        ("t_rev", "review PR #202", "#202 head", "reviewer", "scheduled",
          100, now, "watchdog"),
     ])
     con = sqlite3.connect(env.db)
@@ -372,20 +296,19 @@ def main():
     con.commit()
     con.close()
     armed_calls = []
-    patches = {
+    patches = {  # the reviewer arm card no longer exists (one PR = one card)
         "board_repo": lambda s: "x/y",
         "run": lambda cmd, timeout=None: json.dumps(
             [{"number": 202, "isDraft": False}]),
         "_pr_review_state": lambda repo, n: {
             "head": "abcdef1234", "age": 2 * 3600, "verdict": False,
             "info": None, "wcfy_at": None},
-        "_review_arm_card": lambda *a, **k: armed_calls.append(a) or "t_new",
     }
     saved = {k: getattr(mod, k) for k in patches}
     for k, v in patches.items():
         setattr(mod, k, v)
     findings = mod.review_layer_check(SLUG)
-    check("a scheduled reviewer card is alive for the review layer",
+    check("the scheduled reviewer card stays alive for the review layer",
           not armed_calls, str(armed_calls))
     check("no repeated arm in findings",
           not any("revlayer:armed" in (f[0] if isinstance(f, tuple) else f)
@@ -394,7 +317,7 @@ def main():
         setattr(mod, k, v)
     env.restore()
 
-    print("[11] the hints and commands of the watchdog exist")
+    print("[9] the hints and commands of the watchdog exist")
     import subprocess
     src = open(SCRIPT, encoding="utf-8").read()
     valid = None
@@ -443,68 +366,8 @@ def main():
               "nonexistent: %s (checked %d)" % (sorted(bad), len(cands)))
         check("the move command is no longer advised", "move" not in cands)
 
-    print("[12] only milestone 2.3.0 is open, names come from GitHub")
-    # classify: an issue of the new milestone passes, closed ones do not
-    check("issue of 2.3.0 passes",
-          mod.backlog_classify({"title": "#251 work", "body": "",
-                                "assignee": "coder"}, LINKAGE_ONE_OPEN)
-          == ("keep", "milestone", [251]))
-    check("PR of 2.3.0 passes through Refs",
-          mod.backlog_classify({"title": "PR #292", "body": "",
-                                "assignee": "coder"}, LINKAGE_ONE_OPEN)
-          == ("keep", "milestone", [292]))
-    check("issue of a closed milestone is parked",
-          mod.backlog_classify({"title": "#229 work", "body": "",
-                                "assignee": "coder"}, LINKAGE_ONE_OPEN)
-          == ("demote", "issue_not_milestone", [229]))
-    check("PR on an issue of a closed milestone is parked",
-          mod.backlog_classify({"title": "PR #202", "body": "",
-                                "assignee": "coder"}, LINKAGE_ONE_OPEN)
-          == ("demote", "pr_not_milestone", [202]))
-    # gate: an issue without a milestone is parked, the reason carries the
-    # name taken from GitHub
-    env = Env(mod, tasks=[
-        ("t_46in", "#251 work 2.3.0", "", "coder", "ready", 80, now,
-         "agent"),
-        ("t_46out", "#999 out of focus", "", "coder", "ready", 70, now,
-         "agent"),
-    ])
-    json.dump(LINKAGE_ONE_OPEN, open(mod.BACKLOG_CACHE, "w"))
-    st = {}
-    mod.backlog_gate(SLUG, st, now=now)
-    stt = env.statuses()
-    check("issue of 2.3.0 stays in ready", stt.get("t_46in") == "ready",
-          str(stt))
-    check("issue without a milestone is parked",
-          stt.get("t_46out") == "scheduled", str(stt))
-    sched = [c for c in env.runs if c[4] == "schedule"]
-    check("the reason names 2.3.0",
-          any("2.3.0" in " ".join(map(str, c)) for c in sched),
-          str([c[6:] for c in sched])[:160])
-    check("the reason has no names of old releases",
-          not any(("1.2.0" in " ".join(map(str, c))
-                   or "2.2.0" in " ".join(map(str, c))) for c in sched),
-          str([c[6:] for c in sched])[:160])
-    env.restore()
 
-    print("[13] no open milestones, nothing is parked")
-    env = Env(mod, tasks=[
-        ("t_46e", "#999 junk", "", "coder", "ready", 80, now, "agent"),
-    ])
-    json.dump(LINKAGE_EMPTY, open(mod.BACKLOG_CACHE, "w"))
-    st = {}
-    out = mod.backlog_gate(SLUG, st, now=now)
-    stt = env.statuses()
-    check("nothing parked", stt.get("t_46e") == "ready", str(stt))
-    check("no schedule call",
-          not any(c[4] == "schedule" for c in env.runs),
-          str([c[4:] for c in env.runs]))
-    check("backlog-nomilestones key",
-          any(k == "backlog-nomilestones" and "parks nothing" in t
-              for k, t in out), str([k for k, _ in out]))
-    env.restore()
-
-    print("[14] the linkage reads state=open, no name filter")
+    print("[10] the linkage reads state=open, without a name filter")
     real_fetch = mod.backlog_fetch_linkage
     env = Env(mod)
     os.remove(mod.BACKLOG_CACHE)
@@ -545,26 +408,27 @@ def main():
           (data or {}).get("ms_titles") == {3: "2.3.0"}, str(data)[:160])
     check("issue of the open milestone in the linkage",
           (data or {}).get("ms_issues") == {251: "open"}, str(data)[:160])
-    check("PR of the new milestone passes on fresh data",
-          mod.backlog_classify({"title": "PR #292", "body": "",
-                                "assignee": "coder"},
-                               data)[0:2] == ("keep", "milestone"))
     cache = json.load(open(mod.BACKLOG_CACHE))
-    check("cache of the new format is written", "ms_titles" in cache
+    check("cache of the new format written", "ms_titles" in cache
           and cache.get("ms_titles") == {"3": "2.3.0"}, str(cache)[:120])
     env.restore()
 
-    print("[15] a cache of the old format is unusable, a refresh follows")
+    print("[11] a cache of the old format is not usable, a refresh follows")
     env = Env(mod, tasks=[("t_46x", "#251 work", "", "coder", "ready",
                            80, now, "agent")])
-    old_format = dict(LINKAGE_ONE_OPEN)
-    old_format.pop("ms_titles")
+    old_format = {
+        "ts": time.time(),
+        "ms_issues": {251: "open"},
+        "open_pr_refs": {292: [251]},
+        "direct_ms_prs": [],
+        "owner_review_prs": [],
+    }
     json.dump(old_format, open(mod.BACKLOG_CACHE, "w"))
     fetches = []
 
     def spy_fetch():
         fetches.append(1)
-        return dict(LINKAGE_ONE_OPEN, ts=time.time())
+        return dict(old_format, ms_titles={3: "2.3.0"}, ts=time.time())
 
     saved_fetch = mod.backlog_fetch_linkage
     mod.backlog_fetch_linkage = spy_fetch
@@ -572,14 +436,32 @@ def main():
     mod.backlog_fetch_linkage = saved_fetch
     check("old cache re-read through fetch", len(fetches) == 1,
           str(len(fetches)))
-    check("data is fresh and has ms_titles", fresh is True
+    check("data fresh and with ms_titles", fresh is True
           and (data or {}).get("ms_titles") == {3: "2.3.0"}, str(data)[:80])
+    env.restore()
+
+    print("[12] cache reset when milestones change")
+    env = Env(mod)
+    # the cache does not know #316, the live state says: milestone 2.3.0
+    mod.backlog_cache_reset_on_milestone_change(
+        {229: ("2.3.0", []), 316: ("2.3.0", [])})
+    check("cache reset on a new milestone",
+          not os.path.exists(mod.BACKLOG_CACHE))
+    json.dump(LINKAGE, open(mod.BACKLOG_CACHE, "w"))
+    # without changes the cache lives
+    mod.backlog_cache_reset_on_milestone_change({229: ("2.3.0", [])})
+    check("cache lives without changes",
+          os.path.exists(mod.BACKLOG_CACHE))
+    # an issue lost its milestone: also a reset
+    mod.backlog_cache_reset_on_milestone_change({229: (None, [])})
+    check("cache reset when a milestone is lost",
+          not os.path.exists(mod.BACKLOG_CACHE))
     env.restore()
 
     if FAILED:
         print("FAILED: %s" % ", ".join(FAILED))
         sys.exit(1)
-    print("BACKLOG GATE: all tests green")
+    print("BACKLOG GATE: all tests are green")
 
 
 if __name__ == "__main__":

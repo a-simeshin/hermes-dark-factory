@@ -109,18 +109,67 @@ class Cdp:
         raise RuntimeError("page not loaded in %ds: %s" % (timeout, url))
 
 
-def new_tab(port, url, chrome_bin=None):
-    """Opens a tab, returns (targetId, wsUrl)."""
-    if chrome_bin:
-        subprocess.Popen([chrome_bin, "--headless=new",
-                          "--remote-debugging-port=%d" % port,
-                          "--user-data-dir=%s/chrome-vd-%d"
-                          % (tempfile.gettempdir(), port),
-                          "--no-sandbox", "--disable-gpu",
-                          "about:blank"],
-                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        import time
-        time.sleep(3)
+def start_chrome(chrome_bin, port):
+    """The browser starts ONCE per run and lives until stop_chrome. An
+    earlier version started Chromium inside new_tab (twice per run) and
+    neither kept nor stopped the process: five orphaned chrome-vd-* trees of
+    9-10 processes each were found on the host. start_new_session=True gives
+    the browser its own process group: Chromium's children die with killpg
+    as a whole, even when the parent has already exited."""
+    return subprocess.Popen([chrome_bin, "--headless=new",
+                             "--remote-debugging-port=%d" % port,
+                             "--user-data-dir=%s/chrome-vd-%d"
+                             % (tempfile.gettempdir(), port),
+                             "--no-sandbox", "--disable-gpu",
+                             "about:blank"],
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL,
+                            start_new_session=True)
+
+
+def stop_chrome(proc):
+    """Stops the browser by its process group: TERM, then KILL on timeout.
+    Idempotent: a dead process is not an error."""
+    import signal
+    if proc is None:
+        return
+    try:
+        os.killpg(proc.pid, signal.SIGTERM)
+    except (ProcessLookupError, PermissionError):
+        pass
+    try:
+        proc.wait(timeout=10)
+        return
+    except subprocess.TimeoutExpired:
+        pass
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError):
+        pass
+    try:
+        proc.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        pass
+
+
+def wait_cdp(port, timeout=20):
+    """Waits for the DevTools port to answer instead of a fixed sleep."""
+    import time
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            urllib.request.urlopen(
+                "http://127.0.0.1:%d/json/version" % port, timeout=2).read()
+            return
+        except Exception:
+            time.sleep(0.25)
+    raise RuntimeError("headless Chrome did not come up on :%d in %ds"
+                       % (port, timeout))
+
+
+def new_tab(port, url):
+    """Opens a tab, returns (targetId, wsUrl). The browser is started by
+    start_chrome, not here."""
     req = urllib.request.Request(
         "http://127.0.0.1:%d/json/new?%s" % (port, urllib.parse.quote(url)),
         method="PUT")
@@ -246,17 +295,26 @@ def main():
     steps_js = (open(args.steps_file).read() if args.steps_file else "")
 
     pngs = {}
-    for side, url in (("before", args.url_before),
-                      ("after", args.url_after)):
-        target_id, ws_url = new_tab(args.cdp_port, "about:blank",
-                                    args.chrome_bin or None)
-        try:
-            side_pngs = asyncio.run(shoot_side(ws_url, url, steps_js,
-                                               shots, args.width, args.height))
-            for name, data in side_pngs.items():
-                pngs[(side, name)] = data
-        finally:
-            close_tab(args.cdp_port, target_id)
+    chrome = None
+    if args.chrome_bin:
+        chrome = start_chrome(args.chrome_bin, args.cdp_port)
+    try:
+        if chrome is not None:
+            wait_cdp(args.cdp_port)
+        for side, url in (("before", args.url_before),
+                          ("after", args.url_after)):
+            target_id, ws_url = new_tab(args.cdp_port, "about:blank")
+            try:
+                side_pngs = asyncio.run(shoot_side(ws_url, url, steps_js,
+                                                   shots, args.width,
+                                                   args.height))
+                for name, data in side_pngs.items():
+                    pngs[(side, name)] = data
+            finally:
+                close_tab(args.cdp_port, target_id)
+    finally:
+        # the browser is always stopped, including when a shot raised
+        stop_chrome(chrome)
 
     subdir = args.subdir or ("screenshots/visual-delta/%s" % args.label)
     if args.no_push:

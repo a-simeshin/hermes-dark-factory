@@ -10,14 +10,14 @@ Checks:
   B. Overlap map (pure functions): overlap_pairs finds an open PR touched
      by a merged one through shared files; merge_order_hint puts the PR
      with the most overlaps first.
-  C. Pilot "one PR = one card": an open PR from a pilot branch (setting
-     FACTORY_PILOT_EXEMPT_BRANCHES) with no verdict and no cards does NOT
-     get an auto-armed reviewer-pr<N>-<head7> card
-     (PILOT_EXEMPT_BRANCHES).
+  C. One PR = one card: the per-head reviewer auto-arm and its pilot
+     exemption list are gone. PILOT_EXEMPT_BRANCHES no longer exists, and an
+     open PR with no verdict and no cards does NOT get an auto-armed
+     reviewer-pr<N>-<head7> card from the review layer.
 
 The harness is imported from test_board_watchdog_board_lint.py;
 BOARD_WATCHDOG_SCRIPT overrides the script path, so red-green runs can
-test an older copy of the script (expected FAIL on A and C).
+test an older copy of the script (expected FAIL on A, and on C for a copy that still auto-arms).
 
 Run: python3 test_board_watchdog_ancestor_priority.py
 """
@@ -114,19 +114,17 @@ else:
     check("B0 overlap map functions exist", False,
           "overlap_pairs is missing: code predates the rule")
 
-# --- C. Pilot: auto-arm is not created on a pilot branch ------------------
-check("C0 PILOT_EXEMPT_BRANCHES exists",
-      hasattr(mod, "PILOT_EXEMPT_BRANCHES")
-      and h.PILOT_BRANCH in mod.PILOT_EXEMPT_BRANCHES,
-      "attribute is missing: code predates the rule")
-
-if hasattr(mod, "PILOT_EXEMPT_BRANCHES") and hasattr(mod, "review_layer_check"):
+# --- C. One PR = one card: no auto-arm on a PR without cards ----------
+check("C0 PILOT_EXEMPT_BRANCHES is gone",
+      not hasattr(mod, "PILOT_EXEMPT_BRANCHES"),
+      "the attribute exists: code predates one PR = one card")
+if not hasattr(mod, "PILOT_EXEMPT_BRANCHES") and hasattr(mod, "review_layer_check"):
     slug, db, old_boards = h.make_board(tasks=[])
     # board_repo -> a fictitious repository
     mod.board_repo = lambda s: "acme/widget"
     head = "ab12cd34ef56"
     listing = json.dumps([{"number": 244, "isDraft": False,
-                           "headRefName": h.PILOT_BRANCH}])
+                           "headRefName": "hermes/saved-connections-rebase"}])
     view = json.dumps({
         "headRefOid": head,
         "baseRefName": "develop/2.x",
@@ -150,9 +148,9 @@ if hasattr(mod, "PILOT_EXEMPT_BRANCHES") and hasattr(mod, "review_layer_check"):
     mod.BOARDS = old_boards
     creates = [c for c in calls if len(c) > 4 and c[1] == "kanban"
                and "create" in c[:6]]
-    check("C1 a pilot PR without cards is NOT armed", not creates,
+    check("C1 a PR without cards is NOT armed", not creates,
           "create calls %r" % (creates[:2],))
-    check("C2 the gh query for the pilot head was made (not a silent failure)",
+    check("C2 the gh query for the PR head was made (not a silent failure)",
           any(c[:2] == ["gh", "pr"] and "list" in c for c in calls))
 
 print("\n%s" % ("ALL OK" if not FAILS else "FAILURES: %s" % ", ".join(FAILS)))

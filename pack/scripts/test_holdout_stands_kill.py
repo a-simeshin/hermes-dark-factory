@@ -148,6 +148,10 @@ def test_timeout_wrapper_suffix_match():
 
 
 def main():
+    if not os.path.isdir("/proc/self"):
+        print("SKIP test_holdout_stands_kill (Linux only: holdout-stands-kill.py"
+              " reads /proc/<pid>/cmdline)")
+        return
     test_owner_filter_and_reuse()
     test_dry_run_kills_nothing()
     test_timeout_wrapper_suffix_match()

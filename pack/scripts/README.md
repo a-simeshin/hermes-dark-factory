@@ -16,28 +16,36 @@ Everything that names one project is read from `$HERMES_HOME/factory.env` throug
 |---|---|---|
 | `factory_config.py` | module | Reads `factory.env`. |
 | `cron_quiet.py` | module | Quiet channel for script jobs: routine events go to a daily digest instead of a push to the owner. |
-| `hermes-health.py` | cron | Provider and quota health, dispatch stop on quota exhaustion, failed cron runs, orphaned stands. Silent when healthy. |
+| `board_native_guard.py` | module, CLI | The native-or-live rule: every card generator asks `native_or_live` whether a native Hermes mechanism or a live card already covers the work, and puts the receipt into the card body; `rework_key` is the one key of a rework card. The static scan in its test fails the suite on a new generator that skips the helper. The CLI gives webhook prompts the same receipt. |
+| `milestone_bands.py` | module, CLI | Priority bands computed from the open GitHub milestones on every run (active 80, next 40, others 20), with a disk cache for gh failures. The CLI prints the band of an issue or PR for prompts that create cards. |
+| `scripts_digest.py` | module | Digest of the scripts directory, shared by the test runner's green stamp and the drift check. |
+| `sitecustomize.py` | module | Audit hook loaded by `run-tests.py --audit`: a test that reads a real Hermes home, a live board, a real `gh` or the network turns red. |
+| `run-tests.py` | CLI | Runs every `test_*.py`, each in its own process group (a timeout kills the whole group), prints `TEST TOTAL scripts/: N/M green` and writes the green stamp after a full green audited run. |
+| `teach-snapshot.sh` | CLI | Git snapshot of the agents' knowledge layers, gated on the full test suite: a red suite marks the commit `RED:`. Proves what a teaching round changed. |
+| `hermes-health.py` | cron | Provider and quota health, dispatch stop on quota exhaustion, failed cron runs, orphaned stands, doctor alerts for providers in use, and drift of the scripts directory past the last green test run. Silent when healthy. |
+| `worker-api-watchdog.py` | cron | Live kanban runs: API silence with a live client, compression thrash, a run that only polls GitHub (a repeat parks the card with `kanban schedule`), self-review, duplicate review runs, orphaned claims (running without a live process and with a stale heartbeat). Also executes `SCHEDULED_UNTIL=<UTC>` parking and wakes cards blocked on a PR merge once the PR is merged. |
+| `issue-executor-poll.py` | cron, CLI | Every issue of the active milestone gets an executor card within one cycle, in the milestone's band; skips delivered issues and anything already covered. `--check-issue N` answers a webhook prompt whether a card is appropriate. Logic lives in `board-watchdog.py`. |
+| `board-watchdog.py` | cron | Hourly watchdog of the boards: delivers diagnostics, finds stuck graphs and silence, and runs the gates (admission and milestone bands, rework size and priority, verdict dedup, backlog, prototype first, conflict debt, idempotency keys, closed-issue tails, a closed PR card waiting for the owner's merge, board lint). One PR is worked by one card: the watchdog no longer arms reviewer cards of its own. Single gates run through CLI flags; see `--help` in the source header. |
+| `rework-gate-watchdog.sh` | cron | Runs only the rework gates of `board-watchdog.py` every 5 minutes, before the dispatcher grabs a fresh card. |
+| `pr-hygiene.py` | cron | What can be merged today and what stops it: sibling conflicts, absorbed PRs, merge readiness, rebase cards after a base moves (absorbed by a live card that owns the PR, retired once the PR is mergeable), stale PRs, stack order, rework priority, untracked follow-up promises, claims about external state without an artifact link, visual delta for UI issues only. |
+| `plan-review-gate.py` | cron | Requires a plan review for a large or critical decomposition before its child cards may start. Runs in drain mode: plan review now goes through the native review lane, the gate only services open cycles. |
+| `metrics-evening.py` | cron | Daily report: spend by card and role, review latency, rework, reviewer misses, run outcomes, waiting audit, context size, digest of quiet cron events. Holds the price table used by `usage-ledger.py`: replace it with your plan's prices. |
+| `usage-ledger.py` | cron | Assigns sessions to cards and comments each finished card with its token spend. |
+| `reviewer-misses.py` | cron | Records every case where the reviewer passed a commit and the owner then requested changes on it. |
 | `hermes-backup.sh`, `backup-verify.py` | cron | Nightly `hermes backup` with a verdict that tolerates files vanishing under the archiver, archive test and rotation. |
+| `worktree-gc.py`, `wt-keep.sh` | cron, CLI | Removes worktrees of finished cards once the branch is pushed and has no open PR; `wt-keep.sh` marks a tree to keep. |
+| `pr-risk.py`, `pr-risk.yaml`, `pr-risk-labels.sh` | cron | Deterministic `risk:<class>` label on every open PR from path rules. The path globs in `pr-risk.yaml` marked EXAMPLE must be replaced with your layout. |
 | `kanban-dispatch-hold.py` | CLI | Stops the dispatcher from handing out cards on a live gateway by holding the per-board dispatch lock; running workers finish. |
 | `kanban-dispatch-peak-pause.py`, `peak-pause-tick.sh` | cron | Holds dispatch during the provider's peak-pricing window. |
 | `gw-window.sh` | systemd unit | Deferred gateway restart that waits for a moment with no live agent turns. |
 | `run-bounded.sh` | CLI | Starts a background process with a time-to-live and an owner tag, so stands cannot outlive the run that started them. |
 | `holdout-stands-kill.py`, `holdout-stands-kill.sh` | CLI, cron | Stops stands by owner tag from the registry of `run-bounded.sh`. Linux only (reads `/proc`). |
-| `worktree-gc.py`, `wt-keep.sh` | cron, CLI | Removes worktrees of finished cards once the branch is pushed and has no open PR; `wt-keep.sh` marks a tree to keep. |
-| `usage-ledger.py` | cron | Assigns sessions to cards and comments each finished card with its token spend. Credits come from the price table in `metrics-evening.py`. |
-| `pr-risk.py`, `pr-risk.yaml`, `pr-risk-labels.sh` | cron | Deterministic `risk:<class>` label on every open PR from path rules. The path globs in `pr-risk.yaml` marked EXAMPLE must be replaced with your layout. |
+| `holdout-nightly.sh`, `holdout-nightly-prep.sh` | cron | Prepares worktrees and builds for the nightly hidden-acceptance run and prints the targets for the agent; a base branch missing on origin is skipped, not fatal. Linux only. |
 | `gh-link-guard.py` | guard | Refuses to post a GitHub comment or body whose repository links do not resolve. |
 | `prepush-link-guard.py`, `prepush-identity-guard.py` | git hook | Called by `reference/githooks/pre-push`: dead links in pushed files, and commits made under a default agent address. |
-| `github-pr-filter.sh` | webhook filter | Passes only the owner's PR comments and reviews to the agent. |
+| `github-pr-filter.sh` | webhook filter | Passes only the owner's PR comments, reviews and issue events (opened, milestoned, labeled) to the agent; drops the bot's own mirror issues. |
 | `gh-app-token.sh` | CLI | Mints a one-hour installation token of a GitHub App. |
-| `reviewer-misses.py` | cron | Records every case where the reviewer passed a commit and the owner then requested changes on it. |
-| `plan-review-gate.py` | cron | Requires a plan review for a large or critical decomposition before its child cards may start. |
-| `teach-snapshot.sh` | CLI | Git snapshot of the agents' knowledge layers, to prove what a teaching round changed. |
-| `board-watchdog.py` | cron | Hourly watchdog of the boards: delivers diagnostics, finds stuck graphs and silence, keeps the review layer armed, and runs the gates (rework size, verdict dedup, backlog and admission, prototype first, conflict debt, idempotency keys, board lint). Single gates run through CLI flags; see `--help` in the source header. |
-| `pr-hygiene.py` | cron | What can be merged today and what stops it: sibling conflicts, absorbed PRs, merge readiness, rebase cards after a base moves, stale PRs, stack order. |
-| `metrics-evening.py` | cron | Daily report: spend by card and role, review latency, rework, reviewer misses, run outcomes, waiting audit, context size, digest of quiet cron events. Holds the price table used by `usage-ledger.py`: replace it with your plan's prices. |
-| `visual-delta-capture.py`, `visual-delta-shot.py` | CLI | Before and after screenshots of a UI change from two worktrees. |
-| `holdout-nightly.sh`, `holdout-nightly-prep.sh` | cron | Prepares worktrees and builds for the nightly hidden-acceptance run and prints the targets for the agent. Linux only. |
+| `visual-delta-capture.py`, `visual-delta-shot.py` | CLI | Before and after screenshots of a UI change from two worktrees; one browser per run, always stopped. |
 | `rebase-registry-pr.sh`, `resolve-registry.py` | CLI | Brings the base into a PR and resolves the conflict in an append-only numbered registry file that every PR appends to. |
 | `telegram-noise-measure.py` | CLI | Counts pushes delivered by script jobs in the last 24 hours. |
 | `run_peak_mutants.py` | CLI | Proves `test_peak_pause.py` turns red on each mutant. |
@@ -48,7 +56,7 @@ Everything that names one project is read from `$HERMES_HOME/factory.env` throug
 
 ## Tests
 
-Every `test_*.py` runs on its own with `python3 test_<name>.py`, uses temporary directories and never touches a real Hermes home. Run them after every `hermes update`: several scripts read Hermes files and board databases directly.
+Every `test_*.py` runs on its own with `python3 test_<name>.py`, uses temporary directories and never touches a real Hermes home. `python3 run-tests.py --audit` runs them all with the hermeticity audit and prints one total line. Run it after every `hermes update` and before every teaching snapshot: several scripts read Hermes files and board databases directly. Tests that need Linux (`/proc`) or a Chromium binary say SKIP with the reason instead of passing silently.
 
 ## Known limits of this version
 

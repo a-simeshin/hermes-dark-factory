@@ -74,12 +74,33 @@ if git diff --cached --name-only | grep -qiE '\.env$|\.pem$|\.key$|auth\.json|^s
   exit 1
 fi
 
+# Full-suite gate. A snapshot is committed only after a run of the WHOLE
+# scripts/test_*.py suite (the runner with the hermeticity audit). The total
+# line is printed in full; on red the snapshot is still taken, but the commit
+# message gets a RED tag. A teaching round's report must quote the line
+# "TEST TOTAL scripts/: N/N green"; "green on a sample" is not accepted (a
+# series of rounds once broke 4 tests while 10 tests silently read the live
+# cache, and a sample saw none of it).
+TEST_SUMMARY=""
+TEST_TAG=""
+if [ $# -gt 0 ] && [ -f "$snap_root/scripts/run-tests.py" ]; then
+  if OUT=$(cd "$snap_root/scripts" && python3 run-tests.py --audit 2>&1); then
+    TEST_SUMMARY=$(printf '%s\n' "$OUT" | grep '^TEST TOTAL' || true)
+    echo "$TEST_SUMMARY"
+  else
+    TEST_SUMMARY=$(printf '%s\n' "$OUT" | grep '^TEST TOTAL' || true)
+    echo "$TEST_SUMMARY"
+    printf '%s\n' "$OUT" | grep '^RED:' || true
+    TEST_TAG="RED: ${TEST_SUMMARY:-tests red}; "
+  fi
+fi
+
 if [ $# -gt 0 ]; then
   # "No changes" is a lie when the commit failed. The commit may have failed on
   # a pre-commit hook (for example one that rejects deleted sources): the hook
   # output goes to stderr above, here is an honest diagnosis and a non-zero code.
-  if git commit -q -m "$1"; then
-    echo "snapshot committed: $1"
+  if git commit -q -m "${TEST_TAG}$1"; then
+    echo "snapshot committed: ${TEST_TAG}$1"
   else
     rc=$?
     echo "SNAPSHOT NOT TAKEN: git commit failed (code $rc, the reason is in stderr above, usually a pre-commit hook). HEAD did not change." >&2

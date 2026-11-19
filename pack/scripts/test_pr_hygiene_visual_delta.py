@@ -45,6 +45,14 @@ if spec is None or spec.loader is None:
     sys.exit(0)
 mod = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(mod)
+# Open milestones without gh: the first one is active, the cache lives in a
+# temp directory.
+if hasattr(mod, "_ms_open_milestones"):
+    mod._ms_open_milestones = lambda repo: [
+        {"title": "2.3.0", "due_on": "2026-11-23T00:00:00Z"},
+        {"title": "2.4.0", "due_on": "2026-12-20T00:00:00Z"}]
+    mod.milestone_bands.CACHE_PATH = os.path.join(
+        tempfile.mkdtemp(prefix="phvd-mscache-"), "ms.json")
 
 RAW = "https://raw.githubusercontent.com/o/r/hermes-assets/screenshots/%s.png"
 
@@ -150,10 +158,12 @@ def test_issue_scope_and_dry_run():
     # Our issues (label hermes*) are checked, others are not; dry-run creates
     # no cards; a violation is a missing section. Mutant: a return to the old
     # PR loop fails the test with duplicated numbers ([11, 11]).
+    # UI filter: the fixtures carry the ui label (without it the issue falls
+    # outside the rule entirely).
     issues = [
-        {"number": 9, "labels": [{"name": "hermes"}],
+        {"number": 9, "labels": [{"name": "hermes"}, {"name": "ui"}],
          "body": NON_UI_OK, "title": "ours", "url": "u9"},
-        {"number": 11, "labels": [{"name": "hermes"}],
+        {"number": 11, "labels": [{"name": "hermes"}, {"name": "ui"}],
          "body": "no section", "title": "ours second", "url": "u11"},
         {"number": 10, "labels": [{"name": "bug"}],
          "body": "no section", "title": "someone else's", "url": "u10"},
@@ -178,8 +188,9 @@ def test_card_only_when_section_missing():
     orig_card = mod.visual_delta_card
     mod.visual_delta_card = lambda *a, **k: (made.append(a) or (True, "t_x"))
     try:
-        # malformed section: not first in the body
-        issues = [{"number": 21, "labels": [{"name": "hermes"}],
+        # malformed section: not first in the body (ui label: UI filter)
+        issues = [{"number": 21, "labels": [{"name": "hermes"},
+                                            {"name": "ui"}],
                    "body": "intro text\n\n## Before / After\n```mermaid\n"
                            "flowchart LR\n  a-->b\n```\n",
                    "title": "malformed", "url": "u21"}]
@@ -187,10 +198,12 @@ def test_card_only_when_section_missing():
             issues, dry_run=False)
         assert cards == [] and made == [], (cards, made)
         assert numbers == [21] and "issue #21" in "\n".join(lines)
-        # no section at all -> a card is created
-        issues2 = [{"number": 22, "labels": [{"name": "hermes"}],
+        # no section at all -> a card is created (the issue is in the
+        # active milestone, otherwise admission before create stops it)
+        issues2 = [{"number": 22, "labels": [{"name": "hermes"},
+                                             {"name": "ui"}],
                     "body": "just text without a section", "title": "empty",
-                    "url": "u22"}]
+                    "url": "u22", "milestone": {"title": "2.3.0"}}]
         ok2, lines2, cards2, numbers2 = mod.visual_delta_check(
             issues2, dry_run=False)
         assert made and made[0][1] == 22, made

@@ -27,6 +27,9 @@ import urllib.request
 SCRIPTS = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, SCRIPTS)
 from factory_config import cfg, hermes_home, cfg_list
+# One digest algorithm for run-tests.py and the drift check below:
+# diverging copies would mean false alarms or a hole.
+import scripts_digest  # noqa: E402
 
 HOME = hermes_home()
 BOARDS = os.path.join(HOME, "kanban", "boards")
@@ -720,18 +723,127 @@ def check_scripts():
                 note("script", "%s does not parse" % script, out.strip()[:80])
 
 
-def check_doctor():
-    """The built-in installation diagnostics. No point retelling them in our own
-    words: take the output as is and show only the failure lines."""
-    code, out = run([HERMES, "doctor"], timeout=300)
+def check_scripts_drift():
+    """An edit of scripts/*.py,*.sh that bypassed teach-snapshot.sh.
+
+    The snapshot gate catches drift only at the moment of a snapshot; a cron
+    edit, a manual edit or a worker between snapshots is seen by nobody, and a
+    RED snapshot is committed anyway. Hermes has no native mechanism for this
+    (shell hooks fire on session events, the cron wakeAgent gate decides
+    whether to wake an agent, git hooks see only commits).
+
+    Here the digest of scripts/ is compared with the stamp of the last green
+    run of run-tests.py --audit (the runner writes the stamp itself, including
+    from the teach-snapshot gate). A mismatch triggers a full run; only RED
+    reaches the report (file name and reason), green stays silent and refreshes
+    the stamp. Each digest is checked and alerted exactly once: a repeated tick
+    without changes is quiet and does not rerun the suite. The roots
+    (directories and paths) are overridden by env for hermetic tests.
+    """
+    sdir = os.environ.get("SCRIPTS_DIR", SCRIPTS)
+    stamp_path = os.environ.get("SCRIPTS_GREEN_STAMP", os.path.join(
+        HOME, "cron", "scripts-tests.green.json"))
+    state_path = os.environ.get("SCRIPTS_DRIFT_STATE", os.path.join(
+        HOME, "cron", "scripts-drift.state.json"))
+    runner = os.environ.get("SCRIPTS_RUN_TESTS",
+                            os.path.join(sdir, "run-tests.py"))
+    if not os.path.exists(runner):
+        return
+    digest = scripts_digest.scripts_digest(sdir)
+    try:
+        stamp = json.load(open(stamp_path))
+    except Exception:
+        stamp = {}
+    if stamp.get("digest") == digest:
+        return                      # no drift: quiet tick
+    try:
+        state = json.load(open(state_path))
+    except Exception:
+        state = {}
+    if state.get("digest") == digest:
+        return                      # this digest was already checked and alerted
+    code, out = run([sys.executable, runner, "--audit"], timeout=1800)
+    red = [l.strip() for l in (out or "").splitlines()
+           if l.startswith("FAIL ") or l.startswith("RED:")]
+    if code == 0 and not red:
+        # A green run refreshed the stamp itself; if it could not (no
+        # permission), the watchdog writes it: silence here and in the report.
+        if stamp.get("digest") != digest:
+            try:
+                os.makedirs(os.path.dirname(stamp_path), exist_ok=True)
+                json.dump({"digest": digest, "ts": time.time()},
+                          open(stamp_path, "w"))
+            except OSError:
+                pass
+    else:
+        note("scripts-drift[%s]" % digest[:12],
+             "scripts/ changed without a green run (digest %s), "
+             "run-tests.py --audit RED: %s"
+             % (digest[:12], "; ".join(red[:5]) or "summary unavailable"),
+             "an edit bypassed teach-snapshot: fix the tests, then take a "
+             "snapshot with scripts/teach-snapshot.sh \"what changed\"")
+    try:
+        os.makedirs(os.path.dirname(state_path), exist_ok=True)
+        json.dump({"digest": digest,
+                   "verdict": "red" if (code or red) else "green",
+                   "ts": time.time()}, open(state_path, "w"))
+    except OSError:
+        pass
+
+
+def used_provider_ids():
+    """Provider ids from model/fallback/auxiliary of at least one profile.
+
+    An "invalid API key" alert makes sense only for providers the system
+    actually works with. doctor checks every key in .env, and the keys of two
+    providers no longer in use dripped into the owner's chat for a week after
+    everything moved to another provider.
+    """
+    ids = set()
+    import glob as _glob
+    paths = [os.path.join(HOME, "config.yaml")] + \
+        sorted(_glob.glob(os.path.join(HOME, "profiles", "*", "config.yaml")))
+    for path in paths:
+        try:
+            with open(path, encoding="utf-8", errors="replace") as f:
+                text = f.read()
+        except OSError:
+            continue
+        for m in re.finditer(r"^\s{0,8}provider:\s*[\"']?([A-Za-z0-9_.-]+)", text, re.M):
+            pid = m.group(1)
+            if pid:
+                ids.add(pid.lower())
+    return ids
+
+
+def doctor_bad_lines(out, used):
+    """Failure lines of the doctor output that are fit for an owner alert.
+
+    "invalid API key" is filtered by the providers in use: the key of a dead
+    provider that is not attached anywhere is no alarm for the owner. The
+    provider name in the doctor output may differ from the config id in
+    punctuation ("Z.AI" versus "zai"), so the comparison uses the alphanumeric
+    trace.
+    """
     bad = []
     for line in (out or "").splitlines():
         stripped = line.strip()
         if not stripped:
             continue
-        if stripped.startswith(("✗", "x ", "ERROR", "FAIL")) or " FAIL" in stripped:
+        if stripped.startswith(("\u2717", "x ", "ERROR", "FAIL")) or " FAIL" in stripped:
+            if "invalid API key" in stripped:
+                flat = re.sub(r"[^a-z0-9]", "", stripped.lower())
+                if not any(pid in flat for pid in used):
+                    continue
             bad.append(stripped[:150])
-    for line in bad[:6]:
+    return bad
+
+
+def check_doctor():
+    """The built-in installation diagnostics. No point retelling them in our own
+    words: take the output as is and show only the failure lines."""
+    code, out = run([HERMES, "doctor"], timeout=300)
+    for line in doctor_bad_lines(out, used_provider_ids())[:6]:
         note("doctor", line, "hermes doctor")
 
 
@@ -820,8 +932,13 @@ def check_orphan_stands():
     # them (the cgroup of an interactive session is app.slice/hermes-gateway.service).
     # Orphan stands from those MUST be caught, so these units are excluded from
     # the service exemption below.
-    hermes_units = {"hermes-gateway.service", "hermes-dashboard.service",
-                    "chromium-cdp.service"}
+    # A shared browser service (for example a CDP Chromium for the browser
+    # toolset, systemd-managed with Restart=on-failure) does NOT belong here:
+    # it was once listed as a Hermes unit, and the sweep killed the shared
+    # browser every 2 hours as an orphan, breaking the live CDP sessions of
+    # other workers. A worker's own chromium runs in the gateway's cgroup, not
+    # in such a service, so the hunt loses nothing by leaving it alone.
+    hermes_units = {"hermes-gateway.service", "hermes-dashboard.service"}
 
     def service_unit(pid):
         """Name of the systemd unit if the process lives in its own *.service
@@ -890,6 +1007,7 @@ def main():
     check_balance()
     check_memory()
     check_scripts()
+    check_scripts_drift()
     check_crons()
     check_cron_failures()
     for slug in boards():

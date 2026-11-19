@@ -152,6 +152,18 @@ class TestOrphanStands(unittest.TestCase):
         self.assertEqual(len(probs), 1, "a stand in the hermes-gateway cgroup is not exempt")
         self.assertIn("701", probs[0][1])
 
+    def test_t12_shared_browser_service_not_reported(self):
+        # a shared CDP browser in its own systemd unit is not an abandoned
+        # stand; the sweep must not kill it at the age of 2 hours
+        self.proc.add(800, "chromium-browser",
+                      "chromium-browser --headless=new --no-sandbox "
+                      "--remote-debugging-port=9222 --user-data-dir=chromium-cdp",
+                      age_sec=3 * 3600,
+                      cg="/user.slice/user-1001.slice/user@1001.service/app.slice/"
+                         "chromium-cdp.service")
+        probs = run_check(self.proc)
+        self.assertEqual(probs, [], "a shared browser service is not an orphan")
+
     def test_t6_apply_kills_real_process(self):
         victim = subprocess.Popen(["sleep", "300"])
         self.proc.add(victim.pid, "node", "node orphan-server.js",
@@ -190,7 +202,8 @@ class TestMutants(unittest.TestCase):
         path = os.path.join(d, "hermes-health.py")
         open(path, "w").write(src.replace(old, new, 1))
         # the mutant lives outside the pack directory: it needs factory_config
-        shutil.copy(os.path.join(os.path.dirname(REAL), "factory_config.py"), d)
+        for _dep in ("factory_config.py", "scripts_digest.py"):
+            shutil.copy(os.path.join(os.path.dirname(REAL), _dep), d)
         return path
 
     def run_with(self, script, test_name):

@@ -134,7 +134,12 @@ def test_ready_card_recreated():
     assert "--created-by" in cmd and cmd[cmd.index("--created-by") + 1] == "coder"
     assert "--priority" in cmd and cmd[cmd.index("--priority") + 1] == "42"
     assert "--assignee" in cmd and cmd[cmd.index("--assignee") + 1] == "coder"
-    assert mock.holder.get("body") == "Card body t_agent", mock.holder
+    # The body starts with the native guard receipt (native-or-live rule),
+    # then the original body follows unchanged.
+    body = mock.holder.get("body") or ""
+    assert body.endswith("Card body t_agent"), mock.holder
+    assert body.startswith("## Native guard (native-or-live rule)"), mock.holder
+    assert "native checked, does not cover" in body, mock.holder
     archives = [c for c in calls if len(c) > 4 and c[4] == "archive"]
     assert any("t_agent" in c for c in archives), "no archive: %s" % calls
     comments = [c for c in calls if len(c) > 4 and c[4] == "comment"]

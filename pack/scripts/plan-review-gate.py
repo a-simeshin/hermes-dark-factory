@@ -18,7 +18,8 @@ adversarial-review skill: ACCEPTED / RETURN). The defaults match it; override
 with FACTORY_PLAN_ACCEPT_WORDS and FACTORY_PLAN_RETURN_WORDS (comma-separated,
 case-insensitive, matched as a prefix of the summary). The first word of each
 list is the one the review card prompt asks the reviewer to write."""
-import json, subprocess, re, os
+import json, subprocess, re, os, sys
+import importlib.util as _ilu
 
 from factory_config import cfg, cfg_list, hermes_home
 
@@ -72,9 +73,64 @@ PLAN_REVIEW_MODEL = (("--model", _PLAN_MODEL) if _PLAN_MODEL else ()) + \
                     (("--provider", _PLAN_PROVIDER) if _PLAN_PROVIDER else ())
 
 
+def _live_keys():
+    """Keys of the board's live cards for the native-or-live guard."""
+    import sqlite3
+    db = os.path.join(hermes_home(), "kanban", "boards", BOARD, "kanban.db")
+    if not os.path.exists(db):
+        return []
+    try:
+        con = sqlite3.connect("file:%s?mode=ro" % db, uri=True, timeout=10)
+        rows = con.execute(
+            "SELECT idempotency_key FROM tasks "
+            "WHERE status NOT IN ('done','archived') "
+            "AND idempotency_key IS NOT NULL").fetchall()
+        con.close()
+        return [r[0] for r in rows]
+    except sqlite3.Error:
+        return []
+
+
+def _guard_module():
+    """board_native_guard.py next to this script, shared through sys.modules."""
+    existing = sys.modules.get("board_native_guard")
+    if existing is not None and hasattr(existing, "native_or_live"):
+        return existing
+    spec = _ilu.spec_from_file_location(
+        "board_native_guard",
+        os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                     "board_native_guard.py"))
+    if spec is None or spec.loader is None:
+        raise RuntimeError("board_native_guard spec did not load")
+    mod = _ilu.module_from_spec(spec)
+    sys.modules["board_native_guard"] = mod
+    try:
+        spec.loader.exec_module(mod)
+    except Exception:
+        sys.modules.pop("board_native_guard", None)
+        raise
+    return mod
+
+
 def create(title, body, assignee, idem, *extra):
     # Priority = closeness to merging: planning must not outrun code,
     # otherwise the only worker slot goes to talking about work, not to the work.
+    # The native-or-live rule: ask the shared helper before create. Without
+    # the helper nothing is created (fail closed).
+    try:
+        board_native_guard = _guard_module()
+    except Exception:
+        return None
+    covered, guard = board_native_guard.native_or_live(
+        idem, live_keys=_live_keys(),
+        native_checked=[board_native_guard.NATIVE_TASK_LINKS,
+                        board_native_guard.NATIVE_VERDICT],
+        why="plan review or rework by plan-review-gate: Hermes has no "
+            "native machine review of plans that reads the verdict from "
+            "latest_summary")
+    if covered:
+        return None
+    body = board_native_guard.guard_section(guard) + body
     planning = any(p in title for p in PLANNING_TITLES)
     priority = "10" if planning else "20"
     if planning and assignee == "reviewer":

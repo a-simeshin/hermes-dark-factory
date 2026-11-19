@@ -31,30 +31,39 @@ Checks:
      after a gateway restart; only the separate deprecated loop
      `hermes kanban daemon --force` recomputes it every tick. So a rollback to 1
      carries the note "gateway restart needed";
-  6. ready without an assignee: a card with an empty assignee, or an assignee
-     without a live profile, for longer than 30 minutes. The dispatcher never
-     spawns it (skipped_unassigned / skipped_nonspawnable) and nobody caught
-     such a stop before: owner review cards waited 30 hours for an assignee.
-     The gate beacon is excluded from the check by construction: the watchdog
-     blocks it with needs_input itself when it creates it (_park_beacon);
-  6b. review layer: an open PR whose head is older than 30 minutes with no
-     verdict on that sha and no live reviewer card gets a card from the
-     watchdog (key reviewer-pr<N>-<head7>, p100); while such heads exist,
-     ready cards below p50 are parked in scheduled and come back when the
-     layer is empty;
+  6. ready without an assignee: lint I4 of board_lint (an alert, no automatic
+     fix). The stock stranded_in_ready skips an empty assignee on purpose
+     (kanban_diagnostics, skipped_unassigned), and skipped_unassigned is a
+     field of the dispatcher tick that nobody delivers: owner review cards once
+     waited 30 hours for an assignee. The watchdog does not fill in an
+     assignee: cards must be created with one (the creator picks the profile),
+     and a silent kanban.default_assignee would break profile routing. The
+     gate beacon is excluded by construction: the watchdog blocks it with
+     needs_input itself when it creates it (_park_beacon);
+  6b. review layer: findings about open PR heads and the live review lane;
+     cards are no longer armed per head (one PR = one card);
   7. subscription cleanup: card events (crashed, timed_out, gave_up, blocked,
      completed, review) are delivered by the stock gateway notifier through
      subscriptions; the watchdog subscribes the owner to open cards created
      without a session anchor (crons, gates); the report carries only what
      the events do not: diag aggregates (thresholds, not transitions),
-     silence, a dead dispatcher, gates.
+     silence, a dead dispatcher, gates;
+  8. gates and lints that keep the board honest: admission by milestone and
+     owner approval, milestone priority bands, an executor card for every
+     issue of the active milestone (issue_executor_poll), no decomposition
+     of a card whose PR is already delivered, the tail of a closed issue and
+     duplicate chains, rework priority and stale rework or review arms, the
+     owner-merge hold of a closed PR card, stuck initial_status blocks of
+     accepted plans, guarded ready cards, an idle factory with a non-empty
+     backlog, plus the gates listed in main() (rework size, verdict dedup,
+     conflict debt, backlog, prototype first, idempotency keys, board lint).
 
 Lessons for future watchdog rules (grows over time):
   - the absence of movement on a card that waits for a dependency or an owner
     decision is not a sign that it went stale: a todo card with an open parent
     or a live child is "without movement" by definition; auto-archive may touch
     only cards without live links (parents and children not in done/archived;
-    a scheduled parking by an owner gate is a live link);
+    a scheduled parking by an owner gate is a live link, backlog_p0_stale);
   - the archive is terminal for the CLI (there is no kanban unarchive), the only
     supported way back is a dashboard PATCH status (drag out of the archive).
     Before a rule that archives, answer: how is it rolled back.
@@ -64,7 +73,17 @@ GitHub (gh), and the plan is given from simple to complex: first what is
 already ready to merge and unblocks the most, at the end what needs thinking.
 
 Dedup: the same problem does not shout again more often than once a day.
+
+Native-or-live rule (owner rule): before creating a card, reassigning,
+restoring or removing anything on the board, check that a stock Hermes
+mechanism or a live card does not already do it. The single helper
+board_native_guard.native_or_live is mandatory for every card generator and
+every reassignment; the full rule text and the list of stock paths live in
+board_native_guard.py (RULE_50B) and the kanban-discipline skill. Violations
+are caught by test_board_native_guard.py (statically) and by _kanban_create
+(it requires a GuardNote).
 """
+import calendar
 import hashlib
 import json
 import os
@@ -81,7 +100,7 @@ from factory_config import cfg, cfg_list, hermes_home  # noqa: E402
 
 # One definition of progress after a burnout: it lives in metrics-evening.py
 # (the factory metrics are gathered there), so metric 5 of the summary and the
-# watchdog rule count it the same way.
+# rework size gate count it the same way.
 # The file name has a hyphen, so it is loaded through importlib; for isolated
 # copies (mutation test runs) an equivalent stub remains.
 # CYCLE GUARD: the key "hermes_sibling:<path>" is shared by all scripts/*, and
@@ -113,8 +132,62 @@ else:                              # a copy of the script outside scripts: mutan
         return not _fm.SYSTEM_COMMENT_RE.match(body or "")
     _fm.closes_burnout_progress = _stub_closes
 
+# Milestone priority bands are computed from GitHub on every run. The logic
+# lives in milestone_bands.py, the single definition for board-watchdog and
+# pr-hygiene (static per-script tables silently drifted apart at every
+# release). Here only the sibling is loaded (same cycle guard, the key
+# "hermes_sibling:<path>" is shared by all scripts/*) and thinly wrapped
+# through the local run() where it is used. A copy of the script outside
+# scripts (mutation runs) has no sibling and no bands; consumers treat that
+# as "no data".
+_MB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        "milestone_bands.py")
+if os.path.exists(_MB_PATH):
+    _mb_key = "hermes_sibling:" + os.path.abspath(_MB_PATH)
+    milestone_bands = sys.modules.get(_mb_key)
+    if milestone_bands is None:
+        _mb_spec = _ilu.spec_from_file_location("milestone_bands", _MB_PATH)
+        milestone_bands = _ilu.module_from_spec(_mb_spec)
+        sys.modules[_mb_key] = milestone_bands
+        _mb_spec.loader.exec_module(milestone_bands)
+else:
+    import types as _mbtypes
+    milestone_bands = _mbtypes.ModuleType("milestone_bands_stub")
+    milestone_bands.ACTIVE_BAND = 80
+    milestone_bands.NEXT_BAND = 40
+    milestone_bands.OTHER_BAND = 20
+    milestone_bands.resolve = lambda repo, fetch=None: {
+        "active": None, "next": None, "bands": {}, "source": "nodata"}
+
 HOME = hermes_home()
 BOARDS = os.path.join(HOME, "kanban", "boards")
+
+# The single "is it already stock or live?" helper for all card generators
+# and reassignments. The full owner rule: board_native_guard.py (RULE_50B)
+# and the kanban-discipline skill. _kanban_create requires a GuardNote
+# receipt by type; test_board_native_guard.py fails the suite on a generator
+# that skips the helper.
+try:
+    _bng_spec = _ilu.spec_from_file_location(
+        "board_native_guard",
+        os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                     "board_native_guard.py"))
+    if _bng_spec is None or _bng_spec.loader is None:
+        raise RuntimeError("board_native_guard: spec could not be built")
+    _existing = sys.modules.get("board_native_guard")
+    if _existing is not None and hasattr(_existing, "native_or_live"):
+        # one copy of the module for all scripts: a single GuardNote class
+        board_native_guard = _existing
+    else:
+        board_native_guard = _ilu.module_from_spec(_bng_spec)
+        sys.modules["board_native_guard"] = board_native_guard
+        try:
+            _bng_spec.loader.exec_module(board_native_guard)
+        except Exception:
+            sys.modules.pop("board_native_guard", None)
+            raise
+except Exception:
+    board_native_guard = None
 STATE = os.path.join(HOME, "kanban", "watchdog-state.json")
 HERMES = os.path.expanduser("~/.local/bin/hermes")
 PROFILES_ROOT = os.path.join(HOME, "profiles")
@@ -122,9 +195,16 @@ PROFILES_ROOT = os.path.join(HOME, "profiles")
 # different from a random folder under profiles/.
 _PROFILE_IDENTITY_MARKERS = ("config.yaml", ".env", "SOUL.md",
                              "profile.yaml", "auth.json", "state.db")
+# The only consumer is lint I4 (alert on ready without an assignee). The
+# stock stranded_in_ready skips an empty assignee on purpose, and nobody
+# delivers the dispatcher's skipped_unassigned.
 UNASSIGNED_AFTER = 30 * 60   # ready without a spawnable assignee for longer than this: alert
 SILENCE_HOURS = 6
 REPEAT_AFTER = 24 * 3600
+# Owner rule: an eternal block without "Release condition:" is a question to
+# the owner ONCE, or the archive; the watchdog must not repeat the same line
+# for weeks. staleblock repeats at most once a week.
+STALEBLOCK_REPEAT = 7 * 24 * 3600
 OWNERQ_AFTER_H = 24   # a question to the owner older than a day must reach
                       # the "needs attention" report
 MAX_CHARS = 3600           # Telegram cuts at 4096, leave room for the cron header
@@ -279,6 +359,157 @@ def waiting_on(root, tasks, kids):
         seen.add(node)
         queue.extend(kids.get(node, []))
     return seen
+
+
+# --- A card whose PR is already delivered is not decomposed -------------
+
+_PR_REF_RE = re.compile(r"PR #(\d+)")
+
+
+def _pr_refs_before(db_path, task_id, before_ts):
+    """PR numbers mentioned in a comment or the body of a card before before_ts.
+
+    A "PR #N" link in a worker's checkpoint comment records delivery: the
+    work already lives in a PR and the card body is stale by then. Links
+    like "issue #N" do not count (issue mirrors are legitimate).
+    """
+    refs = set()
+    con = sqlite3.connect("file:%s?mode=ro" % db_path, uri=True, timeout=10)
+    try:
+        rows = con.execute(
+            "select body from task_comments"
+            " where task_id = ? and created_at <= ?",
+            (task_id, before_ts)).fetchall()
+        row = con.execute("select body from tasks where id = ?",
+                          (task_id,)).fetchone()
+        if row and row[0]:
+            rows.append((row[0],))
+    finally:
+        con.close()
+    for (body,) in rows:
+        refs.update(int(m) for m in _PR_REF_RE.findall(body or ""))
+    return refs
+
+
+def _last_routing_before(db_path, task_id, before_ts):
+    """The latest routing event of a card before before_ts.
+
+    block_loop_detected means "returned to triage through a block loop",
+    review_requested/changes_requested/completed are the review cycle. How
+    the card ended before the decomposition decides whether it is legitimate.
+    """
+    kinds = ("block_loop_detected", "review_requested", "changes_requested",
+             "completed")
+    con = sqlite3.connect("file:%s?mode=ro" % db_path, uri=True, timeout=10)
+    try:
+        row = con.execute(
+            "select kind, created_at from task_events where task_id = ?"
+            " and created_at < ? and kind in (%s)"
+            " order by created_at desc limit 1" % ",".join("?" * len(kinds)),
+            (task_id, before_ts) + kinds).fetchone()
+    finally:
+        con.close()
+    return (row[0], float(row[1])) if row else None
+
+
+def decomposed_after_delivery(slug, now=None):
+    """A card whose PR is delivered does not go back to triage and is not
+    decomposed; the continuation after delivery is a new card for the
+    remainder, with a body checked against the PR.
+
+    The failure chain: a worker blocked a card twice with kind=transient
+    ("run budget exhausted"), _route_block (hermes_cli/kanban_db.py) moved it
+    to triage at block_recurrences >= LIMIT (event block_loop_detected), and
+    the gateway's auto_decompose_tick (kanban.auto_decompose) decomposed it
+    minutes later from the STALE body of the issue mirror: the children
+    repeated work already delivered in a PR. The core is not edited; the
+    watchdog catches the transition from board events:
+
+    1) decomposed on a card preceded by block_loop_detected and a "PR #N"
+       link: the children come from a stale body. Action: archive the
+       duplicate children with a comment, the remainder as a new card checked
+       against the PR, close the root with the result "PR #N".
+    2) a card in triage after block_loop_detected with a "PR #N" link: the
+       next auto_decompose tick will decompose it the same way. Action: close
+       the root with the result "PR #N", the remainder as a new card.
+
+    The review cycle (changes_requested before decomposed) is legitimate:
+    rework packages are decomposed by verdict this way, and a PR link is
+    expected there. The gate is silent once the root is closed and no live
+    children remain.
+    """
+    if now is None:
+        now = time.time()
+    db = os.path.join(BOARDS, slug, "kanban.db")
+    con = sqlite3.connect("file:%s?mode=ro" % db, uri=True, timeout=10)
+    try:
+        decomposed = list(con.execute(
+            "select task_id, created_at, payload from task_events"
+            " where kind = 'decomposed' order by created_at"))
+        statuses = dict(con.execute("select id, status from tasks"))
+    finally:
+        con.close()
+    found = []
+
+    for task_id, ts, payload in decomposed:
+        ts = float(ts)
+        live = []
+        try:
+            child_ids = json.loads(payload or "{}").get("child_ids") or []
+        except Exception:
+            child_ids = []
+        for kid in child_ids:
+            if statuses.get(kid) not in ("done", "archived"):
+                live.append(kid)
+        if statuses.get(task_id) in ("done", "archived") and not live:
+            continue  # already sorted out, history must not shout forever
+        routing = _last_routing_before(db, task_id, ts)
+        if not routing or routing[0] != "block_loop_detected":
+            continue  # legitimate decomposition (review cycle or specifier)
+        refs = _pr_refs_before(db, task_id, ts)
+        if not refs:
+            continue
+        pr_list = ", ".join("#%d" % r for r in sorted(refs))
+        found.append((
+            "decpr:%s:%s" % (slug, task_id), 1,
+            "  Decomposed after block_loop with a delivered PR %s: %s [%s]\n"
+            "    The auto-decomposer created the children from a stale body.\n"
+            "    Live children: %s.\n"
+            "    Action: archive the duplicate children with a comment, the\n"
+            "    remainder as a new card with a body checked against the PR,\n"
+            "    close the root with the result \"PR %s\"."
+            % (pr_list, task_id, statuses.get(task_id, "?"),
+               ", ".join(live) or "none", pr_list)))
+
+    con = sqlite3.connect("file:%s?mode=ro" % db, uri=True, timeout=10)
+    try:
+        loops = {}
+        for task_id, ts in con.execute(
+                "select task_id, created_at from task_events"
+                " where kind = 'block_loop_detected'"):
+            if task_id not in loops or ts > loops[task_id]:
+                loops[task_id] = float(ts)
+    finally:
+        con.close()
+    for task_id, loop_ts in sorted(loops.items()):
+        if statuses.get(task_id) != "triage":
+            continue
+        routing = _last_routing_before(db, task_id, now)
+        if not routing or routing[0] != "block_loop_detected":
+            continue  # a review event followed triage, the path is legitimate
+        refs = _pr_refs_before(db, task_id, loop_ts)
+        if not refs:
+            continue
+        pr_list = ", ".join("#%d" % r for r in sorted(refs))
+        found.append((
+            "prloop:%s:%s" % (slug, task_id), 1,
+            "  In triage after block_loop with a delivered PR %s: %s [%s]\n"
+            "    The next auto_decompose tick will decompose it from a stale\n"
+            "    body. Action: close the root with the result \"PR %s\",\n"
+            "    the remainder as a new card checked against the PR, do not decompose."
+            % (pr_list, task_id, statuses.get(task_id, "?"), pr_list)))
+
+    return found
 
 
 def diagnostics(slug):
@@ -559,6 +790,96 @@ def profile_live(name):
                for m in _PROFILE_IDENTITY_MARKERS)
 
 
+def idle_factory_lint(slug, st, tasks, blockers, now=None):
+    """The factory stands still.
+
+    Case: running 0 and ready 0 for hours while there was a backlog of the
+    admissible band (cards parked by the review layer, which a single
+    non-admitted PR head kept locked). The existing checks were silent:
+    stalled fired once and was deduplicated, silent needs 6 h without runs.
+    Owner rule: idle for more than an hour with a non-empty backlog of the
+    admissible band is ONE finding for the owner.
+
+    The admissible backlog is work that would run if no foreign gate or
+    parking held it: (a) todo without open blockers (the dispatcher had to
+    take it; any band: if it does not take p20 for an hour, that is idle
+    too), (b) scheduled cards parked by the review layer itself (marker in
+    the last scheduled reason: the return must happen, otherwise the layer
+    is locked) and (c) open issues of the active milestone without a live
+    card (active_milestone_orphans): a change of the active milestone after
+    a release leaves a backlog even when the board has no cards at all.
+    Admission parkings do NOT count: that is a deliberate wait outside the
+    active milestone, not idling.
+
+    st is mutable: the key "idlefactory:<slug>" holds {"since": epoch} from
+    the first observation of idling; no finding earlier than an hour. The
+    dedup key is per day: at most one push a day, no noise.
+    """
+    now = now or time.time()
+    moving = [i for i, t in tasks.items() if t["status"] == "running"]
+    ready = [i for i, t in tasks.items() if t["status"] == "ready"]
+    startable = [i for i, t in tasks.items()
+                 if t["status"] == "todo"
+                 and not [b for b in blockers.get(i, ())
+                          if b in tasks
+                          and tasks[b]["status"] not in ("done",
+                                                         "archived")]]
+    db = os.path.join(BOARDS, slug, "kanban.db")
+    parked = []
+    orphans = []
+    if not moving and not ready:
+        try:
+            con = sqlite3.connect("file:%s?mode=ro" % db, uri=True,
+                                  timeout=10)
+            for tid, payload in con.execute(
+                    "SELECT t.id, (SELECT e.payload FROM task_events e "
+                    "WHERE e.task_id = t.id AND e.kind = 'scheduled' "
+                    "ORDER BY e.id DESC LIMIT 1) FROM tasks t "
+                    "WHERE t.status = 'scheduled'"):
+                if payload and REVIEW_PARK_MARKER in payload:
+                    parked.append(tid)
+            con.close()
+        except sqlite3.Error:
+            parked = []
+        # No startable cards at all (every todo is held by open parents,
+        # parked is empty), yet there is work: open issues of the active
+        # milestone without a live card. That is the admissible backlog: a
+        # change of the active milestone after a release once left several
+        # issues without an executor while the watchdog stayed silent all
+        # night.
+        if not (startable or parked):
+            orphans = active_milestone_orphans(slug)
+    if moving or ready or not (startable or parked or orphans):
+        st.pop("idlefactory:" + slug, None)
+        return []
+    key_state = "idlefactory:" + slug
+    since = (st.get(key_state) or {}).get("since")
+    if not since:
+        st[key_state] = {"since": now}
+        return []
+    hours = (now - since) / 3600.0
+    if hours < 1.0:
+        return []
+    key = "%s:idlefactory:%s" % (slug, time.strftime("%Y-%m-%d", time.gmtime(now)))
+    tail = []
+    for tid in (startable + parked)[:5]:
+        t = tasks.get(tid, {})
+        tail.append("    %s [%s, p%s, %s] %s" % (
+            tid, t.get("assignee", "-"), t.get("priority", "?"),
+            t.get("status", "?"), (t.get("title") or "")[:60]))
+    for n in orphans[:5]:
+        tail.append("    issue #%d (active milestone, no live"
+                    " card)" % n)
+    body = [
+        "  The factory has stood for %.1f h: running 0, ready 0, and the backlog is not empty." % hours,
+        "  Work that should be running (admissible band):",
+    ] + tail + [
+        "  The dispatcher has nothing to take: check parkings and gates",
+        "  (hermes kanban ls --board %s)." % slug,
+    ]
+    return [(key, 0, "\n".join(body))]
+
+
 def check(slug, state=None):
     """List of (dedup_key, text) for one board."""
     st = state if state is not None else _load_state()
@@ -642,9 +963,10 @@ def check(slug, state=None):
             "    Admission gate failed (%s: %s). Retry in an hour."
             % (type(exc).__name__, exc))))
 
-    # 6b. Review layer: open PRs without a verdict on the head get a reviewer
-    #     card p100 (auto-arm), ready <p50 are parked until the layer is
-    #     empty. gh or code errors do not bring down the other checks.
+    # 6b. Review layer: only the rework arm for a CHANGES REQUESTED verdict
+    #     without a rework card, and the finding about active-milestone PRs
+    #     without a card. The review and WCFY auto-arms were removed (one
+    #     PR = one card).
     try:
         found.extend(review_layer_check(slug))
     except Exception as exc:
@@ -674,17 +996,6 @@ def check(slug, state=None):
             "    Verdict dedup: the check failed (%s: %s). Retry in an hour."
             % (type(exc).__name__, exc))))
 
-    # 6c-bis-2. Serialization of rework of one PR: live coder cards of one PR
-    #           are linked in a chain, only cards of different PRs work in
-    #           parallel (a race of pushes into one branch). A frequent pass:
-    #           --rework-gate-only (cron every 5 minutes).
-    try:
-        found.extend(serial_rework_gate(slug))
-    except Exception as exc:
-        found.append(("%s:serial-rework:err" % slug, 1, (
-            "    Rework serialization: the check failed (%s: %s). Retry "
-            "in an hour." % (type(exc).__name__, exc))))
-
     # 6c-3. Merge-unblocker priority: a ready+coder card for a PR whose code
     #       the owner accepted, with only merge formalities left in the items
     #       and no live code blockers of the same PR, is raised to p90 and is
@@ -696,6 +1007,30 @@ def check(slug, state=None):
         found.append(("%s:merge-unblocker:err" % slug, 1, (
             "    Merge-unblocker: the check failed (%s: %s). Retry in an hour."
             % (type(exc).__name__, exc))))
+
+    # 6c-3-ter. Close gate "remaining: owner merge": a closed PR card with an
+    #           unmerged PR keeps the signal until the merge (one PR = one
+    #           card).
+    try:
+        found.extend(owner_merge_hold_gate(slug))
+    except Exception as exc:
+        found.append(("%s:owner-merge-hold:err" % slug, 1, (
+            "    owner-merge close gate: the check failed (%s: %s). Retry "
+            "in an hour." % (type(exc).__name__, exc))))
+
+    # 6c-3-bis. Rework priority of an open PR: a ready/todo coder card that
+    #           closes an already open PR (rework by verdict, a reviewer's
+    #           fix) is raised to p90 inside the active band: before new
+    #           work, after review p100 and WCFY p95. Stale arms are retired
+    #           in every status except running; the same mechanism retires
+    #           review and WCFY arms on a head that moved on. A frequent
+    #           pass: --rework-gate-only (cron every 5 minutes).
+    try:
+        found.extend(rework_priority_lift(slug))
+    except Exception as exc:
+        found.append(("%s:rework-lift:err" % slug, 1, (
+            "    Rework priority: the check failed (%s: %s). Retry "
+            "in an hour." % (type(exc).__name__, exc))))
 
     # 6c-4. Stuck active_pr guard: a ready card stands under
     #       respawn_guarded(active_pr) after an owner decision, and the handoff
@@ -930,6 +1265,16 @@ def check(slug, state=None):
                           "  Check the dispatcher: grep kanban ~/.hermes/logs/gateway.log | tail" % (
                               idle, len(queued))))
 
+    # Idle for more than an hour with a non-empty backlog of the admissible
+    # band, even if runs finished recently (stalled already deduplicated,
+    # silent not yet at 6 h, while the factory stands). One owner finding.
+    try:
+        found.extend(idle_factory_lint(slug, st, tasks, blockers))
+    except Exception as exc:
+        found.append(("%s:idlefactory:err" % slug, 1, (
+            "    Idle factory gate failed (%s: %s). Retry in an hour."
+            % (type(exc).__name__, exc))))
+
     # 6. Duplicates of cards created by agents without an idempotency-key.
     found.extend(duplicate_detector(slug))
 
@@ -955,6 +1300,29 @@ def check(slug, state=None):
     #     simultaneous start. Switched off (TWIN_ERA=False): there are no twins.
     if TWIN_ERA:
         found.extend(twin_conflict_risk_detector(slug))
+
+    # A card whose PR is delivered does not go back to triage and is not
+    # decomposed; the continuation after delivery is a new card for the
+    # remainder, with a body checked against the PR. Catches both legs:
+    # triage after block_loop with a "PR #N" link (before decomposition)
+    # and decomposed after block_loop (after it).
+    try:
+        found.extend(decomposed_after_delivery(slug))
+    except Exception as exc:
+        found.append(("%s:decpr:err" % slug, 1, (
+            "    Gate \"PR delivered, no decomposition\": the check failed"
+            " (%s: %s). Retry in an hour." % (type(exc).__name__, exc))))
+
+    # ready p>=80 under respawn_guarded for more than 30 min. I3 sees only the
+    # symptom (the slot goes to p<50); the reason the layer is not spawned
+    # was never named. A finding with the reason only, no actions (a card's
+    # own handoff comment fails closed).
+    try:
+        found.extend(guarded_ready_lint(slug))
+    except Exception as exc:
+        found.append(("%s:r48:err" % slug, 1, (
+            "    Gate \"ready under dispatcher guard\" failed (%s: %s)."
+            " Retry in an hour." % (type(exc).__name__, exc))))
 
     return found
 
@@ -1432,6 +1800,21 @@ def _ikey_recreate(slug, db, task_id):
         return None
     title, body, assignee, priority, created_by = row
     key = _ikey_derive(created_by, title, task_id)
+    # Recreation is a restore: first ask the helper whether a live card of
+    # the same family already covers it (a duplicate executor) and whether a
+    # stock mechanism already holds the card.
+    covered, guard = board_native_guard.native_or_live(
+        key,
+        live_keys=_live_keys(slug),
+        native_checked=[
+            board_native_guard.NATIVE_RESPAWN,
+            board_native_guard.NATIVE_TASK_LINKS],
+        why="the card is live but has no idempotency-key: the repeat check"
+            " cannot see it, and there is no stock mechanism that assigns a"
+            " key (idempotency gate); parents are carried over as they are")
+    if covered:
+        return None
+    body = board_native_guard.guard_section(guard) + (body or "")
     body_path = None
     try:
         with tempfile.NamedTemporaryFile(
@@ -1641,26 +2024,54 @@ def idempotency_gate(slug, state=None, now=None):
 #      itself. The latest SCHEDULED reason of the card decides, see
 #      _owner_deferred_review.
 REVIEW_ARM_MIN_AGE_S = 30 * 60          # CI on the head usually takes 5-15 minutes
+NO_EXECUTOR_MIN_AGE_S = 24 * 3600       # an active-milestone issue without
+                                        # a live card for more than a day
+# A release blocker is a bug label or an explicit owner mark in the body
+# ("Owner: start now", "This blocks the <version> tag"). Its threshold is
+# not a day but one watchdog cycle: the card should come from the 5-minute
+# poll (issue_executor_poll), the watchdog is only a safety net here.
+# 10 minutes is longer than the poll and the webhook take, so the watchdog
+# does not shout over a card they have just created.
+NO_EXECUTOR_BLOCKER_MIN_AGE_S = 10 * 60
+OWNER_MARK_RE = re.compile(              # owner mark in the issue body
+    r"(?i)\bowner:\s*start\b|\bblocks the\b")
+ISSUE_POLL_WINDOW_S = 48 * 3600          # the poll reacts to fresh owner
+                                        # actions, the old backlog is left
+                                        # to the no-executor finding (24 h, digest)
+# Work on an issue is already delivered when a merged PR refers to it AFTER
+# the last scope change. Scope is the creation and the
+# labeled/unlabeled/renamed events; milestoned and comments do NOT count as
+# scope: moving an issue into the active milestone is bookkeeping, not new
+# work (otherwise the watchdog breeds duplicate cards for an issue whose
+# prep PR is already merged).
+# A release chore (RELEASE_CHORE_RE) stays open on purpose after its prep PR
+# is merged, until the tag: it waits for the owner's decision, not for an
+# executor.
+RELEASE_CHORE_RE = re.compile(
+    r"(?i)chore\W*release|release\s+(chore|prep)"
+    r"|prepare\s+[\w.]*\s*release")
+SCOPE_EVENT_TYPES = frozenset(           # scope changes of an issue
+    ("labeled", "unlabeled", "renamed"))
 REVIEW_ARM_MAX_AGE_S = 14 * 24 * 3600   # old PRs are not auto-armed: separate hygiene
 REVIEW_ARM_MAX_CREATE = 5               # guard against a storm of rebases
 REVIEW_PARK_BELOW_P = 50
-# Hold: while the file exists, new arms of branches A (repeat review of a
-# pair) and B (WCFY) run in dry-run: no cards are created, the plan with the
-# hold path goes into the findings. Removing the hold means "accepted by
-# the owner".
-PAIR_WCFY_HOLD = os.path.join(HOME, "cache", "pair-wcfy-hold")
 REVIEW_PARK_MARKER = "review-layer hold"
-# Pilot of "one PR = one card": a PR from such a branch goes through the
-# regular review cycle on the executor's own card (request-review
-# reviewer=reviewer, rework and WCFY there too). No auto-arm of a reviewer
-# card and no parallel review lane is created for a pilot branch. The list
-# is removed after the owner's decision on the pilot together with the
-# auto-arm and serial_rework_gate. The table is filled from settings
-# (branch names, comma-separated); the card id value is not used.
-PILOT_EXEMPT_BRANCHES = dict.fromkeys(
-    cfg_list("FACTORY_PILOT_EXEMPT_BRANCHES", ()), "")
+# A QA verdict and a reviewer verdict are told apart mechanically. A tester
+# once titled a verdict "## Review verdict (QA): PASS"; a regex without a
+# lookahead counted it as a reviewer verdict, and the PR looked ready for
+# the owner without any review. Now the reviewer verdict header does NOT
+# allow a QA bracket right after the word verdict; a QA verdict must use the
+# QA_VERDICT_MARKER header. The "ready for the owner" gate (a verdict on the
+# exact head + WCFY on the same head) reads only reviewer verdicts and
+# formal owner reviews.
 _VERDICT_HEADER_RE = re.compile(
-    r"(?im)^#{1,4}\s*(?:re[- ]?)?review\s+verdict\b")
+    r"(?im)^#{1,4}\s*(?:re[- ]?)?review\s+verdict\b(?!\s*\(\s*qa\s*\))")
+# QA verdict header: recognition only (reports, dedup of QA runs), never a
+# reviewer verdict (it does not match _VERDICT_HEADER_RE).
+QA_VERDICT_MARKER = "## QA verdict"
+_QA_VERDICT_HEADER_RE = re.compile(
+    r"(?im)^#{1,4}\s*(?:review\s+verdict\s*\(\s*qa\s*\)|qa\s+verdict)"
+    r"(?=\s|:|$)")
 
 
 def _iso_to_epoch(value):
@@ -1679,19 +2090,21 @@ def _iso_to_epoch(value):
 CALIBRATION_REQUIRED_SINCE = "2026-11-01T00:00:00Z"
 _CALIBRATION_RE = re.compile(r"(?im)^#{1,4}\s*calibration\b")
 
-# The rule "promises of the PR body and WCFY are pinned by a mutant-killing
-# test" was loaded by the reviewer but applied partially: one mutant per
-# fix line and a prose Calibration line ("- contract: every PR-body promise
-# mapped ...") passed the Calibration gate and closed a PASS with two
-# promises that had no mutants at all. A mechanical support of the form: a
-# PASS verdict published from this date must carry, ANYWHERE in the
-# comment, a table "promise / mutant / test / result", otherwise the verdict
-# does not count, as with a missing Calibration. RETURN without the table is
-# acceptable: a return does not accept the work, the error is in the safe
-# direction. The position of the table in the comment is NOT critical: the
-# goal of the gate is "a PASS without the promise/mutant/test/result table
-# does not count", not "the table sits in a particular section". A table
-# is recognised by a header row with promise and mutant in the same row.
+# The rule "promises of the PR body and of WCFY are pinned by a mutant test"
+# was loaded by a reviewer but applied partially: one mutant per fix line and
+# a prose Calibration line "- contract: every PR-body promise mapped ..."
+# passed the Calibration gate and closed a PASS with two promises that had no
+# mutants at all. The mechanical support of the form: a PASS verdict
+# published since this date must carry, ANYWHERE in the comment, a table
+# "promise / mutant / test / result", otherwise the verdict does not count,
+# as if Calibration were missing. RETURN without a table is allowed: a return
+# does not accept the work, the error is in the safe direction.
+# The position of the table in the comment does NOT matter: requiring it
+# strictly inside the Calibration block rejected a valid PASS and its
+# republication re-ran the whole mutant battery for nothing. The goal of the
+# gate is "a PASS without a promise/mutant/test/result table does not count",
+# not "a table in a particular section". Sign: a table header row with
+# promise and mutant on one line.
 PROMISES_TABLE_REQUIRED_SINCE = "2026-11-14T00:00:00Z"
 _PROMISES_TABLE_RE = re.compile(
     r"(?im)^\|\s*\**\s*promise[^\n]*mutant")
@@ -1720,18 +2133,19 @@ def _pr_review_state(repo, number):
 
     A verdict is a formal APPROVED/CHANGES_REQUESTED review on the exact head
     or a comment with a '## ... review verdict' header (including
-    'Re-review verdict') that contains the full head sha or a prefix of at
-    least 7 characters. A coder comment "pushed head X, awaiting verdict" is
-    not a verdict: it has no verdict header.
+    'Re-review verdict') that contains the head sha in full or as a prefix of
+    at least 7 characters. A coder comment "pushed head X, waiting for a
+    verdict" is not a verdict: it has no verdict header.
 
     A verdict comment published since CALIBRATION_REQUIRED_SINCE without a
-    '## Calibration' block does NOT count as a verdict: re-arm, as when
-    there is no verdict. The most recent verdict on the head decides: older
-    ones without the block are grandfathered. Formal reviews are the owner's
+    '## Calibration' block does NOT count as a verdict: re-arm, as if there
+    were no verdict. The most recent verdict on the head decides: older ones
+    without the block are grandfathered. Formal reviews are the owner's
     verdicts, the requirement does not apply to them.
     """
     out = run(["gh", "pr", "view", str(number), "--repo", repo, "--json",
-               "headRefOid,baseRefName,commits,reviews,comments"],
+               "state,headRefOid,baseRefName,author,commits,mergeable,"
+               "reviews,comments"],
               timeout=90)
     try:
         data = json.loads(out)
@@ -1741,36 +2155,142 @@ def _pr_review_state(repo, number):
     if not head:
         return None
     age = None
+    head_commit_at = None
+    head_by_pr_author = False
     commits = data.get("commits") or []
     if commits:
-        committed = _iso_to_epoch((commits[-1] or {}).get("committedDate"))
+        last = commits[-1] or {}
+        committed = _iso_to_epoch(last.get("committedDate"))
         if committed is not None:
             age = max(0.0, time.time() - committed)
+            head_commit_at = committed
+        # The head commit belongs to the executor of the PR (the author of
+        # the branch), not to an outside edit: the head is moved by its own
+        # run. The PR author is an App login ("app/<bot>"), the commit is
+        # signed by the bot login ("<bot>[bot]"): compare normalized forms.
+        def _actor(s):
+            return ((s or "").lower().replace("app/", "")
+                    .replace("[bot]", "").strip())
+        pr_author = _actor((data.get("author") or {}).get("login"))
+        names = set()
+        for a in last.get("authors") or []:
+            names.add(_actor(a.get("login")))
+            names.add(_actor(a.get("name")))
+        head_by_pr_author = bool(pr_author and pr_author in names)
     info = _latest_verdict(data, head)
-    # verdict: strict binding to the exact head (the main auto-arm).
-    # info: the latest significant verdict of the PR (the owner on any head),
-    # branches A/B live on it (WCFY is not created on top of a CR).
+    # The first non-verdict comment AFTER the latest reject (the owner on
+    # any head, or the reviewer): "## Rework: ..." is the executor's answer
+    # to the verdict. A WCFY comment does not count as an answer.
+    reject_at = None
+    if info and info.get("kind") == "reject":
+        reject_at = info.get("at")
+    if reject_at is None:
+        for r in reversed(data.get("reviews") or []):
+            if (r or {}).get("state") == "CHANGES_REQUESTED":
+                reject_at = _iso_to_epoch(r.get("submittedAt"))
+                break
+    reply_after_reject = None
+    if reject_at is not None:
+        for comment in data.get("comments") or []:
+            body_c = (comment or {}).get("body") or ""
+            at = _iso_to_epoch((comment or {}).get("createdAt"))
+            if at is None or at < reject_at:
+                continue
+            if _VERDICT_HEADER_RE.search(body_c):
+                continue
+            if body_c.lstrip().lower().startswith(
+                    WCFY_MARKER.lower()):
+                continue
+            reply_after_reject = at
+            break
+    # verdict: strictly bound to the exact head.
+    # info: the latest meaningful verdict on the PR (the owner on any head);
+    # WCFY is not started on top of a CR.
     verdict_head = _latest_verdict(data, head, owner_any_head=False)
     return {"head": head, "age": age, "verdict": verdict_head is not None,
-            "info": info, "wcfy_at": _wcfy_latest(data),
+            "info": info,
+            # Class of the strict verdict on the exact head (None = no
+            # verdict on the head) and the sign "the owner ever gave a
+            # formal review to this PR" (any head). The first feeds the CR
+            # rework generator, the second the finding "a PR of the active
+            # milestone fell off the board".
+            "head_kind": (verdict_head or {}).get("kind"),
+            "head_at": (verdict_head or {}).get("at"),
+            # The first reject on the exact head (a duplicate verdict must
+            # not disqualify the answering card).
+            "head_reject_at": _head_reject_first_at(data, head),
+            "owner_review": any(
+                (r or {}).get("state") in ("APPROVED", "CHANGES_REQUESTED")
+                for r in data.get("reviews") or []),
+            "wcfy_at": _wcfy_latest(data),
+            # Head commit (epoch), whether it belongs to the executor of the
+            # PR, and the first answer to a reject verdict. They retire rework
+            # arms whose work was done by another run.
+            "head_commit_at": head_commit_at,
+            "head_by_pr_author": head_by_pr_author,
+            "reply_after_reject": reply_after_reject,
+            # OPEN/MERGED/CLOSED to retire stale rework arms (they are
+            # retired not only when the head moves, but also when the PR
+            # itself has left OPEN).
+            "pr_state": data.get("state") or "",
+            # CONFLICTING/MERGEABLE/UNKNOWN. A conflicting PR has no merge
+            # ref, so no pull_request CI run is created at all, and a PASS on
+            # its head is impossible.
+            "mergeable": data.get("mergeable") or "",
             "base": data.get("baseRefName") or ""}
 
 
-# Two verdict carriers compete by time. GitHub's formal review is placed by
-# the owner (the bot cannot review a PR opened by the same App, so the
-# reviewer writes a comment), and a live case mixed both: a reviewer PASS
-# comment, then the owner's formal CR "code accepted, only WCFY left". The
-# verdict class is taken from the verdict line: an essay below the header
-# quotes old verdicts ("this closes the CHANGES REQUESTED of ..." inside an
-# APPROVED), and a class taken from the whole body flips the verdict.
-# A window of 240 characters turned out to be too small. A live verdict:
-# "PASS on head `d4c776a...` (re-review after CHANGES REQUESTED on
-# `0d272f9`; ...)": the mention of the past CR stands in the MOST deciding
-# line, reject was checked first and flipped the PASS; branch B did not
-# create a WCFY card and the PR with a PASS stood for 7 hours. Now the
-# class is read only from the deciding line (_verdict_deciding_line), see
-# below.
-_VERDICT_REJECT_RE = re.compile(r"(?i)changes\s+requested")
+def _pr_closing_issues(repo, number):
+    """Closing issue numbers of PR #N: [] when gh fails.
+
+    The link "an executor card works on this PR" when the card was created
+    BEFORE the PR was opened and does not name it: an architect's card names
+    the issue ("issue #N C3"), the PR is opened later with the same closing
+    issue. Such a running card has only the issue in its body, neither the
+    PR nor the head.
+    """
+    out = run(["gh", "pr", "view", str(number), "--repo", repo, "--json",
+               "closingIssuesReferences"], timeout=60)
+    try:
+        data = json.loads(out)
+    except Exception:
+        return []
+    nums = []
+    for r in data.get("closingIssuesReferences") or []:
+        try:
+            nums.append(int((r or {}).get("number")))
+        except (TypeError, ValueError):
+            continue
+    return nums
+
+
+# Two carriers of a verdict compete in time. The formal GitHub review is
+# given by the owner (a bot cannot review a PR opened by the same App, so the
+# reviewer writes a comment), and the two get mixed: a reviewer PASS comment,
+# then a formal owner CR "code accepted, WCFY remains". The class of a
+# verdict is taken from the verdict line: the essay below the header quotes
+# old verdicts ("this closes the CHANGES REQUESTED of ..." inside an
+# APPROVED), and a class over the whole body flips the verdict.
+# A fixed 240-character window was not enough either: "PASS on head
+# `d4c776a...` (re-review after CHANGES REQUESTED on `0d272f9`; ...)" names
+# the old CR on the deciding line ITSELF; reject was checked first and
+# flipped the PASS. Now the class is read only from the deciding line
+# (_verdict_deciding_line), see below.
+# A reviewer's deciding line may open with the verb first ("**REQUEST
+# CHANGES**, one merge-order blocker plus one major finding") and was parsed
+# as other: the CR rework generator did not see the CR. The owner's passive
+# form ("CHANGES REQUESTED: minor") stays the first alternative.
+_VERDICT_REJECT_RE = re.compile(
+    r"(?i)(?:changes\s+requested|request(?:ed|s)?\s+changes)")
+# The deciding line may carry the verdict history LEFT of the token
+# ("...previous verdict REQUEST CHANGES, issuecomment-...): **PASS**."): the
+# "leftmost wins" heuristic flipped the PASS into a reject, and the CR rework
+# generator armed a rework on an accepted head. The reviewer puts the
+# decision in bold: a bold token beats "leftmost wins"; without bold the
+# leftmost heuristic works as before.
+_VERDICT_BOLD_RE = re.compile(
+    r"(?i)\*\*\s*(pass(?:ed)?|approve[ds]?|accept(?:ed|ance)?|"
+    r"changes\s+requested|request(?:ed|s)?\s+changes)\s*\*\*")
 # The verdict word on the deciding line, with word forms ("ACCEPTED
 # (reviewer, round 3, head ...)"). The old _VERDICT_ACCEPT_RE required
 # "verdict ... pass" as one phrase, which does not fire on a deciding line
@@ -1843,20 +2363,28 @@ def _verdict_deciding_line(body):
 
 
 def _verdict_kind(body):
-    """accept/reject/other by the deciding line of a verdict.
+    """accept/reject/other from the deciding line of a verdict.
 
     The class used to be taken from the first 240 characters of the body,
-    reject first: a PASS of the second round that mentioned the past CR in
-    parentheses on the deciding line ("PASS on head X (re-review after
-    CHANGES REQUESTED on Y)") was read as reject. The decision of a verdict
-    is read from its deciding line, not from mentions in history: a
-    second-round review almost always refers to the past CR. Inside the
-    deciding line the class is given by the word that stands further left:
-    the verdict token opens the line in the reviewer's format, and the
-    history comes to the right in parentheses. The reverse is symmetric: a
-    CR that mentions a past APPROVE stays reject.
+    reject first: a second-round PASS that mentions the old CR in brackets on
+    the deciding line ("PASS on head X (re-review after CHANGES REQUESTED on
+    Y)") was read as a reject. The decision of a verdict is read from its
+    deciding line, not from mentions in its history: a second-round review
+    almost always refers to the previous CR. Within the deciding line the
+    leftmost word decides: the verdict token opens the line in the reviewer's
+    format, the history follows to the right in brackets. The reverse is
+    symmetric: a CR that mentions an old APPROVE stays a reject. A bold
+    verdict token beats the leftmost rule.
     """
     line = _verdict_deciding_line(body) or ""
+    bold = _VERDICT_BOLD_RE.search(line)
+    if bold:
+        word = bold.group(1)
+        if _VERDICT_ACCEPT_WORD_RE.search(word):
+            return "accept"
+        if _VERDICT_REJECT_RE.search(word):
+            return "reject"
+        return "other"
     acc = _VERDICT_ACCEPT_WORD_RE.search(line)
     rej = _VERDICT_REJECT_RE.search(line)
     if acc and (not rej or acc.start() < rej.start()):
@@ -1929,6 +2457,48 @@ def _latest_verdict(data, head, owner_any_head=True):
     events.sort(key=lambda e: (e[0] is not None, e[0] or 0))
     return {"kind": events[-1][1], "at": events[-1][0],
             "body": events[-1][2]}
+
+
+def _head_reject_first_at(data, head):
+    """Epoch of the FIRST reject verdict on the exact head, or None.
+
+    Why the first and not the latest (_latest_verdict gives the latest): a
+    rework card is created as an answer to the verdict, and the reviewer may
+    duplicate the same RETURN on the same head AFTER the card was created.
+    Comparing with the duplicate would disqualify the answering card.
+    "Created after the verdict" means after the first reject on the current
+    head. Validity is the same as in _latest_verdict: Calibration is
+    required since CALIBRATION_REQUIRED_SINCE; the promises table is needed
+    only by accept verdicts and does not affect a reject.
+    """
+    best = None
+
+    def up(at):
+        nonlocal best
+        if at is not None and (best is None or at < best):
+            best = at
+
+    for r in data.get("reviews") or []:
+        if (r or {}).get("state") != "CHANGES_REQUESTED":
+            continue
+        if ((r.get("commit") or {}).get("oid") or "") != head:
+            continue
+        up(_iso_to_epoch(r.get("submittedAt")))
+    for comment in data.get("comments") or []:
+        body = (comment or {}).get("body") or ""
+        if not _VERDICT_HEADER_RE.search(body):
+            continue
+        if not (head in body or re.search(
+                r"(?i)\b" + re.escape(head[:7]), body)):
+            continue
+        created = (comment or {}).get("createdAt") or ""
+        if created >= CALIBRATION_REQUIRED_SINCE \
+                and not _CALIBRATION_RE.search(body):
+            continue
+        if _verdict_kind(body) != "reject":
+            continue
+        up(_iso_to_epoch(created))
+    return best
 
 
 def _wcfy_comment_is(body):
@@ -2024,67 +2594,167 @@ def _head_mandatory_ci(repo, number, base, protect_cache):
     return True, ""
 
 
-CONVENTIONS_SKILL = cfg("FACTORY_CONVENTIONS_SKILL", "project-conventions")
+def svc_priority(slug, number, default):
+    """Milestone band for a service card of a PR.
 
-
-def _review_arm_card(slug, number, head, age_h, key=None, rearm_of=None):
-    """Creates a reviewer card on the exact head. The id of the new one or None.
-
-    key: the dedup key. By default the base reviewer-pr<N>-<head7>; on a
-    repeated arm after a card closed without a verdict a fresh key with the
-    suffix -rN is passed (the base one is deduplicated against the done
-    card). rearm_of: ids of earlier cards of the family for the card body.
+    Reads the admission gate cache (refreshed by every hourly run):
+    band = max(bands of the PR's issues from Refs/Closes and of the PR's own
+    milestone). The top band "finish to merge" (the active milestone, 80)
+    keeps the original default (100/95, "80 or higher"), other milestones
+    give their exact band (the next milestone, 40). No data -> default: the
+    admission gate corrects the priority on its next run.
     """
-    key = key or "reviewer-pr%d-%s" % (number, head[:7])
-    rearm_note = ""
-    if rearm_of:
-        rearm_note = (
-            "\n\nRepeated arm: the previous card(s) %s were closed by the "
-            "reviewer WITHOUT a verdict on this head. Key %s is fresh, there "
-            "is no dedup against the done card. A verdict is mandatory "
-            "before this card is closed."
-            % (rearm_of, key))
-    title = ("[reviewer] PR #%d (head %s): review of head without verdict "
-             "(watchdog auto-arm)" % (number, head[:7]))
-    body = (
-        "PR #%d, exact head for the verdict: %s.\n\n"
-        "Created by the watchdog automatically: the head has had no verdict "
-        "for %.1f h and there was no live reviewer card (the executor card "
-        "closed after the push without a reviewer card)."
-        "%s\n\n"
-        "Task: adversarial review of the exact head %s against the branch "
-        "base: the diff since the last verdict, CI on the head, mergeable, "
-        "consistency of the PR body with the code. Line conventions: in the "
-        "system prompt (skill %s).\n\n"
-        "Verdict: a comment in PR #%d with the header \"## Review verdict\" "
-        "and the exact sha of the head, in English. Before the verdict read "
-        "the last 10 entries of the misses journal of the adversarial-review "
-        "skill and add a \"## Calibration\" block: a line for every "
-        "applicable class of misses (contract, mutation, ui-input, "
-        "pr-texts; N/A with a reason for inapplicable ones). The review "
-        "layer does not count a verdict without the block: re-arm as when "
-        "there is no verdict. The card is not closed without a verdict on "
-        "this sha: done without a verdict in the PR is a downtime "
-        "incident, the watchdog will see it and recreate the card."
-        % (number, head, age_h, rearm_note, head[:7], CONVENTIONS_SKILL, number))
-    body_path = None
     try:
-        with tempfile.NamedTemporaryFile(
-                "w", suffix=".md", encoding="utf-8", delete=False) as fh:
-            fh.write(body)
-            body_path = fh.name
-        return _kanban_create(slug, title, body, "reviewer", 100, key,
-                              ("serena-lsp", "adversarial-review"))
+        with open(os.path.join(BOARDS, slug, ADMISSION_CACHE_NAME)) as fh:
+            cache = json.load(fh)
+    except Exception:
+        return default
+    ms = ms_bands(slug)
+    band = None
+
+    def up(b):
+        nonlocal band
+        if b and (band is None or b > band):
+            band = b
+
+    for i in (cache.get("pr_issues") or {}).get(str(number), []):
+        up(ms["bands"].get(
+            (cache.get("issues") or {}).get(str(i))))
+    up(ms["bands"].get(
+        (cache.get("pr_milestones") or {}).get(str(number))))
+    if band is None:
+        return default
+    if band == milestone_bands.ACTIVE_BAND:
+        return max(default, band)
+    return band
+
+
+def _live_keys(slug):
+    """Keys of live board cards (not done/archived) for the native guard."""
+    db = os.path.join(BOARDS, slug, "kanban.db")
+    if not os.path.exists(db):
+        return []
+    try:
+        con = sqlite3.connect("file:%s?mode=ro" % db, uri=True,
+                              timeout=10)
+        rows = con.execute(
+            "SELECT idempotency_key FROM tasks "
+            "WHERE status NOT IN ('done','archived') "
+            "AND idempotency_key IS NOT NULL").fetchall()
+        con.close()
+        return [r[0] for r in rows]
+    except sqlite3.Error:
+        return []
+
+
+def _review_cycle_live(slug, number, head):
+    """A fresh re-read of the board right BEFORE create.
+
+    A board snapshot taken earlier in the pass gets about a minute of gh
+    requests old. Within that minute an executor card may request review
+    and the stock review lane may claim it; a card created from the stale
+    snapshot then duplicates a review that is already running.
+
+    Returns [(task_id, reason)]: live cards that name PR #number and already
+    carry the STOCK review cycle of THIS head: status review
+    (kanban_request_review moves the card into the review lane, the
+    dispatcher starts the review run itself) or running with a claim of
+    source_status=review. A card that does not name OUR head explicitly
+    (another head, or no sha at all) does not count as busy for our head:
+    the cycle of an old head does not cover a new one. The stock
+    review_requested event always names the sha.
+    An empty list = no stock cycle.
+    """
+    db = os.path.join(BOARDS, slug, "kanban.db")
+    if not os.path.exists(db):
+        return []
+    pat = re.compile(r"#%d\b" % number)
+    head7 = (head or "")[:7]
+    out = []
+    try:
+        con = sqlite3.connect("file:%s?mode=ro" % db, uri=True,
+                              timeout=10)
+    except sqlite3.Error:
+        return []
+    try:
+        rows = con.execute(
+            "SELECT id, status, title, body FROM tasks "
+            "WHERE status IN ('review', 'running')").fetchall()
+        for tid, status, title, body in rows:
+            blob = "%s %s" % (title or "", body or "")
+            for (c,) in con.execute(
+                    "SELECT body FROM task_comments WHERE task_id=? "
+                    "ORDER BY id DESC LIMIT 3", (tid,)):
+                blob += " " + (c or "")
+            for (p,) in con.execute(
+                    "SELECT payload FROM task_events WHERE task_id=? AND "
+                    "kind IN ('review_requested','changes_requested') "
+                    "ORDER BY id DESC LIMIT 3", (tid,)):
+                blob += " " + (p or "")
+            for (s,) in con.execute(
+                    "SELECT summary FROM task_runs WHERE task_id=? AND "
+                    "summary IS NOT NULL ORDER BY id DESC LIMIT 2", (tid,)):
+                blob += " " + (s or "")
+            if not pat.search(blob):
+                continue
+            heads = [m[:7] for m in re.findall(
+                r"\b([0-9a-f]{40})\b", blob)]
+            heads += [m[:7] for m in re.findall(
+                r"(?:head|sha)[ :]*`?([0-9a-f]{7,40})",
+                blob, re.I)]
+            # names ANOTHER head explicitly or none at all: our head is not
+            # confirmed busy (the cycle of an old or unknown head does not
+            # cover a new one)
+            if head7 not in heads:
+                continue
+            if status == "review":
+                out.append((tid, "review"))
+                continue
+            for (p,) in con.execute(
+                    "SELECT payload FROM task_events WHERE task_id=? AND "
+                    "kind='claimed' ORDER BY id DESC LIMIT 3", (tid,)):
+                try:
+                    if json.loads(p or "{}").get(
+                            "source_status") == "review":
+                        out.append((tid, "running:review-claim"))
+                        break
+                except ValueError:
+                    continue
     finally:
-        if body_path:
-            try:
-                os.unlink(body_path)
-            except OSError:
-                pass
+        con.close()
+    return out
 
 
-def _kanban_create(slug, title, body, assignee, priority, key, skills=()):
-    """hermes kanban create via body-file. The id of the new card or None."""
+def _kanban_create(slug, title, body, assignee, priority, key, skills=(),
+                   guard=None):
+    """hermes kanban create through a body file. The new card id or None.
+
+    assignee is required. Cards created without an assignee are never
+    started by the dispatcher (skipped_unassigned): such a card is dead
+    from birth. An empty assignee here is a bug of the calling code, so it
+    is refused at once instead of leaving a dead card on the board.
+
+    guard is required and must be a GuardNote from
+    board_native_guard.native_or_live (a receipt "stock checked, nothing
+    live"). There are no direct calls that bypass the receipt: every
+    generator asks the helper first, covered=True means "do not create".
+    """
+    if board_native_guard is None:
+        raise ValueError(
+            "_kanban_create: native guard unavailable: creating cards "
+            "is forbidden while scripts/board_native_guard.py "
+            "does not load")
+    if not isinstance(guard, board_native_guard.GuardNote):
+        raise ValueError(
+            "_kanban_create: a guard receipt is required (native guard "
+            "rule, key %s): call board_native_guard.native_or_live and pass "
+            "its result; covered=True = do not create at all" % key)
+    body = board_native_guard.guard_section(guard) + (body or "")
+    if not (assignee or "").strip():
+        raise ValueError(
+            "_kanban_create: empty assignee (slug=%s key=%s): a card"
+            " without an assignee is never started by the dispatcher"
+            % (slug, key))
     body_path = None
     try:
         with tempfile.NamedTemporaryFile(
@@ -2144,81 +2814,200 @@ def _fmt_utc(at):
     return time.strftime("%Y-%m-%d %H:%MZ", time.gmtime(at))
 
 
-def _pair_rearm_card(slug, number, head, age_h, twin, key, rearm_of):
-    """A reviewer card for a repeat review after a paired blocker is closed.
+def _title_owns_pr(title, number):
+    """True: the card title names PR #N as the object of the work.
 
-    A reviewer CR on the head of one PR of a pair referred to the twin's
-    blocker ("push a new head on #N, then re-request review here"), the twin
-    got a fix and a PASS, and nobody requested the repeat review: a PR with
-    a verdict does not enter the main auto-arm, and the pair stood forever
-    until the owner intervened manually.
+    The PR number must be in the title (the body does not count). Mentions
+    are filtered out: "(survivor J-H from the review of PR #A)" is work on an
+    issue, not on PR #A; "Rebase and land PR #B (waits for #A)" is work on
+    #B, not on #A. A mention does not count when a word of another role
+    stands within 24 characters before #N: review, waiting, merge source.
     """
+    _MENTION_STOP = ("review", "wait", "merge of", "after")
+    for m in re.finditer(r"#%d\b" % number, title or ""):
+        pre = (title[:m.start()])[-24:].lower()
+        if not any(w in pre for w in _MENTION_STOP):
+            return True
+    return False
+
+
+# A service card that waits for a merge or for the owner is not live work
+# on a PR. Example: "[issue-close] close issue #N after the merge of PR #M"
+# (blocked, waits for the merge) carries "#M" in the title and the head in
+# the body, and a check "a live coder card works with this head" counted it
+# as work. The trigger of such cards is outside the board (a PR merge, an
+# owner decision); they never move the PR themselves. Classes: issue-close
+# on merge, hold, waiting for a merge or for the owner.
+_SERVICE_WAIT_CARD_RE = re.compile(
+    r"(?i)\[\s*(?:issue-close|hold|wait-merge|wait-owner|"
+    r"wait-for-merge|service)\s*\]"
+    r"|issue-close\b"
+    r"|\bclose\s+issue\b[^\n]{0,100}(?:after|before)\s+(?:the\s+)?merg\w*"
+    r"|(?:\bwait(?:s|ing)?|\bawait(?:s|ing)?)\s+(?:for\s+)?"
+    r"(?:(?:the\s+)?merge\s+of\s+)?(?:PR|pull request)\s*#"
+    # A follow-up "(issue #N, after the merge of PR #M)" (blocked until the
+    # merge, the head of #M quoted in the body as context) is a merge wait
+    # without the words "waits"/"close issue". "until/before the merge"
+    # counts ONLY with a block marker: "land this before the merge of PR #M"
+    # is real pre-merge work on the PR.
+    r"|\bafter\s+(?:the\s+)?merg\w*\s+(?:of\s+)?(?:PR|pull request)\s*#"
+    r"|\bblock(?:ed|s)?\s+(?:until|till|before)\s+(?:the\s+)?merg\w*")
+
+
+def _is_service_wait_card(title, body):
+    """True: a service card whose trigger is a merge or the owner."""
+    return bool(_SERVICE_WAIT_CARD_RE.search(
+        (title or "") + "\n" + (body or "")))
+
+
+# A context quote of a PR head. A card "Issue #N: Before/After from the
+# rework head of PR #M (abc1234)" quotes the head of the PR as the SOURCE of
+# its screenshots; it does not move the PR, does not request review, and no
+# changes_requested will come back to it. Same class as the service cards
+# above (a side card silenced live work on the PR), another kind: not a
+# merge wait but work on its own artifact with somebody else's head as the
+# source. The structural sign is double: the card declares ITS object as an
+# issue in the first word of the title ("Issue #N: ..."), and the PR head is
+# quoted with source words ("from the rework head of PR #", "frames from
+# the head of PR #"). The issue prefix alone, without source words, does NOT
+# match: "Issue #N: text fix in PR #M" may be real work on PR #M, and its
+# cycle must not be silenced (conservative on purpose).
+_OWN_ISSUE_TITLE_RE = re.compile(r"(?i)^issue\s*#(\d+)\s*:")
+_CONTEXT_CITE_PR_RE = re.compile(
+    r"(?i)(?:from|of)\s+(?:the\s+)?(?:rework\s+)?head\s+of\s+"
+    r"(?:the\s+)?(?:rework\s+of\s+)?(?:PR|pull\s*request)\s*#"
+    r"|\bheads?\b[^#\n]{0,30}\b(?:context|source)\b")
+
+
+def _is_context_cite_card(title, body):
+    """True: a card of its own issue quotes a PR head as its source."""
+    if not _OWN_ISSUE_TITLE_RE.search(title or ""):
+        return False
+    return bool(_CONTEXT_CITE_PR_RE.search(title or "")
+                or _CONTEXT_CITE_PR_RE.search(body or ""))
+
+
+def cr_rework_gaps(states, live, pilot_numbers=()):
+    """[(number, head)] with a CR on the head and no live work.
+
+    PRs with CHANGES REQUESTED stood for hours without a rework card: the
+    verdict cleared the pending state and the CR work went to nobody. The
+    arm is suppressed by a live executor card with this PR in its title (the
+    stock review cycle returns changes_requested to it) or by a live
+    reviewer card of the PR (review in flight). pilot_numbers are skipped.
+    """
+    gaps = []
+    for number in sorted(states):
+        if number in pilot_numbers:
+            continue
+        st = states[number]
+        if st.get("head_kind") != "reject":
+            continue
+        if any(t[3] != "reviewer" and _title_owns_pr(t[1], number)
+               and not _is_service_wait_card(t[1], t[2])
+               for t in live):
+            continue
+        if any(t[3] == "reviewer"
+               and (re.search(r"#%d\b" % number,
+                              (t[1] or "") + " " + (t[2] or ""))
+                    or ("pr%d-" % number) in (t[6] or ""))
+               for t in live):
+            continue
+        gaps.append((number, st["head"]))
+    return gaps
+
+
+def milestone_pr_orphans(states, live, admit, pilot_numbers=()):
+    """[number] of active-milestone PRs that have no card.
+
+    A PR with admission (active milestone, approved issue, gen_admission),
+    without a live card that has this PR in its title and without a formal
+    owner review. Such PRs stood green waiting for the owner while the board
+    did not show them at all. The head must be at least REVIEW_ARM_MIN_AGE_S
+    old: a freshly opened PR may not have its card yet.
+    """
+    orphans = []
+    for number in sorted(states):
+        if number in pilot_numbers:
+            continue
+        st = states[number]
+        age = st.get("age")
+        if age is None or age < REVIEW_ARM_MIN_AGE_S:
+            continue
+        if st.get("owner_review"):
+            continue
+        if any(_title_owns_pr(t[1], number)
+               and not _is_service_wait_card(t[1], t[2])
+               for t in live):
+            continue
+        if not admit(number):
+            continue
+        orphans.append(number)
+    return orphans
+
+
+def _rework_arm_card(slug, number, head, info, key=None, rearm_of=None,
+                     guard=None):
+    """Coder rework card for a CR verdict on the exact head.
+
+    Priority through svc_priority(default 90): the active milestone band
+    keeps 90 (the rework of an open PR goes before new work of the band,
+    below review 100 and WCFY 95), other milestones give their exact band.
+    Live cards below the target are lifted by rework_priority_lift.
+    The key is built by the shared helper board_native_guard.rework_key
+    (coder-pr<N>-rework-<head7>), the same for all rework generators.
+    """
+    key = key or board_native_guard.rework_key(number, head)
     rearm_note = ""
     if rearm_of:
         rearm_note = (
-            "\n\nRepeated arm: the previous card(s) %s were closed without a "
-            "verdict. Key %s is fresh, there is no dedup against the done "
-            "card." % (rearm_of, key))
-    title = ("[reviewer] PR #%d (head %s): re-review, paired blocker "
-             "#%d closed (watchdog auto-arm)" % (number, head[:7], twin))
-    body = (
-        "PR #%d, exact head for the verdict: %s.\n\n"
-        "Created by the watchdog automatically: the latest verdict on this "
-        "head, CHANGES REQUESTED, referred to the paired blocker of the twin "
-        "PR #%d, and the twin now has a reviewer PASS fresher than this "
-        "verdict, that is the blocker is closed by the reviewer's own "
-        "instruction (\"push a new head on #%d, then re-request review "
-        "here\"). The head is %.1f h old and nobody requested a repeat "
-        "review: without a card the pair would stand forever.%s\n\n"
-        "Task: a repeat adversarial review of the exact head %s against the "
-        "branch base, with the focus on the paired blocker: whether the "
-        "twin's fix #%d really closes it, consistency of the pair "
-        "(contract, mutations, texts), CI on the head, mergeable, "
-        "consistency of the PR body with the code. Line conventions: in the "
-        "system prompt (skill %s).\n\n"
-        "Verdict: a comment in PR #%d with the header \"## Review verdict\" "
-        "and the exact sha of the head, in English, the \"## Calibration\" "
-        "block is mandatory (a verdict without the block does not count). "
-        "The card is not closed without a verdict: the watchdog will see "
-        "done without a verdict and recreate it."
-        % (number, head, twin, twin, age_h, rearm_note, head[:7], twin,
-           CONVENTIONS_SKILL, number))
-    return _kanban_create(slug, title, body, "reviewer", 100, key,
-                          ("serena-lsp", "adversarial-review"))
-
-
-def _wcfy_arm_card(slug, number, head, wcfy_at, key, rearm_of):
-    """A coder card for a fresh WCFY on the final head after a PASS.
-
-    Priority 95: the last link before the merge, but below the p100 of
-    reviewer cards, so that a repeat review goes before the final text.
-    """
-    rearm_note = ""
-    if rearm_of:
-        rearm_note = (
-            "\n\nRepeated arm: the previous card(s) %s were closed without a "
-            "published comment. Key %s is fresh."
-            % (rearm_of, key))
-    title = ("[coder] PR #%d (head %s): fresh \"What changes for you\" "
+            "\n\nRe-arm: the previous card(s) of the family %s are closed,"
+            " but the CR verdict on head %s still stands. Key %s is fresh."
+            % (rearm_of, head[:7], key))
+    title = ("[coder] PR #%d (head %s): rework by verdict "
              "(watchdog auto-arm)" % (number, head[:7]))
     body = (
-        "PR #%d, exact head: %s.\n\n"
-        "Created by the watchdog automatically: the head carries a reviewer "
-        "PASS, but there is no fresh \"What changes for you\" for it (the "
-        "latest WCFY comment: %s, the head is newer than it). A stale WCFY "
-        "describes an old form of the change."
-        "%s\n\n"
-        "Task: publish in PR #%d a NEW comment with the header exactly "
-        "\"## What changes for you\" (English): what changes for the user, "
-        "what proves it (command output, screenshot), what was run; bind it "
-        "to the exact sha of the head %s. Editing only the PR body does not "
-        "count: an edit of the body has no date, the machine freshness check "
-        "(the board-watchdog review layer) goes by dated comments, with a "
-        "marker shared with pr-hygiene. The card is closed after the "
-        "comment is published."
-        % (number, head, _fmt_utc(wcfy_at), rearm_note, number, head[:7]))
-    return _kanban_create(slug, title, body, "coder", 95, key,
-                          ("pr-deliverable",))
+        "PR #%d, exact head with the verdict: %s (latest verdict: %s).\n\n"
+        "Created by the watchdog automatically: the head carries "
+        "CHANGES REQUESTED, and there was no live card working on this PR "
+        "(otherwise such PRs stand for hours while the slots go to other "
+        "work).%s\n\n"
+        "Task: read the verdict in PR #%d (a comment with the header "
+        "\\\"## Review verdict\\\" or a formal CR) and close all blockers. "
+        "Fixes go to the PR branch, a new head, CI green, then a MANDATORY "
+        "rework response: a comment in the PR answering EVERY BLOCK item "
+        "of the verdict (what was done, commit, mutation). Without it the "
+        "reviewer sees a bare new head and does not know how the verdict "
+        "was closed, and the review stalls for hours. The duty is carried "
+        "by ANY card that delivers the rework, including a decomposition "
+        "child: the template is not visible there, the duty remains (skill "
+        "pr-deliverable). After the answer, kanban_request_review "
+        "with reviewer=reviewer (explicitly) and leave the run. Without "
+        "reviewer= the card is not reassigned and the executor takes the "
+        "review column again: a self-review loop. "
+        "Before kanban_request_review check for a live reviewer "
+        "card on the NEW head (key reviewer-pr%d-<head7>): if it already "
+        "reviews this head, do not request review, finish the run with a "
+        "link to it (the duplicate session is retired by the watchdog). "
+        "If the verdict needs no new code (for example "
+        "only a screenshot or text), publish what is required in the PR "
+        "bound to the head, request a re-review and leave. Do NOT wait for "
+        "the reviewer's verdict inside the run: it arrives as an event on "
+        "the new head, and waiting holds a dispatcher slot for hours. Do "
+        "not mark the card done before the new verdict (the next run does "
+        "it on the event); a reject on a head without live work is a "
+        "watchdog finding, it will recreate the rework.\\n\\n"
+        "Comment hygiene: until the first run of this card, the PR is "
+        "mentioned in its comments ONLY by number, without a URL: an "
+        "issuecomment link in a fresh comment freezes the card under the "
+        "dispatcher's active_pr guard for 24 h. Pass evidence from a "
+        "neighbouring run by PR number and head sha, or accompany the "
+        "comment with a handoff event (reassign)."
+        % (number, head, _fmt_utc((info or {}).get("at")), rearm_note,
+           number, number))
+    return _kanban_create(slug, title, body, "coder",
+                          svc_priority(slug, number, 90), key,
+                          ("pr-deliverable",), guard=guard)
 
 
 def _owner_deferred_review(db, task_id):
@@ -2415,12 +3204,110 @@ ADMISSION_WORK_STATUSES = ("ready", "todo", "review", "scheduled")
 ADMISSION_MARKER = "admission gate:"
 ISSUE_LINK_MARKER = "issue-link:"
 INFRA_MARKER = "admission: infra"
+# Return from parking and milestone priority bands. A return is not
+# automatic by itself: when an issue is approved, the gate returns ONE
+# working card per issue/PR (one live card per PR/issue), and duplicates are
+# archived with a reference to it.
+# The milestone priority bands are computed from GitHub on every run
+# (scripts/milestone_bands.py, the single definition shared with
+# pr-hygiene). Active = the open milestone with the nearest due_on (on a tie
+# or without due_on, by version number); next = the open milestone with the
+# smallest version above the active one. Bands: active 80, next 40, other
+# open ones 20; closed milestones are not in the open list and get no band.
+# A static table would silently leave the next milestone on the wrong band
+# on release day.
+# The active milestone of the factory is the top band. Generators do not
+# create cards for work outside it at all: the band is below p50, and the
+# review layer would take the card off the queue right after creation.
+
+
+def _ms_fetch(repo):
+    """Open milestones of the repo for milestone_bands.resolve: gh through
+    the local run() (tests replace exactly that). Garbage instead of JSON
+    or empty output on failure -> None; resolve then takes the last
+    successful result from disk or returns "no data"."""
+    out = run(["gh", "api",
+               "repos/%s/milestones?state=open&per_page=100" % repo],
+              timeout=60)
+    try:
+        items = json.loads(out or "[]")
+    except Exception:
+        return None
+    return [{"title": m.get("title"), "due_on": m.get("due_on")}
+            for m in items]
+
+
+def ms_bands(slug=None, repo=None):
+    """{active, next, bands, source} of the board's repository; memoized per
+    process (every cron run is a new process, that is "on every run")."""
+    if repo is None:
+        repo = board_repo(slug or "")
+    if not repo:
+        return {"active": None, "next": None, "bands": {},
+                "source": "nodata"}
+    return milestone_bands.resolve(repo, fetch=_ms_fetch)
+# Admission cache for the claim guards (the kanban-admission-guard plugin):
+# lives next to the board, refreshed by every gate run.
+ADMISSION_CACHE_NAME = "admission-approved.json"
+NO_LINK_WHY = "no binding to an issue of the repository"
+
+
+def gen_admission(slug, number):
+    """Admission of a service card generator BEFORE creation.
+
+    Returns (ok, why_not). False = do not create the card: the admission
+    gate or the review layer would park it right after create. Two cases:
+    a PR without a binding to an approved issue (the gate: the admission
+    white list), and a PR for an issue in a milestone other than the active
+    one (band below p50: the review layer takes it off the queue). The
+    active milestone is computed from GitHub (ms_bands).
+    The check runs before creation, not after.
+    No cache or no bands -> ok: the old behaviour, the next gate run fixes
+    it.
+    """
+    try:
+        with open(os.path.join(BOARDS, slug, ADMISSION_CACHE_NAME)) as fh:
+            cache = json.load(fh)
+    except Exception:
+        return True, ""
+    if str(number) not in {str(n) for n in cache.get("prs") or []}:
+        return False, ("PR without a binding to an approved issue: the "
+                       "admission gate would park the card right after "
+                       "creation")
+    band = None
+
+    def up(b):
+        nonlocal band
+        if b and (band is None or b > band):
+            band = b
+
+    ms = ms_bands(slug)
+    active = ms["active"]
+    for i in (cache.get("pr_issues") or {}).get(str(number), []):
+        up(ms["bands"].get(
+            (cache.get("issues") or {}).get(str(i))))
+    up(ms["bands"].get(
+        (cache.get("pr_milestones") or {}).get(str(number))))
+    if band is not None and active and band != ms["bands"][active]:
+        return False, ("the PR's issue is in a milestone with band p%d,"
+                       " outside the active %s: the card is below p50, the"
+                       " review layer would take it off the queue right"
+                       " after creation" % (band, active))
+    return True, ""
 
 
 def open_issue_states(repo):
-    """Open issues of the repo: number -> (milestone title, label set)."""
+    """Open issues of the repo: number -> (milestone, labels, updated_epoch, body).
+
+    updated_epoch: time of the last issue update, for the check "active
+    milestone without a live card for longer than 24 h".
+    body: for owner blocker marks (OWNER_MARK_RE) and for filtering out bot
+    mirrors ("Mirrored from kanban card").
+    A field missing in the gh answer (old test scenarios) -> None.
+    """
     out = run(["gh", "issue", "list", "--repo", repo, "--state", "open",
-               "--limit", "300", "--json", "number,milestone,labels"],
+               "--limit", "300",
+               "--json", "number,milestone,labels,updatedAt,body"],
               timeout=90)
     try:
         parsed = json.loads(out)
@@ -2430,44 +3317,332 @@ def open_issue_states(repo):
     for it in parsed:
         labels = {lab.get("name") for lab in it.get("labels") or []}
         milestone = (it.get("milestone") or {}).get("title")
-        states[it.get("number")] = (milestone, labels)
+        upd = None
+        raw = it.get("updatedAt")
+        if raw:
+            try:
+                upd = calendar.timegm(time.strptime(
+                    raw[:19], "%Y-%m-%dT%H:%M:%S"))
+            except Exception:
+                upd = None
+        states[it.get("number")] = (milestone, labels, upd,
+                                    it.get("body"))
     return states
 
 
-def open_pr_issues(repo, states):
-    """Open PRs of the repo: number -> issue numbers of the body, live in states.
+def _iso_epoch(raw):
+    """RFC3339 UTC -> epoch or None (no data or garbage)."""
+    if not raw:
+        return None
+    try:
+        return calendar.timegm(time.strptime(raw[:19], "%Y-%m-%dT%H:%M:%S"))
+    except Exception:
+        return None
 
-    For the service exception: a PR "against an approved issue" if the PR
-    body references at least one issue with a milestone.
+
+def mirror_source(body):
+    """Id of the source card from the footer of an issue mirror, or None."""
+    m = re.search(r"Mirrored from kanban card `?(t_[0-9a-zA-Z]+)`?",
+                  body or "")
+    return m.group(1) if m else None
+
+
+def closed_milestone_last(repo):
+    """Epoch closed_at of the last closed milestone, or None.
+
+    The moment "a milestone became active after a release": a milestone
+    becomes active (the nearest due_on among open ones) when the previous one
+    is closed by a tag. Its issues may have been created long before the 48 h
+    window and their updatedAt may be old too: a change of the active
+    milestone does not touch the issues themselves, so a poll window based
+    on updatedAt did not see them. gh failure or garbage instead of JSON ->
+    None (the old behaviour).
+    """
+    out = run(["gh", "api",
+               "repos/%s/milestones?state=closed&per_page=5" % repo],
+              timeout=60)
+    try:
+        items = json.loads(out or "[]")
+    except Exception:
+        return None
+    best = None
+    for m in items or []:
+        t = _iso_epoch(m.get("closed_at"))
+        if t and (best is None or t > best):
+            best = t
+    return best
+
+
+def issue_milestoned_at(repo, n, title):
+    """Epoch of the last milestoned event of the issue into milestone
+    title, or None. Moving an issue into the active milestone is the moment
+    it enters, not its creation date."""
+    out = run(["gh", "api",
+               "repos/%s/issues/%d/timeline?per_page=100" % (repo, n)],
+              timeout=60)
+    try:
+        events = json.loads(out or "[]")
+    except Exception:
+        return None
+    best = None
+    for e in events or []:
+        if e.get("event") != "milestoned":
+            continue
+        if ((e.get("milestone") or {}).get("title") or "") != title:
+            continue
+        t = _iso_epoch(e.get("created_at"))
+        if t and (best is None or t > best):
+            best = t
+    return best
+
+
+def active_milestone_orphans(slug, repo=None):
+    """Open issues of the active milestone without a live card.
+
+    The same filtering as the issue_executor_poll poll (a live card, an open
+    PR, wait-for-triage), but without the window and without the delivery
+    check: this is the admissible-band backlog for idle_factory_lint. A
+    mirror covers an issue only while its source card is alive: a closed
+    source (done) does not hold the work. Without this the watchdog stayed
+    silent when there were no cards at all, every todo was held by open
+    parents and parked was empty, while the active milestone had open
+    issues.
+    gh failure -> [] (the old behaviour: the lint is silent, the poll
+    remains as the safety net).
+    """
+    repo = repo or board_repo(slug)
+    if not repo:
+        return []
+    states = open_issue_states(repo)
+    if states is None:
+        return []
+    ms = ms_bands(repo=repo)
+    active = ms["active"]
+    if not active or active not in (ms["bands"] or {}):
+        return []
+    db = os.path.join(BOARDS, slug, "kanban.db")
+    if not os.path.exists(db):
+        return []
+    con = sqlite3.connect("file:%s?mode=ro" % db, uri=True, timeout=10)
+    live_ids, live_refs = set(), set()
+    try:
+        for tid, title, body in con.execute(
+                "SELECT id, title, coalesce(body,'') FROM tasks"
+                " WHERE status NOT IN ('done','archived')"):
+            live_ids.add(tid)
+            live_refs |= {int(x) for x in re.findall(
+                r"#(\d+)", (title or "") + " " + (body or ""))}
+    finally:
+        con.close()
+    pr_of_issue = {}
+    for pr_n, iss in ((open_pr_linkage(repo, states) or {})
+                      .get("pr_issues") or {}).items():
+        for i in iss:
+            pr_of_issue.setdefault(i, pr_n)
+    out = []
+    for n in sorted(states):
+        v = states[n]
+        if not isinstance(v, tuple):
+            continue
+        milestone, labels, upd, body = (tuple(v) + (None,) * 4)[:4]
+        if milestone != active or n in live_refs or n in pr_of_issue:
+            continue
+        if "wait-for-triage" in labels:
+            continue
+        # A mirror covers the issue only while its source is alive; a
+        # closed source no longer holds the issue.
+        live_src = mirror_source(body or "")
+        if live_src and live_src in live_ids:
+            continue
+        out.append(n)
+    return out
+
+
+def merged_pr_refs(repo):
+    """Merged PRs of the repo: number -> {"refs": set, "merged_at": epoch}.
+
+    refs are the issue numbers mentioned in the title/body of the PR
+    (Refs/Closes/#N). gh failure or garbage instead of JSON -> {}: the
+    delivered-silence does not trigger and the old path (creating a card)
+    stays, a safety net against false silence when gh is unavailable.
+    """
+    out = run(["gh", "pr", "list", "--repo", repo, "--state", "merged",
+               "--limit", "100",
+               "--json", "number,title,body,mergedAt"], timeout=90)
+    try:
+        parsed = json.loads(out)
+    except Exception:
+        return {}
+    res = {}
+    for p in parsed:
+        num = p.get("number")
+        if num is None:
+            continue
+        res[num] = {
+            "refs": {int(x) for x in re.findall(
+                r"#(\d+)", "%s %s" % (p.get("title") or "",
+                                      p.get("body") or ""))},
+            "merged_at": _iso_epoch(p.get("mergedAt"))}
+    return res
+
+
+def issue_delivered(slug, repo, n, merged=None):
+    """Is the work on the issue already delivered?
+
+    Generators once created three duplicate executor cards within minutes
+    for an issue whose PR was already merged.
+
+    Returns (delivered, detail, release_chore). delivered=True means no
+    executor card may be created (a question to the owner, or silence):
+
+      a) a merged PR referencing #N, merged after the last scope change of
+         the issue (creation + labeled/unlabeled/renamed; milestoned and
+         comments do not count as scope);
+      b) a done executor card with #N whose text names a merged PR (done by
+         itself is not coverage: delivery is a PR).
+
+    No data (gh failure, empty createdAt/events): delivered=False, the old
+    path works. release_chore: the title matches RELEASE_CHORE_RE; such an
+    issue stays open on purpose after the merged prep PR until the tag and
+    waits for the owner's decision.
+    """
+    if merged is None:
+        merged = merged_pr_refs(repo)
+    view = run(["gh", "issue", "view", str(n), "--repo", repo,
+                "--json", "title,createdAt"], timeout=60)
+    try:
+        meta = json.loads(view) or {}
+    except Exception:
+        meta = {}
+    title = (meta.get("title") or "").strip()
+    chore = bool(title) and bool(RELEASE_CHORE_RE.search(title))
+    scope = _iso_epoch(meta.get("createdAt"))
+    events = run(["gh", "api", "repos/%s/issues/%d/events" % (repo, n)],
+                 timeout=60)
+    try:
+        for ev in json.loads(events) or []:
+            if ev.get("event") in SCOPE_EVENT_TYPES:
+                t = _iso_epoch(ev.get("created_at"))
+                if t is not None and (scope is None or t > scope):
+                    scope = t
+    except Exception:
+        pass
+    if scope is not None:
+        for pn in sorted(merged):
+            info = merged[pn]
+            if n not in info["refs"] or info.get("merged_at") is None:
+                continue
+            if info["merged_at"] > scope:
+                return True, ("PR #%d referencing #%d was merged after the"
+                              " last scope change of the issue"
+                              % (pn, n)), chore
+        # b) a done executor card whose text has #N and a reference to a
+        # merged PR (delivery is a PR, not a status)
+        db = os.path.join(BOARDS, slug, "kanban.db")
+        if os.path.exists(db):
+            con = sqlite3.connect("file:%s?mode=ro" % db, uri=True,
+                                  timeout=10)
+            try:
+                rows = list(con.execute(
+                    "SELECT id, title, coalesce(body,'') FROM tasks"
+                    " WHERE status='done' AND assignee='coder'"))
+            finally:
+                con.close()
+            for tid, t_title, t_body in rows:
+                text = "%s %s" % (t_title or "", t_body or "")
+                if not re.search(r"#%d\b" % n, text):
+                    continue
+                for pr_s in re.findall(r"(?i)\bpr\s*#?(\d+)\b", text):
+                    pn = int(pr_s)
+                    info = merged.get(pn) or {}
+                    m_at = info.get("merged_at")
+                    if m_at is None:
+                        out = run(["gh", "pr", "view", str(pn), "--repo",
+                                   repo, "--json", "state,mergedAt"],
+                                  timeout=60)
+                        try:
+                            pm = json.loads(out) or {}
+                        except Exception:
+                            pm = {}
+                        m_at = (_iso_epoch(pm.get("mergedAt"))
+                                if pm.get("state") == "MERGED" else None)
+                    if m_at is not None and m_at > scope:
+                        return True, ("done card %s delivered the work:"
+                                      " PR #%d merged" % (tid, pn)), chore
+    return False, "", chore
+
+
+def open_pr_linkage(repo, states):
+    """Open PRs of the repo: pr_issues (number -> issue numbers of the body
+    that are live in states), pr_milestones (number -> the PR's direct
+    milestone), owner_review_prs (PRs with a formal owner review).
+
+    The binding collection of the former backlog gate lives here. A direct
+    milestone on a PR is a binding (owner decision); a formal owner review
+    (APPROVED/CHANGES_REQUESTED) is the owner's decision to work on the PR,
+    and cards of such a PR are not parked. latestReviews gives the latest
+    review of every reviewer: COMMENTED/DISMISSED from the owner after
+    APPROVED carries no decision (conservative, head semantics).
     """
     out = run(["gh", "pr", "list", "--repo", repo, "--state", "open",
-               "--limit", "100", "--json", "number,body"], timeout=90)
+               "--limit", "100",
+               "--json", "number,body,milestone,latestReviews"], timeout=90)
     try:
         parsed = json.loads(out)
     except Exception:
         return None
     live = set(states)
-    res = {}
+    owner = repo.split("/")[0]
+    res = {"pr_issues": {}, "pr_milestones": {}, "owner_review_prs": []}
     for p in parsed:
         nums = {int(n) for n in re.findall(r"#(\d{1,5})\b",
                                            p.get("body") or "")}
-        res[p.get("number")] = sorted(nums & live)
+        res["pr_issues"][p.get("number")] = sorted(nums & live)
+        ms = (p.get("milestone") or {}).get("title")
+        if ms:
+            res["pr_milestones"][p.get("number")] = ms
+        for rv in p.get("latestReviews") or []:
+            if ((rv.get("author") or {}).get("login") == owner
+                    and rv.get("state") in ("APPROVED", "CHANGES_REQUESTED")):
+                res["owner_review_prs"].append(p.get("number"))
+                break
     return res
 
 
 def admission_gate(slug):
-    """Admission gate (white list).
+    """Admission gate (white list, with return from parking and bands).
 
-    A card is admitted if it (itself or an ancestor by task_links) has a
-    binding to an open issue with a milestone, or it is a service card of an
-    open PR against an approved issue, or it has the infrastructure marker.
+    A card is admitted when it (or an ancestor by task_links) has a binding
+    to an open issue with a milestone, or it is a service card of an open PR
+    against an approved issue, or it carries the infrastructure marker.
     A binding = an "issue-link: #N" comment (survives specify) or a live
     reference #N in title/body. A non-admitted card in ready/todo/review is
-    taken off the queue by the stock schedule with a marker comment
-    (idempotent); running is not preempted, only a finding; blocked is not
-    touched (it already waits for a human). While references are live in the
-    body, the gate stamps an issue-link comment so that specify cannot erase
-    the binding.
+    taken off the queue with the stock schedule and a marker comment
+    (idempotent); running is not preempted, only a finding; blocked is left
+    alone (it already waits for a human). While references are live in the
+    body, the gate stamps an issue-link comment so specify cannot erase the
+    binding.
+
+    Details:
+    - the card's own binding to an unapproved issue dominates the PR service
+      exception (otherwise a PR could hide an issue without a milestone and
+      promote raised the card to ready);
+    - return from parking: when the card's issue gets a milestone, ONE
+      working card per issue is returned (the oldest of the highest
+      priority), duplicates are archived with a reference to it (one live
+      card per PR/issue);
+    - milestone priority bands (computed from GitHub on every run: active
+      80, next 40, other open ones 20);
+    - the admission cache (issues/prs) is written next to the board for the
+      claim guard.
+
+    The former backlog gate rule "outside a milestone" is merged here (it
+    once parked cards from a stale cache). Taken over from it: the
+    exception for ops; a direct milestone on a PR is a binding (owner
+    decision); a PR with a formal owner review is not parked. The return
+    understands both parking markers (admission and backlog); priority bands
+    also apply to PR service cards: the band of their issue's milestone, and
+    the top band "finish up to merge" keeps a priority above the band.
     """
     repo = board_repo(slug)
     if not repo:
@@ -2475,30 +3650,70 @@ def admission_gate(slug):
     states = open_issue_states(repo)
     if states is None:
         return []                     # gh failure: retry in an hour
-    pr_issues = open_pr_issues(repo, states)
-    if pr_issues is None:
+    # Open issues also carry updatedAt and body; old test stubs return a
+    # 2-tuple (milestone, labels): pad to 4, so the open_issue_states
+    # contract is extended without breaking existing stubs.
+    states = {n: (tuple(v) + (None, None, None, None))[:4]
+              if isinstance(v, tuple) else v for n, v in states.items()}
+    pr_link = open_pr_linkage(repo, states)
+    if pr_link is None:
         return []
+    # Bands from GitHub (memoized per process). source != "gh" means the
+    # data is stale or missing: the bands are applied, but a finding is
+    # raised so a release day does not pass silently. The finding has a key
+    # (a keyless 2-tuple crashed consumers that parse findings as
+    # (key, sev, text)).
+    ms = milestone_bands.resolve(repo, fetch=_ms_fetch)
+    ms_bands_map = ms["bands"]
+    # Named active_ms: inside pass 1 a local "active" group of cards would
+    # overwrite any variable named active.
+    active_ms = ms["active"]
+    findings_pre = [] if ms["source"] == "gh" or not states else [(
+        "%s:admission:ms-bands-stale" % slug, 2,
+        "milestone bands are not from GitHub (source=%s, gh failure?): "
+        "applied %s, freshness not guaranteed"
+        % (ms["source"], "from the disk cache" if ms["bands"] else "none"))]
+    # The backlog binding cache is reset when milestones change.
+    backlog_cache_reset_on_milestone_change(states)
     db = os.path.join(BOARDS, slug, "kanban.db")
     if not os.path.exists(db):
         return []
     con = sqlite3.connect("file:%s?mode=ro" % db, uri=True, timeout=10)
     live = list(con.execute(
-        "SELECT id, title, body, status, priority FROM tasks "
-        "WHERE status NOT IN ('done','archived')"))
+        "SELECT id, title, body, status, priority, created_at,"
+        " coalesce(assignee,'') FROM tasks"
+        " WHERE status NOT IN ('done','archived')"))
     done_refs = list(con.execute(
         "SELECT title, body FROM tasks WHERE status = 'done' "
         "AND completed_at > ?", (time.time() - 14 * 24 * 3600,)))
+    titles = {}
+    bodies = {}
+    for tid, t_title, t_body in con.execute(
+            "SELECT id, title, body FROM tasks"):
+        titles[tid] = t_title or ""
+        bodies[tid] = t_body or ""
     comments = {}
     for tid, cbody in con.execute("SELECT task_id, body FROM task_comments"):
         comments.setdefault(tid, []).append(cbody)
+    # The latest scheduled reason per card. "Return from parking" (below)
+    # must look at it: a card parked by the review layer (hold below p50) is
+    # NOT "in the gate's parking", even if an old admission marker remains
+    # in its history. Otherwise the gate returns the card every hour, the
+    # review layer parks it back, and so on in a circle: new scheduled events
+    # and comments without movement.
+    last_sched = {}
+    for tid, payload in con.execute(
+            "SELECT task_id, payload FROM task_events"
+            " WHERE kind = 'scheduled' ORDER BY id"):
+        last_sched[tid] = payload or ""
     parents = {}
+    children = {}
     for pid, cid in con.execute(
             "SELECT parent_id, child_id FROM task_links"):
         parents.setdefault(cid, []).append(pid)
+        children.setdefault(pid, []).append(cid)
     con.close()
     live_ids = {row[0] for row in live}
-    titles = {row[0]: row[1] or "" for row in live}
-    bodies = {row[0]: row[2] or "" for row in live}
 
     def marker_links(tid):
         """Issue numbers from the issue-link comments of the card."""
@@ -2511,53 +3726,216 @@ def admission_gate(slug):
         return out
 
     def ancestors(tid):
+        # archived parents included: admission by ancestor survives the
+        # archiving of a duplicate (otherwise its children lost admission
+        # between runs)
         seen, stack = set(), list(parents.get(tid, []))
         while stack:
             p = stack.pop()
-            if p in seen or p not in live_ids:
+            if p in seen:
                 continue
             seen.add(p)
             stack.extend(parents.get(p, []))
         return seen
 
-    findings = []
+    def descendants(tid):
+        seen, stack = set(), list(children.get(tid, []))
+        while stack:
+            c = stack.pop()
+            if c in seen or c not in live_ids:
+                continue
+            seen.add(c)
+            stack.extend(children.get(c, []))
+        return seen
+
+    def band_of(nums):
+        """Priority band by the milestones of approved issues (max)."""
+        best = None
+        for n in nums:
+            band = ms_bands_map.get(states[n][0])
+            if band is not None and (best is None or band > best):
+                best = band
+        return best
+
+    # --- pass 1: admission decision for every live task -------------------
+    info = {}
     refs_live = set()
+    # Only LIVE cards (queued or in progress), without the done slice: for
+    # "active milestone without an executor" a card closed recently does not
+    # count as coverage
+    live_refs = set()
     for t_title, t_body in done_refs:
         refs_live.update(refs_in({"title": t_title or "",
                                   "body": t_body or ""}))
-    for task_id, title, body, status, prio in live:
+    for task_id, title, body, status, prio, created, assignee in live:
         own = set(refs_in({"title": title or "", "body": body or ""}))
-        nums = own | marker_links(task_id)
+        own_marker = marker_links(task_id)
+        own_all = own | own_marker
+        # refs_live also counts markers (specify erases bodies): an issue with
+        # a live parked card does not count as "without a card"
+        refs_live.update(n for n in own_all if n in states)
+        live_refs.update(n for n in own_all if n in states)
+        nums = set(own_all)
         for anc in ancestors(task_id):
             nums |= marker_links(anc)
             nums |= set(refs_in({"title": titles[anc],
                                  "body": bodies[anc]}))
-        refs_live.update(own)
         issues = {n for n in nums if n in states}
-        prs = {n for n in nums if n in pr_issues}
+        prs = {n for n in nums if n in pr_link["pr_issues"]}
+        infra = any(INFRA_MARKER in cbody
+                    for cbody in comments.get(task_id, ()))
+        own_issues = own_all & set(states)
+        own_approved = sorted(n for n in own_issues if states[n][0])
+        approved = sorted(n for n in issues if states[n][0])
+        # The card's anchor for the band = its own issue: #N in the title,
+        # in an "Issue:" line of the body or in the issue-link marker (the
+        # gate's stamp, not prose), plus the same anchors of ancestors (a
+        # chain inherits the root's issue). Side #N mentions in prose give
+        # no band: a PR of the active milestone mentioned in the prose of a
+        # next-milestone chain once raised that chain to the active band.
+        # One anchor definition for all gates: closed_tail_anchor_refs; the
+        # marker is equivalent to the Issue: line (it states the binding
+        # explicitly).
+        anchor = set(closed_tail_anchor_refs(title or "", body or ""))
+        anchor |= own_marker
+        for anc in ancestors(task_id):
+            anchor |= closed_tail_anchor_refs(titles[anc], bodies[anc])
+            anchor |= marker_links(anc)
+        # PR service exception (extended from the former backlog gate):
+        # Refs/Closes of an approved issue, OR a direct milestone of the PR
+        # (owner decision), OR a formal owner review
+        # (APPROVED/CHANGES_REQUESTED).
+        svc = sorted(n for n in prs
+                     if any(states[i][0] for i in pr_link["pr_issues"][n])
+                     or pr_link["pr_milestones"].get(n)
+                     or n in pr_link["owner_review_prs"])
+        if infra:
+            admitted, why, band = True, None, None
+        elif (assignee or "") == "ops":
+            # from the former backlog gate: ops cards are not parked
+            admitted, why, band = True, None, None
+        elif own_issues and not own_approved:
+            # the card's own binding to an unapproved issue dominates the
+            # service exception of an open PR
+            admitted = False
+            band = None
+            why = ", ".join("#%d without a milestone" % n
+                            for n in sorted(own_issues))
+        elif approved or svc:
+            admitted, why = True, None
+            # band only from anchor issues (title or "Issue:" line), not
+            # from any #N in the prose of the body
+            band = band_of(n for n in approved if n in anchor)
+            # a PR service card gets the band of its issue's milestone (and
+            # of the PR's direct milestone), not lower
+            for n in svc:
+                if n not in anchor:
+                    # a side PR from prose gives no band
+                    continue
+                for i in pr_link["pr_issues"][n]:
+                    if states[i][0]:
+                        b = ms_bands_map.get(states[i][0])
+                        if b and (band is None or b > band):
+                            band = b
+                b = ms_bands_map.get(
+                    pr_link["pr_milestones"].get(n))
+                if b and (band is None or b > band):
+                    band = b
+        else:
+            admitted, band = False, None
+            if issues:
+                why = ", ".join("#%d without a milestone" % n
+                                for n in sorted(issues))
+            elif prs:
+                why = ", ".join("PR #%d against an unapproved issue" % n
+                                for n in sorted(prs))
+            else:
+                why = NO_LINK_WHY
+        info[task_id] = {
+            "status": status, "prio": prio, "created": created or 0,
+            "own_issues": own_issues, "own_approved": set(own_approved),
+            "admitted": admitted, "why": why, "band": band,
+            "svc": bool(svc), "assignee": assignee or "",
+            "self_admitted": bool(own_approved or svc or infra),
+        }
+
+    # the subtree of an unapproved root is not raised (promote once raised
+    # such a child to ready between two hourly gate runs)
+    for task_id in list(info):
+        root = info[task_id]
+        if root["admitted"] or root["status"] not in ADMISSION_WORK_STATUSES:
+            continue
+        for desc in descendants(task_id):
+            d = info.get(desc)
+            if (not d or d["admitted"] or d["self_admitted"]
+                    or d["status"] not in ADMISSION_WORK_STATUSES
+                    or d["why"] != NO_LINK_WHY):
+                continue
+            d["why"] = ("subtree of the unapproved root %s: %s"
+                        % (task_id, root["why"]))
+
+    # --- pass 2: actions ---------------------------------------------------
+    findings = []
+    findings.extend(findings_pre)
+    for task_id, title, body, status, prio, created, assignee in live:
+        d = info[task_id]
         if any(INFRA_MARKER in cbody for cbody in comments.get(task_id, ())):
             continue
         # a stable binding: stamp issue-link while references are live in the
         # body (blocked is not stamped: the card is already with a human)
-        stamp = own & set(states)
+        stamp = set(refs_in({"title": title or "", "body": body or ""})) \
+            & set(states)
         if stamp and status != "blocked" \
                 and not (marker_links(task_id) & stamp):
             run([HERMES, "kanban", "--board", slug, "comment", task_id,
                  ISSUE_LINK_MARKER + " %s (automatic from the body, kept by "
                  "the admission gate, because specify and the decomposer rewrite the body)"
                  % " ".join("#%d" % n for n in sorted(stamp))], timeout=90)
-        approved = sorted(n for n in issues if states[n][0])
-        svc = sorted(n for n in prs
-                     if any(states[i][0] for i in pr_issues[n]))
-        if approved or svc:
+        if d["admitted"]:
+            # a card without an assignee is never started by the dispatcher
+            # (skipped_unassigned; owner review cards once waited 30 hours):
+            # report it on every run while the assignee is empty
+            if (not d["assignee"]
+                    and status in ("ready", "todo", "review")):
+                findings.append((
+                    "%s:admission:unassigned:%s" % (slug, task_id), 1, (
+                        "    %s (%s, p%s) has no assignee: the dispatcher does"
+                        " not start it. Assign: kanban edit %s"
+                        " --assignee coder/architect as appropriate"
+                        % (task_id, status, prio, task_id))))
+            # Milestone priority band (active 80, next 40). It also applies
+            # to service cards (review, WCFY, rebases): the band of their
+            # issue's milestone; the top band "finish up to merge" keeps a
+            # priority above the band (active = 80+). A merge-unblocker is
+            # left alone: its p100 is the last raise before the merge, above
+            # the bands by design.
+            # It applies to running too: a card of a next-milestone issue
+            # created by a webhook with p80 can be claimed within seconds,
+            # before the hourly gate run, and would live with the wrong
+            # priority to its end. Editing a running card's priority does
+            # not preempt the run (the dispatcher reads priority on the next
+            # claim).
+            if (d["band"] and status in ("ready", "todo", "review",
+                                         "scheduled", "running")
+                    and prio != d["band"]
+                    and not any(MERGE_UNBLOCKER_MARKER in cbody
+                                for cbody in comments.get(task_id, ()))):
+                if d["svc"] and d["band"] == milestone_bands.ACTIVE_BAND:
+                    target = max(prio, d["band"])
+                else:
+                    target = d["band"]
+                if target != prio:
+                    run([HERMES, "kanban", "--board", slug, "edit", task_id,
+                         "--priority", str(target)], timeout=90)
+                    findings.append((
+                        "%s:admission:band:%s" % (slug, task_id), 2, (
+                            "    %s milestone priority band:"
+                            " p%s -> p%s%s"
+                            % (task_id, prio, target,
+                               " (service card, top band)" if
+                               target != d["band"] else ""))))
             continue
-        if issues:
-            why = ", ".join("#%d without a milestone" % n for n in sorted(issues))
-        elif prs:
-            why = ", ".join("PR #%d against an unapproved issue" % n
-                            for n in sorted(prs))
-        else:
-            why = "no binding to an issue of the repository"
+        why = d["why"]
         if status == "running":
             findings.append(("%s:admission:%s" % (slug, task_id), 2, (
                 "    %s IN PROGRESS, but not admitted by the white list (%s): "
@@ -2583,25 +3961,551 @@ def admission_gate(slug):
         findings.append(("%s:admission:%s" % (slug, task_id), 2, (
             "    %s (%s, p%s) taken off the queue by the admission white list: %s"
             % (task_id, status, prio, why))))
-    approved = [n for n, (milestone, labels) in sorted(states.items())
-                if "hermes" in labels
-                and "wait-for-triage" not in labels
-                and milestone
-                and n not in refs_live]
+
+    # --- return from parking when an issue is approved ---------------------
+    # One live card per PR/issue: the working card is returned, duplicates
+    # are archived with a reference to it.
+    # Links of one task_links chain are NOT duplicates. The gate once
+    # archived the coder card that wrote a fix and kept the ops card that
+    # closes the issue as the working one: review and the stability check
+    # waited for a result that would never come. A duplicate without links
+    # to the group is archived; the working card is the one that produces
+    # the artifact.
+    # Both parking markers are understood (the admission gate and the
+    # former backlog gate): otherwise backlog parkings stay in scheduled
+    # without a return.
+    def parked_marker(tid):
+        return any(ADMISSION_MARKER in cbody
+                   or BACKLOG_PARK_MARKER in cbody
+                   for cbody in comments.get(tid, ()))
+
+    parked = [tid for tid, d in info.items()
+              if d["status"] == "scheduled" and d["admitted"]
+              and parked_marker(tid)
+              and REVIEW_PARK_MARKER not in last_sched.get(tid, "")]
+
+    def depth(tid, seen=frozenset()):
+        ps = [p for p in parents.get(tid, []) if p in live_ids
+              and p not in seen]
+        return 1 + max((depth(p, seen | {tid}) for p in ps), default=0)
+
+    def live_kids(tid, exclude):
+        return [c for c in children.get(tid, [])
+                if c in info and c not in exclude]
+
+    def archive_dup(tid, issue, keeper, exclude, archived_now):
+        # children stay alive: separate cards with their own status.
+        # Archiving a duplicate used to break chains: live children stayed
+        # with a parent in the archive and got the watchdog's I6 block
+        # "parent archived, assign a successor". Now the children are
+        # relinked to the working card (link keeper kid). A child that is
+        # itself the working card is unlinked from the duplicate: a link
+        # would point the card at itself, and its prerequisite is already in
+        # it.
+        kids = live_kids(tid, exclude)
+        run([HERMES, "kanban", "--board", slug, "comment", tid,
+             ADMISSION_MARKER + " duplicate of issue #%d, working card %s "
+             "(one live card per PR/issue)%s"
+             % (issue, keeper,
+                "; children stay alive: " + ",".join(kids) if kids else "")],
+            timeout=90)
+        run([HERMES, "kanban", "--board", slug, "archive", tid], timeout=90)
+        for kid in kids:
+            if kid == keeper:
+                run([HERMES, "kanban", "--board", slug, "unlink", tid, kid],
+                    timeout=90)
+            else:
+                run([HERMES, "kanban", "--board", slug, "link", keeper, kid],
+                    timeout=90)
+        archived_now.add(tid)
+        findings.append(("%s:admission:dup:%s" % (slug, tid), 2, (
+            "    %s archived as a duplicate of issue #%d, working %s%s"
+            % (tid, issue, keeper,
+               "; children relinked: " + ",".join(kids) if kids else ""))))
+
+    def chain_peers(tid, peers):
+        """Members of the group/active linked to tid by a task_links edge.
+
+        A card linked as parent/child to another card of the same issue is a
+        link of a decomposition chain (coder -> review -> stability), not a
+        duplicate. Without this a fix card was archived while its review
+        children were alive."""
+        ids = set(peers)
+        return ids & (set(parents.get(tid, [])) | set(children.get(tid, [])))
+
+    KEEPER_ROLE_ORDER = ("coder", "architect", "tester", "reviewer", "ops")
+
+    def pick_keeper(cands):
+        """The working card = the one that produces the artifact.
+
+        Picking sorted(active)[0] (the lexicographically smallest id) used to
+        make an ops card that closes the issue, or a visual-delta card, the
+        working one. Role order: code > architecture > testing > review >
+        ops (ops posts a verdict, it produces no artifact). visual-delta
+        (capturing a delta for the issue, not work on it) is never the
+        working card."""
+        def key(t):
+            role = (info[t].get("assignee") or "").lower()
+            ro = (KEEPER_ROLE_ORDER.index(role)
+                  if role in KEEPER_ROLE_ORDER else len(KEEPER_ROLE_ORDER))
+            return (1 if "visual-delta" in (titles.get(t) or "").lower()
+                    else 0, ro, t)
+        return min(cands, key=key)
+
+    def return_link(tid, issue):
+        """Return a chain link from parking: not a duplicate, separate work."""
+        run([HERMES, "kanban", "--board", slug, "unblock", tid,
+             "--reason", ADMISSION_MARKER + " return from parking: issue"
+             " #%d approved, the card is linked by task_links to other"
+             " cards of this issue (a chain link, not a duplicate)"
+             % issue], timeout=90)
+        band = info[tid]["band"]
+        if band and info[tid]["prio"] != band:
+            run([HERMES, "kanban", "--board", slug, "edit", tid,
+                 "--priority", str(band)], timeout=90)
+        findings.append(("%s:admission:chain-return:%s" % (slug, tid), 1, (
+            "    %s returned from parking as a chain link of issue #%d"
+            " (not a duplicate), band %s" % (tid, issue, band or "-"))))
+
+    groups = {}
+    for tid in parked:
+        for n in info[tid]["own_approved"]:
+            groups.setdefault(n, []).append(tid)
+    archived_now = set()
+    for n, members in sorted(groups.items()):
+        active = [tid for tid, d in info.items()
+                  if d["status"] in ("ready", "todo", "review", "running")
+                  and n in d["own_issues"]]
+        # a chain link (task_links to another group member or to a live
+        # card of the same issue) is not archived as a duplicate
+        chain = {tid for tid in members
+                 if chain_peers(tid, members) or chain_peers(tid, active)}
+        if active:
+            keeper = pick_keeper(active)
+            for tid in sorted(members, key=lambda t: -depth(t)):
+                if tid in chain:
+                    return_link(tid, n)
+                else:
+                    archive_dup(tid, n, keeper,
+                                archived_now, archived_now)
+            continue
+        # working card: highest priority, then the oldest, then the role
+        # that produces the artifact
+        maxp = max(info[t]["prio"] for t in members)
+        oldest = min(info[t]["created"] for t in members
+                     if info[t]["prio"] == maxp)
+        keeper = pick_keeper([t for t in members
+                              if info[t]["prio"] == maxp
+                              and info[t]["created"] == oldest])
+        run([HERMES, "kanban", "--board", slug, "unblock", keeper,
+             "--reason", ADMISSION_MARKER + " return from parking: "
+             "issue #%d approved by the owner (milestone)" % n], timeout=90)
+        band = info[keeper]["band"]
+        if band and info[keeper]["prio"] != band:
+            run([HERMES, "kanban", "--board", slug, "edit", keeper,
+                 "--priority", str(band)], timeout=90)
+        findings.append(("%s:admission:return:%d" % (slug, n), 1, (
+            "    issue #%d approved: %s returned from parking (p%s), "
+            "band %s" % (n, keeper, band or info[keeper]["prio"],
+                         "active=80" if band == 80 else
+                         ("next=40" if band == 40 else "-")))))
+        ordered = sorted(members, key=lambda t: -depth(t))
+        # keeper is not excluded from the duplicate's children: a
+        # duplicate->keeper link must be unlinked
+        for tid in ordered:
+            if tid == keeper:
+                continue
+            if tid in chain:
+                return_link(tid, n)
+            else:
+                archive_dup(tid, n, keeper, archived_now, archived_now)
+
+    # a parked card admitted as a service card (the PR got a direct
+    # milestone or a formal owner review, no issue references): the former
+    # backlog raise by owner review, now one mechanism
+    grouped = {tid for members in groups.values() for tid in members}
+    for tid in parked:
+        if tid in grouped:
+            continue
+        run([HERMES, "kanban", "--board", slug, "unblock", tid,
+             "--reason", ADMISSION_MARKER + " return from parking: the PR"
+             " got a direct milestone or a formal owner review"
+             " (service admission)"],
+            timeout=90)
+        band = info[tid]["band"]
+        if band and info[tid]["prio"] != band \
+                and not any(MERGE_UNBLOCKER_MARKER in cbody
+                            for cbody in comments.get(tid, ())):
+            run([HERMES, "kanban", "--board", slug, "edit", tid,
+                 "--priority", str(band)], timeout=90)
+        findings.append(("%s:admission:return-svc:%s" % (slug, tid), 1, (
+            "    %s returned from parking: PR service admission (milestone/"
+            "owner review), band %s"
+            % (tid, band or "-"))))
+
+    # --- live duplicates of one issue and producing role ------------------
+    # Three coder cards for one patch once appeared: a reviewer created one
+    # with a wrong link direction, unlink is forbidden from a worker, so it
+    # created a second one, and a manual restore added a third, which the
+    # dispatcher started. The gates did not see it: the dedup above scans
+    # only parked cards; gen_admission is admission by issue/milestone
+    # BEFORE create, not a duplicate check; chain_peers tells links apart by
+    # coder->review edges, which both code siblings of one issue have.
+    # There is no creation idempotency by the key "issue+role": the keys of
+    # the two cards differ and both pass (the idempotency gate catches only
+    # a repeated key or a missing one). A live duplicate = the same open
+    # issue, the same producing role, an active status and NO direct
+    # task_links edge between the copies. Two running at once are not
+    # broken automatically: a human decides.
+    by_issue_role = {}
+    for tid, d in info.items():
+        if d["status"] not in ("ready", "todo", "review", "running"):
+            continue
+        role = (d.get("assignee") or "").lower()
+        if role not in KEEPER_ROLE_ORDER[:3]:
+            continue
+        for n in d["own_issues"]:
+            by_issue_role.setdefault((n, role), []).append(tid)
+    for (n, role), cands in sorted(by_issue_role.items()):
+        cands = [t for t in cands if t not in archived_now]
+        if len(cands) < 2:
+            continue
+        # a direct edge between copies = links of one chain, not duplicates
+        if any(q != t and (q in parents.get(t, [])
+                           or q in children.get(t, []))
+               for t in cands for q in cands):
+            continue
+        # a shared live child (a shared review/stability link) = the copies
+        # feed one chain. Different unlinked cards of one issue and role can
+        # be legitimately different work (for example a keepalive card and
+        # a working card): they are left alone.
+        if not any(set(children.get(t, [])) & set(children.get(q, []))
+                   for t in cands for q in cands if t != q):
+            continue
+        running = [t for t in cands if info[t]["status"] == "running"]
+        if len(running) > 1:
+            findings.append((
+                "%s:admission:live-dup:%d:%s" % (slug, n, role), 1, (
+                    "    issue #%d: more than one running %s (%s): a live"
+                    " executor duplicate, a human decides whether to break"
+                    " active runs" % (n, role, ",".join(sorted(running))))))
+            continue
+        keeper = (running[0] if running
+                  else pick_keeper(sorted(
+                      cands, key=lambda t: (-info[t]["prio"],
+                                            info[t]["created"]))))
+        for tid in cands:
+            if tid != keeper and tid not in archived_now:
+                archive_dup(tid, n, keeper, archived_now, archived_now)
+        findings.append((
+            "%s:admission:live-dup:%d:%s" % (slug, n, role), 2, (
+                "    issue #%d: live duplicate of role %s archived, working %s"
+                % (n, role, keeper))))
+
+    # --- admission cache for the claim guard ------------------------------
+    # pr_issues/pr_milestones are included so service card generators
+    # create cards right away in the band of their issue's milestone
+    # (svc_priority), without relying on the gate's correction.
+    try:
+        cache = {
+            "updated": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "issues": {str(n): states[n][0] for n in states
+                       if states[n][0]},
+            "prs": sorted(n for n in pr_link["pr_issues"]
+                          if any(states[i][0] for i in pr_link["pr_issues"][n])
+                          or pr_link["pr_milestones"].get(n)
+                          or n in pr_link["owner_review_prs"]),
+            "pr_issues": {str(n): pr_link["pr_issues"][n]
+                          for n in pr_link["pr_issues"]},
+            "pr_milestones": {str(n): ms for n, ms
+                              in pr_link["pr_milestones"].items()},
+        }
+        with open(os.path.join(BOARDS, slug, ADMISSION_CACHE_NAME),
+                  "w") as fh:
+            json.dump(cache, fh, ensure_ascii=False, indent=1)
+    except Exception:
+        pass
+
+    # Delivered work (a merged PR after the last scope change, or a done
+    # card with a merged PR) needs no executor. The check is expensive
+    # (gh view + events): cached per run, computed only for issues of the
+    # active milestone.
+    merged = None
+    delivered_cache = {}
+
+    def _delivered(n):
+        nonlocal merged
+        if merged is None:
+            merged = merged_pr_refs(repo)
+        if n not in delivered_cache:
+            delivered_cache[n] = issue_delivered(slug, repo, n,
+                                                 merged=merged)
+        return delivered_cache[n]
+
+    approved = []
+    for n, (milestone, labels, *_rest) in sorted(states.items()):
+        if "wait-for-triage" in labels or not milestone or n in refs_live:
+            continue
+        if active_ms is not None and milestone == active_ms \
+                and _delivered(n)[0]:
+            continue    # work delivered: question or silence below
+        approved.append(n)
     if approved:
         findings.append(("%s:admission:unclaimed:%s" % (
             slug, ",".join(str(n) for n in approved)), 1, (
-            "    Approved issues without a card: %s. Create a card "
-            "(the owner assigned a milestone)."
+            "    Approved issues without a card: %s. Create a card"
+            " with an assignee (--assignee coder/architect as"
+            " appropriate): without one the dispatcher does not start it"
+            " (the owner assigned a milestone)."
             % ", ".join("#%d" % n for n in approved))))
+
+    # --- active milestone without a LIVE card for longer than 24 h ---------
+    # The unclaimed check above counts done cards of the last 14 days as
+    # coverage, and wait-for-triage issues are excluded entirely, so an
+    # active-milestone issue could stay silent. Here coverage = live cards
+    # only; age = updatedAt of the issue itself (no time data -> skip, not a
+    # false signal). An issue with an open PR (Refs/Closes in the PR body)
+    # is not "without an executor": the work is in flight.
+    # A release blocker (label bug or an owner mark OWNER_MARK_RE) does not
+    # wait a day: the threshold is one watchdog cycle
+    # (NO_EXECUTOR_BLOCKER_MIN_AGE_S), key blk-no-executor, class owner
+    # (a push to the owner, REPEAT_AFTER holds the repeat for a day).
+    if active_ms is not None and ms["bands"].get(active_ms):
+        pr_of_issue = {}
+        for pr_n, iss in (pr_link.get("pr_issues") or {}).items():
+            for i in iss:
+                pr_of_issue.setdefault(i, pr_n)
+        merged = None
+        for n in sorted(states):
+            milestone, labels, upd, body = states[n]
+            if milestone != active_ms or n in live_refs:
+                continue
+            if n in pr_of_issue:
+                continue
+            triage = "wait-for-triage" in labels
+            blocker = (not triage and ("bug" in labels
+                       or bool(OWNER_MARK_RE.search(body or ""))))
+            min_age = (NO_EXECUTOR_BLOCKER_MIN_AGE_S if blocker
+                       else NO_EXECUTOR_MIN_AGE_S)
+            if not upd or time.time() - upd < min_age:
+                continue
+            age_h = int((time.time() - upd) // 3600)
+            # Work delivered -> no executor card. A release chore after the
+            # merged prep PR stays open on purpose until the tag: silence
+            # until the owner decides. Other delivered work -> a question to
+            # the owner "what remains".
+            delivered, d_detail, chore = _delivered(n)
+            if delivered:
+                if chore:
+                    continue
+                findings.append((
+                    "%s:admission:delivered-open:%d" % (slug, n), 1, (
+                        "    issue #%d is open, but its work is delivered"
+                        " (%s). Question to the owner: what remains for #%d?"
+                        " Do not create an executor card until the owner"
+                        " names the remainder."
+                        % (n, d_detail, n))))
+                continue
+            if "wait-for-triage" in labels:
+                findings.append((
+                    "%s:admission:triage-stuck:%d" % (slug, n), 1, (
+                        "    issue #%d (active %s) has been in the owner's"
+                        " triage for %d h without a live card: the owner"
+                        " assigned a milestone, but wait-for-triage remains."
+                        " Remove the label with a decision (do it / not"
+                        " planned) or close the issue."
+                        % (n, active_ms, age_h))))
+            elif blocker:
+                findings.append((
+                    "%s:admission:blk-no-executor:%d" % (slug, n), 1, (
+                        "    BLOCKER: issue #%d of the active milestone %s"
+                        " (label bug or an owner mark) without a live"
+                        " card for %d h, the 5-minute poll did not cover it."
+                        " Create an executor card with band %d"
+                        " (helper: scripts/milestone_bands.py --repo"
+                        " <repo> --issue %d); if the poll is stuck, check"
+                        " the issue-executor-poll cron."
+                        % (n, active_ms, age_h,
+                           ms["bands"][active_ms], n))))
+            else:
+                findings.append((
+                    "%s:admission:no-executor:%d" % (slug, n), 1, (
+                        "    issue #%d of the active milestone %s without a"
+                        " live card for %d h (last issue activity)."
+                        " Create an executor card with band %d"
+                        " (helper: scripts/milestone_bands.py --repo"
+                        " <repo> --issue %d)."
+                        % (n, active_ms, age_h,
+                           ms["bands"][active_ms], n))))
     return findings
 
 
-def review_layer_check(slug):
-    """Review layer: auto-arm reviewer cards, park ready cards below p50.
+def issue_executor_poll(dry_run=False):
+    """An executor card for an issue of the active milestone within one poll
+    cycle (a 5-minute cron), not a day later through the no-executor
+    finding and not by the owner's hand.
 
-    Returns findings; performs the actions immediately (like idempotency_gate).
-    gh errors on individual PRs are skipped silently: the hourly run retries.
+    Why: an urgent bug issue of the active milestone stood an hour without
+    an executor. The issues event does not arrive (the webhook subscription
+    listens only to issue_comment/pull_request_review), and the admission
+    no-executor finding has a 24 h threshold, so the owner had to comment
+    "start now".
+
+    Contract (native-or-live rule): before creating, native_or_live by the
+    key issue-<N>; a live card mentioning #N, an open PR, wait-for-triage,
+    a bot mirror ("Mirrored from kanban card" or a bot author) and an age
+    above ISSUE_POLL_WINDOW_S cover or filter the issue. Priority = the
+    band of the active milestone (milestone_bands), the assignee is
+    mandatory, idempotency-key owner-issue-<N> is shared with the webhook
+    path. A dry run (dry_run) prints the plan and creates nothing.
+
+    Returns [(slug, issue, card_id_or_None)] of what was created (or
+    planned in dry_run).
+    """
+    if board_native_guard is None:
+        return []                     # guard unavailable: creation is forbidden
+    plan = []
+    now = time.time()
+    for slug in board_slugs():
+        repo = board_repo(slug)
+        if not repo:
+            continue
+        states = open_issue_states(repo)
+        if states is None:
+            continue
+        states = {n: (tuple(v) + (None, None, None, None))[:4]
+                  if isinstance(v, tuple) else v
+                  for n, v in states.items()}
+        ms = milestone_bands.resolve(repo, fetch=_ms_fetch)
+        active = ms["active"]
+        band = (ms["bands"] or {}).get(active) if active else None
+        if not band:
+            continue
+        db = os.path.join(BOARDS, slug, "kanban.db")
+        if not os.path.exists(db):
+            continue
+        con = sqlite3.connect("file:%s?mode=ro" % db, uri=True, timeout=10)
+        live_refs = set()
+        live_ids = set()
+        try:
+            for tid, title, body in con.execute(
+                    "SELECT id, title, coalesce(body,'') FROM tasks"
+                    " WHERE status NOT IN ('done','archived')"):
+                live_ids.add(tid)
+                live_refs |= {int(x) for x in re.findall(
+                    r"#(\d+)", (title or "") + " " + (body or ""))}
+        finally:
+            con.close()
+        pr_link = open_pr_linkage(repo, states) or {}
+        pr_of_issue = {}
+        for pr_n, iss in (pr_link.get("pr_issues") or {}).items():
+            for i in iss:
+                pr_of_issue.setdefault(i, pr_n)
+        merged = None
+        active_since = False       # False = not asked yet; None = no data
+        for n in sorted(states):
+            milestone, labels, upd, body = states[n]
+            if milestone != active or n in live_refs:
+                continue
+            if n in pr_of_issue or "wait-for-triage" in labels:
+                continue
+            # A mirror suppresses the issue only while its source card is
+            # alive: a mirror footer of a long-closed card used to silence
+            # the poll on a critical issue of the active milestone.
+            src = mirror_source(body or "")
+            if src and src in live_ids:
+                continue
+            # The window is also counted from the moment the issue ENTERED
+            # the active milestone, not only from updatedAt. After a release
+            # the next milestone becomes active while its issues may be
+            # months old: switching the active milestone does not touch the
+            # issues themselves, so a window on updatedAt was blind.
+            # Entering = a milestoned move of the issue OR the activation of
+            # the milestone itself (closed_at of the previous one, "the
+            # milestone became active after the release").
+            fresh = upd and now - upd <= ISSUE_POLL_WINDOW_S
+            if not fresh:
+                if active_since is False:
+                    active_since = closed_milestone_last(repo)
+                if active_since and now - active_since <= ISSUE_POLL_WINDOW_S:
+                    entered = active_since   # activation is fresher than any move
+                else:
+                    entered = issue_milestoned_at(repo, n, active) or 0
+                    if active_since:
+                        entered = max(entered, active_since)
+                if not entered or now - entered > ISSUE_POLL_WINDOW_S:
+                    continue
+            # Delivered work gets no card: a release-prep PR was merged
+            # while its issue stayed open until the tag, and the poll created
+            # duplicates twice within an hour. A release chore and anything
+            # covered by a merged PR stays silent; the owner names what is
+            # left.
+            if merged is None:
+                merged = merged_pr_refs(repo)
+            if issue_delivered(slug, repo, n, merged=merged)[0]:
+                continue
+            covered, note = board_native_guard.native_or_live(
+                "issue-%d" % n,
+                live_keys=["issue-%d" % r for r in sorted(live_refs)],
+                native_checked=(board_native_guard.NATIVE_TASK_LINKS,),
+                why="the owner opened/moved issue #%d into the active"
+                    " milestone %s, there is no executor"
+                    % (n, active))
+            if covered:
+                continue
+            view = run(["gh", "issue", "view", str(n), "--repo", repo,
+                        "--json", "title,body,author"], timeout=60)
+            try:
+                meta = json.loads(view) or {}
+            except Exception:
+                meta = {}
+            author = ((meta.get("author") or {}).get("login") or "")
+            if author in tuple(cfg_list(
+                    "FACTORY_BOT_LOGINS",
+                    cfg_list("FACTORY_REVIEWER_LOGINS", ()))) \
+                    or author.endswith("[bot]"):
+                continue
+            title = (meta.get("title") or ("issue #%d" % n)).strip()
+            card_body = (
+                "Issue: #%d\n\n%s\n\nSource: an issue of the active milestone"
+                " %s without an executor card (5-minute poll)."
+                " Author: %s.\n\n"
+                "Handing over to review: kanban_request_review only with an"
+                " explicit reviewer=reviewer; BEFORE the call check for a live"
+                " reviewer card on your exact head (key"
+                " reviewer-pr<N>-<head7> in `hermes kanban ls`): if such a"
+                " card is already alive, do not request review, finish the run"
+                " with a comment linking to it. There are never two review"
+                " sessions of one head: the later one is retired by the"
+                " watchdog."
+                % (n, (meta.get("body") or body or "").strip()[:2000],
+                   active, author or "unknown"))
+            if dry_run:
+                plan.append((slug, n, None))
+                print("[dry-run %s] issue #%d -> executor card"
+                      " (assignee coder, p%d, key owner-issue-%d)"
+                      % (slug, n, band, n))
+                continue
+            card = _kanban_create(
+                slug, "%s (issue #%d)" % (title, n), card_body,
+                "coder", band, "owner-issue-%d" % n, guard=note)
+            if card:
+                plan.append((slug, n, card))
+    return plan
+
+
+def review_layer_check(slug):
+    """Review layer: only the rework arm for a change-request verdict.
+
+    Scheme "one PR = one card" (owner decision): the auto-arm of reviewer
+    cards per head, the paired arm and the WCFY arm per head were removed.
+    Review lives in the stock review lane of the executor card
+    (kanban_request_review with reviewer=reviewer), and the executor writes
+    the WCFY with the same card.
+
+    Returns findings; actions are performed right away (like
+    idempotency_gate). gh errors on individual PRs are skipped silently:
+    the hourly run retries.
     """
     repo = board_repo(slug)
     if not repo:
@@ -2614,10 +4518,6 @@ def review_layer_check(slug):
         numbers = [p["number"] for p in parsed if not p.get("isDraft")]
     except Exception:
         return []
-    # Pilot branches are never armed (see PILOT_EXEMPT_BRANCHES).
-    pilot_numbers = {p["number"] for p in parsed
-                     if p.get("headRefName") in PILOT_EXEMPT_BRANCHES
-                     and not p.get("isDraft")}
     # A draft PR is not armed. The numbers filter above prevents a NEW card
     # for a draft; here we retire cards that already exist, because the
     # owner can turn a PR into a draft after it was armed.
@@ -2644,160 +4544,125 @@ def review_layer_check(slug):
             "    %s (review of PR #%s) archived: PR is a draft"
             % (tid, m.group(1)))))
     # A done card carrying the key of this head is not in `live`, yet a create
-    # with the same key is DEDUPLICATED against it (dedup catches any
-    # non-archived card, including done): no new card would appear, the PR
-    # would stay without a verdict and the watchdog would be silent. So the
-    # keyed family is collected from done cards too.
+    # with the same key is DEDUPLICATED against it (dedup matches any
+    # non-archived card, done included): no new card appears, the PR is again
+    # without a verdict and the watchdog stays silent. So the keyed family is
+    # collected from done cards as well.
     done_keyed = list(con.execute(
         "SELECT id, idempotency_key FROM tasks WHERE status = 'done' "
         "AND (idempotency_key LIKE 'reviewer-pr%' "
-        "     OR idempotency_key LIKE 'coder-pr%-wcfy-%')"))
-    # In the normal review cycle the executor card often does NOT name the PR
-    # in its body: the number and head appear only in the handoff comment and
-    # in the summary of the review runs. To check whether a PR is already in
-    # the normal cycle, look at the latest comments, the review-cycle events
-    # and the run summaries of live executor cards.
-    cycle_refs = {}
-    for (t_id,) in con.execute(
-            "SELECT id FROM tasks WHERE status IN "
-            "('running','ready','review')"):
-        parts = []
-        parts += [r[0] or "" for r in con.execute(
-            "SELECT body FROM task_comments WHERE task_id=? "
-            "ORDER BY id DESC LIMIT 3", (t_id,))]
-        parts += [r[0] or "" for r in con.execute(
-            "SELECT payload FROM task_events WHERE task_id=? AND kind IN "
-            "('review_requested','changes_requested') "
-            "ORDER BY id DESC LIMIT 3", (t_id,))]
-        parts += [r[0] or "" for r in con.execute(
-            "SELECT summary FROM task_runs WHERE task_id=? "
-            "AND summary IS NOT NULL ORDER BY id DESC LIMIT 2", (t_id,))]
-        cycle_refs[t_id] = " ".join(parts)
+        "     OR idempotency_key LIKE 'coder-pr%-wcfy-%' "
+        # the rework family for a change request (the CR rework generator)
+        "     OR idempotency_key LIKE 'coder-pr%-rework-%')"))
+    # The live-duplicate dedup of the admission gate extended to reviewers.
+    # That dedup catches only producing roles by the issue+role key; reviewing
+    # one head twice is the same live duplicate, and the reviewer is the most
+    # expensive role (max effort). An open PR has one head, so the group is
+    # PR+head: the family key reviewer-pr<N>-<head7> (including the -rN/-pN
+    # suffixes) or PR#+head from the title/body of a manual card; a card
+    # without a head (a planned "review the final head once the rework is
+    # done") joins any group of its PR. Exceptions: two paired arms -pN with
+    # DIFFERENT suffixes (the twin era) are legitimate; a duplicate with live
+    # children is not archived (that would break a chain), only a finding
+    # for a human.
+    def _rev_head_of(t):
+        m = re.fullmatch(
+            r"reviewer-pr(\d+)-([0-9a-f]{7})((-r|-p)\d+)?", t[6] or "")
+        if m:
+            return int(m.group(1)), m.group(2), m.group(3) or ""
+        mp = re.search(r"PR #(\d+)", "%s %s" % (t[1] or "", t[2] or ""))
+        if not mp:
+            return None
+        mh = (re.search(r"head[ :]*`?([0-9a-f]{7,40})",
+                        t[1] or "", re.I)
+              or re.search(r"\bhead[ :]*`?([0-9a-f]{7,40})",
+                           (t[1] or "") + " " + (t[2] or ""), re.I)
+              or re.search(r"\b([0-9a-f]{40})\b", t[2] or ""))
+        return int(mp.group(1)), ((mh.group(1) if mh else "")[:7]
+                                  or None), "manual"
+
+    live_ids = {t[0] for t in live}
+    rev_keyed = {}
+    rev_headless = {}
+    for t in live:
+        if t[3] != "reviewer" or t[4] not in (
+                "ready", "todo", "running", "review"):
+            continue
+        g = _rev_head_of(t)
+        if not g:
+            continue
+        if g[1]:
+            rev_keyed.setdefault((g[0], g[1]), []).append((t, g[2]))
+        else:
+            rev_headless.setdefault(g[0], []).append(t)
+    rev_dup_groups = dict(rev_keyed)
+    for gk, members in list(rev_dup_groups.items()):
+        members += [(t, "manual") for t in rev_headless.get(gk[0], [])]
+        rev_dup_groups[gk] = members
+    for n, hl in rev_headless.items():
+        if n not in {g[0] for g in rev_keyed} and len(hl) >= 2:
+            rev_dup_groups[(n, None)] = [(t, "manual") for t in hl]
+    for gk, members in sorted(rev_dup_groups.items()):
+        if len(members) < 2:
+            continue
+        pairs = [suf for _, suf in members if suf.startswith("-p")]
+        if len(members) == 2 and len(pairs) == 2 and pairs[0] != pairs[1]:
+            continue
+        def _rank(m):
+            t, suf = m
+            order = {"running": 0, "review": 1, "ready": 2, "todo": 3}
+            created = con.execute(
+                "SELECT created_at FROM tasks WHERE id=?", (t[0],)
+            ).fetchone()
+            return (order.get(t[4], 9), 0 if suf == "" else 1,
+                    created[0] if created else 0, t[0])
+        members = sorted(members, key=_rank)
+        keeper = members[0][0]
+        for t, _suf in members[1:]:
+            kids = [c for (c,) in con.execute(
+                "SELECT child_id FROM task_links WHERE parent_id=?",
+                (t[0],))]
+            if any(k in live_ids for k in kids):
+                findings.append((
+                    "%s:revlayer:dup-review-children:%d:%s"
+                    % (slug, gk[0], gk[1]), 1, (
+                        "    PR #%s %s: live review duplicate %s next to"
+                        " working card %s, but %s has live children (%s):"
+                        " a human decides how to break it."
+                        % (gk[0], gk[1] or "-", t[0], keeper, t[0],
+                           ",".join(k for k in kids if k in live_ids)))))
+                continue
+            run([HERMES, "kanban", "--board", slug, "comment", t[0],
+                 ADMISSION_MARKER + " live review duplicate of PR #%s"
+                 " %s: working card %s already covers this head, a review"
+                 " run on the duplicate is max effort wasted. Archived."
+                 % (gk[0], gk[1] or "-", keeper)], timeout=90)
+            run([HERMES, "kanban", "--board", slug, "archive", t[0]],
+                timeout=90)
+            findings.append((
+                "%s:revlayer:dup-review:%d:%s" % (slug, gk[0], gk[1]), 2, (
+                    "    PR #%s %s: live review duplicate %s archived,"
+                    " working card %s (live-duplicate dedup extended to"
+                    " reviewers by the PR+head key)."
+                    % (gk[0], gk[1] or "-", t[0], keeper))))
     con.close()
 
     states = {}   # number -> review state (cache for both check phases)
-    pending = []  # (number, head, age) without a verdict inside the arm window
     for number in numbers:
         state = _pr_review_state(repo, number)
         if not state:
             continue
         states[number] = state
-        if state["verdict"] or state["age"] is None:
-            continue
-        if state["age"] < REVIEW_ARM_MIN_AGE_S \
-                or state["age"] > REVIEW_ARM_MAX_AGE_S:
-            continue
-        pending.append((number, state["head"], state["age"]))
 
-    text_refs = ["%s" % (t[1] or "") + " " + (t[2] or "") for t in live]
-    armed, blocked_alive, unhandled, closed_nv = [], [], [], []
-    cycle_busy = []   # (number, head7, task_id, status) already in a cycle
-    deferred = []   # (number, head7, task_id): review deferred by a decision
-    for number, head, age in sorted(pending, key=lambda item: -item[2]):
-        if number in pilot_numbers:
-            continue   # pilot: one PR = one card
-        base = "reviewer-pr%d-%s" % (number, head[:7])
-        match = [t for t, refs in zip(live, text_refs)
-                 if t[6] == base
-                 or (t[3] == "reviewer"
-                     and re.search(r"#%d\b" % number, refs)
-                     and head[:7] in refs)]
-        if match:
-            task_id, status = match[0][0], match[0][4]
-            if status == "blocked":
-                blocked_alive.append("%s #%d %s [%s]"
-                                     % (task_id, number, head[:7], status))
-            elif status == "scheduled" \
-                    and _owner_deferred_review(db, task_id):
-                # The card sits in scheduled because of someone else's
-                # decision, so the review will not start before the owner
-                # decides. The head stays without a verdict but holds no
-                # slot: the parking branch below counts the layer by
-                # `holding`.
-                deferred.append((number, head[:7], task_id))
-            continue
-        # A live card with a suffixed key (-r2 ...): the base text did not
-        # match but the family is alive, so no duplicate may be created.
-        # Owner decision: a double arm of one head is forbidden. ANY key of
-        # this head's family counts as live: the base key, -rN (re-arm
-        # after a card closed without a verdict) and -pN (paired arm). One
-        # live card of any suffix is enough not to create a new one.
-        fam_live_keys = [t[6] for t in live
-                         if (t[6] or "") == base
-                         or (t[6] or "").startswith(base + "-r")
-                         or (t[6] or "").startswith(base + "-p")]
-        if fam_live_keys:
-            continue
-        # The watchdog used to arm a reviewer card a minute before the
-        # executor card handed off to review; the verdict then went through
-        # both channels, one fix was made twice and reviewed twice. A live
-        # executor card (assignee != reviewer) in running/ready/review that
-        # names this PR and head in its text, comments or review-cycle
-        # events already carries the normal review cycle: its
-        # changes_requested goes back to the same executor, so no parallel
-        # auto-arm lane is needed.
-        for t, refs in zip(live, text_refs):
-            if t[3] == "reviewer" \
-                    or t[4] not in ("running", "ready", "review"):
-                continue
-            full = refs + " " + cycle_refs.get(t[0], "")
-            if re.search(r"#%d\b" % number, full) \
-                    and head[:7] in full:
-                cycle_busy.append((number, head[:7], t[0], t[4]))
-                break
-        if cycle_busy and cycle_busy[-1][0] == number:
-            continue
-        fam_done = [d_id for d_id, d_key in done_keyed
-                    if d_key == base or d_key.startswith(base + "-r")]
-        key = base
-        rearm_of = None
-        if fam_done:
-            # All cards of the family are closed but the head has no
-            # verdict: the reviewer closed a card without a verdict. The new
-            # arm must use a FRESH key: the base key would be deduplicated
-            # against the done card.
-            max_r = 1
-            for k in list(fam_live_keys) + [d_key for _, d_key in done_keyed]:
-                m = re.fullmatch(re.escape(base) + r"-r(\d+)", k or "")
-                if m:
-                    max_r = max(max_r, int(m.group(1)))
-            key = "%s-r%d" % (base, max_r + 1)
-            rearm_of = ", ".join(fam_done)
-            closed_nv.append((number, head[:7], rearm_of, key))
-        if len(armed) >= REVIEW_ARM_MAX_CREATE:
-            unhandled.append("#%d %s" % (number, head[:7]))
-            continue
-        new_id = _review_arm_card(slug, number, head, age / 3600.0,
-                                  key=key, rearm_of=rearm_of)
-        if new_id:
-            armed.append((new_id, number, head[:7], key, age / 3600.0))
-        else:
-            unhandled.append("#%d %s (create failed)" % (number, head[:7]))
-
-    # --- Heads WITH a verdict are checked too ------------------------------
-    # A change-request verdict from the reviewer may point at a blocker in a
-    # twin PR; the twin then gets its fix and a PASS, and the pair would stand
-    # forever, because a PR with a verdict never enters `pending`. Two
-    # branches:
-    #   A: the latest verdict on the head is reject, its body references #N
-    #      (N != the PR itself), and the latest verdict on PR #N is accept,
-    #      FRESHER than our reject: the paired blocker is closed, so a
-    #      repeated review of the same head is armed. A twin/pair word
-    #      without a number cannot be checked and is not armed. The guard
-    #      "twin PASS is fresher than the reject" is mandatory: otherwise
-    #      the reviewer already saw the PASS and rejected for another reason,
-    #      and a repeat would loop the arms.
-    #   B: the latest verdict on the head is accept and there is no fresh
-    #      WCFY for the head (no comment with the marker at all, or it is
-    #      older than the head): a coder card is armed to write a dated WCFY
-    #      comment. Only when all REQUIRED checks of the head are SUCCESS
-    #      (branch protection of the base): a PASS on a red head is not a
-    #      PASS, and a head under a stack rebuild changes its sha, so the
-    #      WCFY would go stale for nothing.
-    hold = os.path.exists(PAIR_WCFY_HOLD)
-    pair_armed, wcfy_armed, l35_unhandled = [], [], []
-    twin_cache = {}
-    protect_cache = {}
+    # Scheme "one PR = one card" (owner decision). The auto-arm of reviewer
+    # cards per head (key reviewer-pr<N>-<head7>), the paired arm and the
+    # WCFY arm per head were removed: review lives on the executor card
+    # (kanban_request_review with reviewer=reviewer), the executor writes
+    # the WCFY with the same card, and waiting for the owner goes through
+    # needs_input with the condition "PR #N merged by the owner". What is
+    # left is the rework arm (a change-request verdict on a head without a
+    # rework card).
+    rework_armed, ms_rework_wait = [], []
     for number in sorted(states):
         st = states[number]
         info = st.get("info")
@@ -2807,210 +4672,74 @@ def review_layer_check(slug):
                 or st["age"] > REVIEW_ARM_MAX_AGE_S:
             continue
         head = st["head"]
-        if info["kind"] == "reject" and TWIN_ERA:
-            # The paired arm lives only in the twin era (TWIN_ERA); once the
-            # old release line is end-of-life, branch A does not run. Without
-            # a pair word (pair/twin) references #N are not counted as
-            # paired blockers: a false positive was seen when an unrelated
-            # reference was treated as a pair.
-            if not _PAIR_WORD_RE.search(info["body"] or ""):
-                continue
-            refs = [int(x) for x in _PAIR_REF_RE.findall(info["body"] or "")]
-            refs = [r for r in dict.fromkeys(refs) if r != number]
-            for twin in refs:
-                if twin not in twin_cache:
-                    try:
-                        twin_cache[twin] = _pr_review_state(repo, twin)
-                    except Exception:
-                        twin_cache[twin] = None
-                tinfo = (twin_cache[twin] or {}).get("info")
-                if not tinfo or tinfo["kind"] != "accept":
-                    continue
-                if info["at"] is None or tinfo["at"] is None \
-                        or tinfo["at"] <= info["at"]:
-                    continue
-                # A repeated review of an UNCHANGED head makes sense only if
-                # the blocker is lifted without new code in this PR (the
-                # paired PR was merged or accepted). If the verdict demands
-                # new work in the PR itself, the machine sign of that work
-                # is a LIVE work card for this PR: assignee != reviewer and
-                # the PR number in the TITLE (the body is no good: the twin's
-                # card references the paired number in its body, which is not
-                # work on this PR). Otherwise the reviewer would occupy a
-                # slot and return the same change request on the same head
-                # while other cards wait for a slot. The review arrives on
-                # the new head through the ordinary auto-arm once the work
-                # card closes. The same sign also suppresses a paired arm
-                # that would duplicate the main arm of the same head.
-                work_live = [t[0] for t in live
-                             if t[3] != "reviewer"
-                             and re.search(r"#%d\b" % number, t[1] or "")]
-                if work_live:
-                    findings.append((
-                        "%s:revlayer:pairwork:%d:%s"
-                        % (slug, number, head[:7]), 1, (
-                        "    PR #%d %s: paired blocker #%d is closed, "
-                        "but live work card %s requires new code in "
-                        "the PR itself: no repeated review of the unchanged "
-                        "head is created, the verdict will arrive on the "
-                        "new head through the ordinary auto-arm."
-                        % (number, head[:7], twin,
-                           ", ".join(work_live)))))
-                    break
-                base = "reviewer-pr%d-%s-p%d" % (number, head[:7], twin)
-                fam_state, key, rearm_of = _family_arm_key(
-                    base, live, done_keyed)
-                if fam_state == "live":
-                    break
-                if any(t[3] == "reviewer"
-                       and re.search(r"#%d\b" % number, refs_txt)
-                       and head[:7] in refs_txt
-                       for t, refs_txt in zip(live, text_refs)):
-                    break
-                if len(armed) + len(pair_armed) + len(wcfy_armed) \
-                        >= REVIEW_ARM_MAX_CREATE:
-                    l35_unhandled.append("pair #%d %s" % (number, head[:7]))
-                    break
-                if hold:
-                    findings.append((
-                        "%s:revlayer:pairdry:%d:%s" % (slug, number, head[:7]),
-                        1, (
-                        "    Pair re-review (dry, hold): repeated review of "
-                        "PR #%d %s after the paired blocker #%d was closed "
-                        "(twin PASS is fresher than the change request on "
-                        "the head). Hold: %s" % (
-                            number, head[:7], twin, PAIR_WCFY_HOLD))))
-                    break
-                new_id = _pair_rearm_card(slug, number, head,
-                                          st["age"] / 3600.0, twin,
-                                          key, rearm_of)
-                if new_id:
-                    pair_armed.append((new_id, number, head[:7], twin, key))
-                else:
-                    l35_unhandled.append(
-                        "pair #%d %s (create failed)" % (number, head[:7]))
-                break
-        elif info["kind"] == "accept":
-            head_at = time.time() - st["age"]
-            wcfy_at = st.get("wcfy_at")
-            if wcfy_at is not None and wcfy_at >= head_at:
-                continue
-            base = "coder-pr%d-wcfy-%s" % (number, head[:7])
-            fam_state, key, rearm_of = _family_arm_key(base, live, done_keyed)
-            if fam_state == "live":
-                continue
-            if any(t[3] == "coder"
-                   and re.search(r"#%d\b" % number, refs_txt)
-                   and head[:7] in refs_txt
-                   for t, refs_txt in zip(live, text_refs)):
-                continue
-            # The "after PASS" arm goes only onto a head whose required
-            # checks are green. Otherwise a reviewer verdict on a head with
-            # a red required check would start a card for a head that is
-            # waiting for a stack rebuild.
-            ci_ok, ci_why = _head_mandatory_ci(
-                repo, number, st.get("base") or "", protect_cache)
-            if not ci_ok:
-                findings.append((
-                    "%s:revlayer:wcfyci:%d:%s" % (slug, number, head[:7]),
-                    1, (
-                    "    PR #%d %s: the accept verdict stands on a head where"
-                    " not all required checks are green (%s): no WCFY is"
-                    " created. The head is under a fix or a stack rebuild"
-                    " and will change its sha, the comment would go stale"
-                    " before it is read. A verdict on such a head must be"
-                    " CHANGES REQUESTED or \"blocked by #N\", not PASS. The"
-                    " WCFY arrives through the auto-arm on the new head with"
-                    " green CI." % (number, head[:7], ci_why))))
-                continue
-            if len(armed) + len(pair_armed) + len(wcfy_armed) \
-                    >= REVIEW_ARM_MAX_CREATE:
-                l35_unhandled.append("wcfy #%d %s" % (number, head[:7]))
-                continue
-            if hold:
-                findings.append((
-                    "%s:revlayer:wcfydry:%d:%s" % (slug, number, head[:7]),
-                    1, (
-                    "    (dry, hold): PR #%d %s has a reviewer PASS without "
-                    "a fresh WCFY (latest %s, the head is newer). Hold: %s" % (
-                        number, head[:7], _fmt_utc(wcfy_at),
-                        PAIR_WCFY_HOLD))))
-                continue
-            new_id = _wcfy_arm_card(slug, number, head, wcfy_at,
-                                    key, rearm_of)
-            if new_id:
-                wcfy_armed.append((new_id, number, head[:7], key))
-            else:
-                l35_unhandled.append(
-                    "wcfy #%d %s (create failed)" % (number, head[:7]))
-    for new_id, number, head7, twin, key in pair_armed:
+        if info["kind"] != "reject":
+            continue
+        # A change-request verdict on a head must have a live rework card.
+        # Without this, PRs with change requests stood without a card while
+        # the slots were taken by work of the next milestone.
+        if not cr_rework_gaps({number: st}, live):
+            continue
+        base = "coder-pr%d-rework-%s" % (number, head[:7])
+        fam_state, key, rearm_of = _family_arm_key(base, live, done_keyed)
+        if fam_state == "live":
+            continue
+        admit, admit_why = gen_admission(slug, number)
+        if admit:
+            ms_rework_wait.append(number)
+        else:
+            findings.append((
+                "r36:revlayer:rework-noadmit:%s:%d" % (slug, number), 2,
+                ("    PR #%d %s with a change-request verdict has no rework "
+                 "card, no arm created: %s (admission is checked before "
+                 "create)" % (number, head[:7], admit_why))))
+            continue
+        if len(rework_armed) >= REVIEW_ARM_MAX_CREATE:
+            continue
+        # The single native-or-live helper before create.
+        covered, guard = board_native_guard.native_or_live(
+            key,
+            live_keys=[t[6] for t in live],
+            native_checked=[
+                board_native_guard.NATIVE_VERDICT,
+                board_native_guard.NATIVE_REVIEW_LANE],
+            why="an owner change-request verdict on a head without a"
+                " rework card: there is no stock mechanism for rework on an"
+                " owner verdict (the CR rework arm)")
+        if covered:
+            findings.append((
+                "%s:revlayer:50b-rework:%d:%s" % (slug, number,
+                                                   head[:7]), 1,
+                "    Rework arm for PR #%d %s retired: %s"
+                % (number, head[:7], guard)))
+            continue
+        new_id = _rework_arm_card(slug, number, head, info,
+                                  key=key, rearm_of=rearm_of,
+                                  guard=guard)
+        if new_id:
+            rework_armed.append((new_id, number, head[:7], key))
+    for new_id, number, head7, key in rework_armed:
         findings.append((
-            "%s:revlayer:pair:%d:%s" % (slug, number, head7), 1, (
-            "    PR #%d %s: the change request referenced paired blocker "
-            "#%d, the twin's PASS is fresher than the change request: the "
-            "watchdog created repeated review %s (p100, reviewer, key %s)."
-            % (number, head7, twin, new_id, key))))
-    for new_id, number, head7, key in wcfy_armed:
-        findings.append((
-            "%s:revlayer:wcfy:%d:%s" % (slug, number, head7), 1, (
-            "    PR #%d %s has a reviewer PASS without a fresh WCFY: the "
-            "watchdog created %s (p95, coder, key %s)."
+            "%s:r36:rework-arm:%d:%s" % (slug, number, head7), 1, (
+            "    PR #%d %s with a change-request verdict had no rework "
+            "card: the watchdog created %s (coder, band of the active "
+            "milestone, key %s)."
             % (number, head7, new_id, key))))
-    if l35_unhandled:
+    # A PR of the active milestone without a live card and without a formal
+    # owner review: green PRs waiting for the owner were absent from the
+    # board, and while the band of the active milestone is empty the
+    # dispatcher fills the slots with lower-band work of the next one.
+    for number in milestone_pr_orphans(
+            states, live, lambda n: gen_admission(slug, n)[0]):
         findings.append((
-            "%s:revlayer:l35unhandled:%d" % (slug, len(l35_unhandled)), 2, (
-            "    Left without a card: %s (limit of %d creations per run or "
-            "a create failure): the next pass will pick them up."
-            % (", ".join(l35_unhandled), REVIEW_ARM_MAX_CREATE))))
-
-    for number, head7, prev, key in closed_nv:
-        findings.append(("%s:revlayer:closed:%d:%s" % (slug, number, head7), 1, (
-            "    Review layer: the reviewer closed card(s) %s WITHOUT a "
-            "verdict on the head of PR #%d %s (key %s*). Root of the idle "
-            "time: a create with the base key is deduplicated against the "
-            "done card. Re-armed under key %s." % (prev, number, head7,
-                            "reviewer-pr%d-%s" % (number, head7), key))))
-    for new_id, number, head7, key, age_h in armed:
-        findings.append(("%s:revlayer:arm:%d:%s" % (slug, number, head7), 1, (
-            "    Review layer: PR #%d head %s has had no verdict for %.1f h: "
-            "the watchdog created %s (p100, reviewer, key %s)."
-            % (number, head7, age_h, new_id, key))))
-    for number, head7, tid, st in cycle_busy:
-        findings.append((
-            "%s:revlayer:cycle:%d:%s" % (slug, number, head7), 1, (
-            "    PR #%d %s: live executor card %s [%s] already carries the "
-            "normal review cycle for this head: no parallel review lane is "
-            "auto-armed, its changes_requested goes back to the same "
-            "executor."
-            % (number, head7, tid, st))))
-    for line in blocked_alive:
-        task_id = line.split()[0]
-        findings.append(("%s:revlayer:stuck:%s" % (slug, task_id), 2, (
-            "    Review layer: %s: the reviewer card is alive but not in "
-            "ready, and the head has no verdict. Investigate or unblock."
-            % line)))
-    if unhandled:
-        findings.append(("%s:revlayer:unhandled:%d" % (slug, len(unhandled)),
-                         2, (
-            "    Review layer: left without a card: %s (limit of %d "
-            "creations per run or a create failure): the next pass will "
-            "pick them up."
-            % (", ".join(unhandled), REVIEW_ARM_MAX_CREATE))))
-
-    # The layer is held only by heads whose review can actually run. A head
-    # whose reviewer card sits in scheduled because of someone else's
-    # decision drops out of `holding`. Without this, "parking reviews of
-    # heads, while the layer waits for the same review and keeps the
-    # parking" closed on itself: ready cards below p50 stayed in scheduled
-    # forever.
-    deferred_numbers = {n for n, _, _ in deferred}
-    # A head in the normal review cycle does not hold the layer either: the
-    # cycle of the executor card will bring the verdict, so other ready
-    # cards need not be parked for that wait.
-    cycle_numbers = {n for n, _, _, _ in cycle_busy}
-    holding = [p for p in pending
-               if p[0] not in deferred_numbers
-               and p[0] not in cycle_numbers]
+            "%s:r36:ms-orphan:%d" % (slug, number), 2, (
+            "    PR #%d of the active milestone has no live card and no "
+            "formal owner review: the work fell off the board, the next "
+            "step is not assigned." % number)))
+    # Only change requests without a rework card hold the layer
+    # (ms_rework_wait). Heads without a verdict hold nothing any more:
+    # review lives in the stock review lane of the executor card.
+    holding = [(n, (states.get(n) or {}).get("head", "")[:7] or "?", 0)
+               for n in sorted(set(ms_rework_wait))]
     if holding:
         parkable = [t for t in live
                     if t[4] == "ready" and (t[3] or "")
@@ -3031,11 +4760,6 @@ def review_layer_check(slug):
         if parked or running_low:
             text = ("    Review layer is not empty (%d heads without a "
                     "verdict): " % len(holding))
-            if deferred:
-                text += ("Also deferred by a decision, not holding the "
-                         "layer: %s. "
-                         % ", ".join("#%d(%s)" % (n, tid)
-                                     for n, _, tid in deferred))
             if parked:
                 text += "parked ready <p%d: %s. " % (
                     REVIEW_PARK_BELOW_P, ", ".join(parked))
@@ -3048,11 +4772,23 @@ def review_layer_check(slug):
                              text))
     else:
         con = sqlite3.connect("file:%s?mode=ro" % db, uri=True, timeout=10)
-        held = [row[0] for row in con.execute(
+        cand = [row[0] for row in con.execute(
             "SELECT DISTINCT t.id FROM tasks t JOIN task_comments c "
             "ON c.task_id = t.id WHERE t.status = 'scheduled' "
             "AND c.body LIKE ?",
             ("%SCHEDULED: " + REVIEW_PARK_MARKER + "%",))]
+        # Look at the latest scheduled reason, not at any old SCHEDULED
+        # comment of the review layer in the history. If the admission gate
+        # parked the card after the review parking, a release here would
+        # start a loop release -> park -> release.
+        held = []
+        for tid in cand:
+            last = con.execute(
+                "SELECT payload FROM task_events WHERE task_id = ?"
+                " AND kind = 'scheduled' ORDER BY id DESC LIMIT 1",
+                (tid,)).fetchone()
+            if last and REVIEW_PARK_MARKER in (last[0] or ""):
+                held.append(tid)
         con.close()
         released = []
         for task_id in held:
@@ -3064,20 +4800,6 @@ def review_layer_check(slug):
                              % (slug, ",".join(released)[:60]), 2, (
                 "    Review layer emptied: returned from parking to ready: %s."
                 % ", ".join(released))))
-        if deferred:
-            # The layer is empty for slots not because there are no reviews
-            # but because they are deferred by a decision. Say so
-            # explicitly, otherwise the alert gives no reason for the
-            # silence and the cause has to be hunted by hand.
-            findings.append(("%s:revlayer:deferred:%d"
-                             % (slug, len(deferred)), 1, (
-                "    Review layer is empty for slots, but there are heads "
-                "without a verdict: %s. Their review is deferred by a "
-                "decision (reviewer cards in scheduled/backlog), they hold "
-                "no slots. Verdicts will appear when the owner returns the "
-                "cards to ready."
-                % ", ".join("#%d %s (%s)" % (n, h7, tid)
-                            for n, h7, tid in deferred))))
     return findings
 
 
@@ -3199,8 +4921,22 @@ def rework_oversize_scan(slug):
 
 def _decompose_card(slug, tid, title, blocks, nlines, prio, key):
     """Decomposition card for the architect. Returns the id of the new card or None."""
+    # Native-or-live helper before create (the calling gate already checked
+    # the live key decompose-<tid>; here the family is checked again).
+    covered, guard = board_native_guard.native_or_live(
+        key,
+        live_keys=_live_keys(slug),
+        native_checked=[
+            board_native_guard.NATIVE_RESPAWN,
+            board_native_guard.NATIVE_TASK_LINKS],
+        why="rework package with 3+ BLOCK: the stock auto_decompose does not "
+            "cut rework bodies with BLOCK items by acceptance criteria, the "
+            "rework size gate must intercept it itself")
+    if covered:
+        return None
     reason = "%d BLOCK in the body" % blocks
     body = (
+        board_native_guard.guard_section(guard) +
         "Parent: %s (%s). Reason for interception: %s.\n\n"
         "Rework card size gate: a package with 3+ BLOCK items is not given "
         "to coder (the amount of work = 3+ BLOCK, the body length is not a "
@@ -3260,8 +4996,19 @@ def rework_oversize_gate(slug):
         return []
     db = os.path.join(BOARDS, slug, "kanban.db")
     findings = []
+    live_keys = _live_keys(slug)
     for tid, title, blocks, nlines, prio in hits:
         key = "decompose-%s" % tid
+        # Reassignment plus a decomposition create: the native-or-live helper.
+        covered, guard = board_native_guard.native_or_live(
+            key,
+            live_keys=live_keys,
+            native_checked=[
+                board_native_guard.NATIVE_RESPAWN,
+                board_native_guard.NATIVE_TASK_LINKS],
+            why="rework package with %d BLOCK: the stock auto_decompose does "
+                "not cut rework bodies with BLOCK items, interception by the "
+                "rework size gate is required" % blocks)
         con = sqlite3.connect("file:%s?mode=ro" % db, uri=True, timeout=10)
         exists = con.execute(
             "SELECT 1 FROM tasks WHERE idempotency_key = ?"
@@ -3271,6 +5018,12 @@ def rework_oversize_gate(slug):
             " LIMIT 1", (tid, REWORK_GATE_MARKER + "%")).fetchone()
         con.close()
         if exists:
+            continue
+        if covered:
+            findings.append((
+                "%s:rework-oversize-50b:%s" % (slug, tid), 1,
+                "    Size gate: interception of %s suppressed (native or "
+                "live): %s" % (tid, guard)))
             continue
         reason = "%d BLOCK in the body" % blocks
         if not commented:
@@ -3363,7 +5116,28 @@ def rework_gate_auto_return(slug, apply=True):
             candidates.append((tid, dec_id, parent[0]))
     con.close()
     findings = []
+    live_keys = _live_keys(slug)
     for tid, dec_id, status in candidates:
+        # Returning the parent is a restoration: first ask the helper
+        # whether the stock respawn would pick the card up by itself (a
+        # manual restoration once produced a duplicate executor).
+        covered, guard = board_native_guard.native_or_live(
+            "rework-return-%s" % tid,
+            live_keys=live_keys,
+            native_checked=[
+                board_native_guard.NATIVE_RESPAWN,
+                board_native_guard.NATIVE_TASK_LINKS],
+            why="decomposition %s closed with the verdict "
+                "\"fits-in-one-run\", the parent is still with architect: "
+                "there is no stock mechanism returning the parent after a "
+                "decomposition (the CLI guard restrains only runs, the "
+                "architect is a cron job)" % dec_id)
+        if covered:
+            findings.append((
+                "%s:rework-fit-return-50b:%s" % (slug, tid), 1,
+                "    Size gate: return of %s suppressed (native or live): %s"
+                % (tid, guard)))
+            continue
         text = ("    Size gate, automatic return: " + tid + "\n"
                 "      decomposition " + dec_id + " closed with the verdict"
                 " \"fits-in-one-run\", the parent is returned to coder.\n")
@@ -3897,202 +5671,37 @@ def verdict_dedup_gate(slug, apply=True):
     return findings
 
 
-# === Serialization of rework on one PR =====================================
+# === Merge unblocker: priority for a card that closes the last merge preconditions =
 #
-# When an umbrella card for a verdict closes, the platform releases ALL of
-# its children at once, and two coders push and rebase the same branch in
-# parallel. The result is double context, double tests, push races, a lost
-# commit, a repeated CI run, and a review layer that arms a head which goes
-# stale within an hour. The owner's rule: one verdict per PR = one coder
-# card in progress; splitting a package to fit the iteration budget is
-# allowed, but the children run as a chain strictly in sequence
-# (block1 -> block2 -> minors), with rebase and WCFY only in the last link.
-# Only cards for different PRs may run in parallel. The gate builds the
-# chain post factum: the platform releases the first link, the others wait
-# on links.
-
-OWNER_REVIEW_KEY_PR_RE = re.compile(
-    r"^owner-review-(\d+)-[0-9a-f]{6,40}(?:[.\-]|$)", re.I)
-SERIAL_REWORK_STATUSES = ("todo", "ready", "running", "review")
-SERIAL_REWORK_MARKER = "Watchdog: serialization of cards of one PR."
-SERIAL_TAIL_RE = re.compile(r"rebase|wcfy|what.?s? changed", re.I)
-
-
-def _serial_card_pr(title, key):
-    """PR number from the key owner-review-N-sha... or the first #N of the
-    title. None if the card is not about a PR."""
-    m = OWNER_REVIEW_KEY_PR_RE.match(key or "")
-    if m:
-        return m.group(1)
-    m = VERDICT_PR_RE.search(title or "")
-    return m.group(1) if m else None
-
-
-def serial_rework_order(cards):
-    """Chain order: tail cards (rebase/WCFY, whose head must be final) go
-    last, the rest by created."""
-    def rank(c):
-        return (1 if SERIAL_TAIL_RE.search(c["title"] or "") else 0,
-                c["created"])
-    return sorted(cards, key=rank)
-
-
-def _serial_has_path(adj, a, b, _seen=None):
-    """Whether there is a path a -> ... -> b in adjacency {parent:
-    {children}} (protection against a repeated link and cycles)."""
-    if a == b:
-        return True
-    _seen = _seen if _seen is not None else set()
-    if a in _seen or a not in adj:
-        return False
-    _seen.add(a)
-    return any(_serial_has_path(adj, n, b, _seen) for n in adj[a])
-
-
-def serial_rework_scan(slug):
-    """Live coder rework cards grouped by PR: only groups of 2 or more.
-    Returns [(pr, [card...])], card = {id,title,status,created}.
-    The umbrella (a parent of a group member) is not part of the chain: it
-    releases the children and does not push next to them."""
-    db = os.path.join(BOARDS, slug, "kanban.db")
-    if not os.path.exists(db):
-        return []
-    con = sqlite3.connect("file:%s?mode=ro" % db, uri=True, timeout=10)
-    rows = con.execute(
-        "SELECT id, title, body, status, assignee, idempotency_key,"
-        " created_at FROM tasks"
-        " WHERE status IN ('todo','ready','running','review','blocked')"
-        " ORDER BY created_at").fetchall()
-    link_rows = con.execute(
-        "SELECT parent_id, child_id FROM task_links").fetchall()
-    con.close()
-    adj = {}
-    for p, c in link_rows:
-        adj.setdefault(p, set()).add(c)
-    by_pr = {}
-    for tid, title, body, status, assignee, key, created in rows:
-        title, body, key = title or "", body or "", key or ""
-        if assignee != "coder" or status not in SERIAL_REWORK_STATUSES:
-            continue
-        pr = _serial_card_pr(title, key)
-        if pr is None:
-            continue
-        if lint_card_kind(title, key) not in ("rework", "rebase", None) \
-                and not REWORK_GATE_RE.search(title + " " + body):
-            continue
-        by_pr.setdefault(pr, []).append(
-            {"id": tid, "title": title, "status": status, "key": key,
-             "created": float(created or 0)})
-    out = []
-    for pr, cards in by_pr.items():
-        ids = {c["id"] for c in cards}
-        sibs = [c for c in cards
-                if not any(m in ids for m in adj.get(c["id"], ()))]
-        if len(sibs) > 1:
-            out.append((pr, sibs))
-    return out
-
-
-def serial_rework_gate(slug, apply=True):
-    """Cards of one PR do not work in parallel.
-
-    Builds a link chain <earlier> <later> between live coder rework cards of
-    one PR: the platform releases the first link, the others sit on
-    dependency_wait. A card in running/review is not put under a link
-    (completing under a live parent is a deadlock): a pair in progress is a
-    recorded race, the gate alerts without mutating. Idempotency: a repeated
-    link is excluded by the path check, the marker is not duplicated.
-    Returns findings [(key, rank, text)]."""
-    groups = serial_rework_scan(slug)
-    if not groups:
-        return []
-    db = os.path.join(BOARDS, slug, "kanban.db")
-    con = sqlite3.connect("file:%s?mode=ro" % db, uri=True, timeout=10)
-    link_rows = con.execute(
-        "SELECT parent_id, child_id FROM task_links").fetchall()
-    marked = {r[0] for r in con.execute(
-        "SELECT task_id FROM task_comments WHERE body LIKE ?",
-        (SERIAL_REWORK_MARKER[:32] + "%",)).fetchall()}
-    con.close()
-    adj = {}
-    for p, c in link_rows:
-        adj.setdefault(p, set()).add(c)
-    findings = []
-    for pr, cards in groups:
-        order = serial_rework_order(cards)
-        for prev, nxt in zip(order, order[1:]):
-            if _serial_has_path(adj, prev["id"], nxt["id"]) \
-                    or _serial_has_path(adj, nxt["id"], prev["id"]):
-                continue
-            key = "%s:serial:%s:%s-%s" % (slug, pr, prev["id"], nxt["id"])
-            text = ("    PR #%s serialization: %s [%s] -> %s [%s]\n"
-                    "      %s\n      %s"
-                    % (pr, prev["id"], prev["status"], nxt["id"],
-                       nxt["status"], prev["title"][:70],
-                       nxt["title"][:70]))
-            if nxt["status"] in ("running", "review"):
-                findings.append((key + ":race", 1, text + (
-                    "\n      Race: both links are in progress on one branch."
-                    "\n      Runs are not interrupted. The later worker must"
-                    " fetch the fresh head before rebase/push and make sure"
-                    " the earlier link's commit reached the base.")))
-                continue
-            if not apply:
-                findings.append((key, 1,
-                                 text + " [dry-run: link not created]"))
-                continue
-            run([HERMES, "kanban", "--board", slug, "link", prev["id"],
-                 nxt["id"]], timeout=90)
-            adj.setdefault(prev["id"], set()).add(nxt["id"])
-            if nxt["id"] not in marked:
-                run([HERMES, "kanban", "--board", slug, "comment",
-                     nxt["id"],
-                     SERIAL_REWORK_MARKER + " Link %s -> %s created:"
-                     " cards of one PR #%s run strictly in sequence"
-                     " (one verdict = one branch; parallel only for"
-                     " cards on different PRs). The platform will pick up"
-                     " this card by itself when %s closes."
-                     % (prev["id"], nxt["id"], pr, prev["id"]),
-                     "--author", "watchdog"], timeout=90)
-            findings.append((key, 1, text + (
-                "\n      The gate created a link: the card waits for %s to"
-                " finish." % prev["id"])))
-    return findings
-
-
-# === Priority for the card that closes the last merge preconditions ========
-#
-# Coder cards with minutes of work (WCFY, update-branch, green CI on a PR
-# whose code the owner accepted) can sit in ready for hours: both slots are
-# taken by large blocks, and at equal p80 the dispatcher takes the older
-# card (ORDER BY priority DESC, created_at ASC in the dispatcher core).
-# Meanwhile the coder closes older visual-delta p80 cards by date, merges
-# wait on formalities, and the queue goes to informal volume.
+# Why: coder cards with minutes of work (WCFY, update-branch, green CI on a
+# PR whose code the owner accepted) stood in ready for hours: both slots
+# were taken by large blocks, and at equal priority the dispatcher takes the
+# older card (ORDER BY priority DESC, created_at ASC in the core
+# kanban_db_dispatch.py). Merges waited for formalities while the queue went
+# to non-formal volume.
 #
 # Rule: a ready+coder card whose (1) body holds an owner verdict CHANGES
-# REQUESTED: minor, (2) mark of accepted code ("code accepted", "fix is
-# accepted", "only merge prerequisites remain", APPROVED), (3) blocking
-# items are all merge formalities (WCFY, update-branch, green CI, the
-# Before / After section, merge as a pair), (4) the same PR has no live card
-# with code or test work, is raised to p100. The dispatcher core is not
-# touched: selection already goes by priority DESC.
+# REQUESTED: minor, (2) carries a mark of accepted code ("code accepted",
+# "fix is accepted", "only merge prerequisites remain", APPROVED), (3) all
+# blocking items are merge formalities (WCFY, update-branch, green CI,
+# Before / After section, merge as a pair), (4) and whose PR has no live
+# card with code or test work, is raised to p100. The dispatcher core is
+# not touched: selection already goes by priority DESC.
 #
 # Two extensions of the rule:
 # 1. The formality class is recognised by the card's work, not by a rework
-#    title. [visual-delta] (the Before / After item of a verdict), the
-#    watchdog's WCFY cards, update-branch and "green CI" carry the same
-#    formality but without verdict text in the body: the acceptance of the
-#    PR's code is looked up in verdict cards (any status) and in owner
-#    review mirrors (comments with author=github on PR cards). Without this
-#    a card of such a class would not be seen by the gate: its body has
-#    neither CHANGES REQUESTED nor minor. Rebase cards of pr-hygiene
-#    ("rebase PR #N onto ...") do not count as a class: their priority
-#    96-99 is managed by pr-hygiene itself.
-# 2. p100, not p90: the last formality before the merge of a PR whose code
-#    the owner accepted goes before any work on PRs not ready to merge,
-#    including rebases of the conflict debt (p96-p99). Numerically p100
-#    equals review arms (assignee reviewer), but for the coder queue there
-#    is no overlap: the dispatcher sorts by priority inside the pool of one
+#    title. [visual-delta] (the Before / After item of a verdict), WCFY
+#    cards, update-branch and "green CI" carry the same formality but
+#    without the verdict text in the body: acceptance of the code of the
+#    same PR is looked up in verdict cards (any status) and in owner review
+#    mirrors (comments author=github on the PR cards). Rebase cards of
+#    pr-hygiene ("rebase PR #N onto ...") are not this class: pr-hygiene
+#    manages their priority 96-99 itself.
+# 2. p100, not p90: the last formality before merging a PR whose code the
+#    owner accepted goes before any work on PRs that are not ready to
+#    merge, including conflict-debt rebases (p96-p99). Numerically p100
+#    equals review arms (assignee reviewer, I2); there is no overlap in the
+#    coder queue: the dispatcher sorts by priority inside the pool of one
 #    executor.
 
 MERGE_UNBLOCKER_MARKER = "Watchdog: merge-unblocker priority."
@@ -4364,6 +5973,666 @@ def merge_unblocker_gate(slug, apply=True):
         findings.append(("%s:merge-unblocker:%s" % (slug, h["tid"]), 1,
                          text + "\n      Priority raised: p%d -> p%d."
                          % (h["prio"], MERGE_UNBLOCKER_PRIO)))
+    return findings
+
+
+# === Rework of an open PR before new work of the band ======================
+#
+# Why: PRs stood with a CHANGES REQUESTED verdict while dispatcher slots
+# went to cards that open new PRs: within one band the core orders by
+# created_at (kanban_db_dispatch.py, ORDER BY priority DESC, created_at
+# ASC), there is no stock way to order inside a priority, and new work
+# created earlier overtakes the rework. Owner rule: finish before starting.
+# Review (p100) and WCFY (p95) are already ordered by priority; rework of an
+# open PR is raised by the same mechanism to p90 inside the active band
+# (svc_priority default 90 in _rework_arm_card and in pr-hygiene
+# create_rework_card). This gate raises cards that already exist (including
+# reviewer fixes with keys reviewer-PRN-rework-verdict-*, which the arms did
+# not create). Idempotent: p >= target is not touched, priority never moves
+# down, the band of an inactive milestone (svc below the current one) is not
+# touched. Frequent pass: --rework-gate-only (cron every 5 minutes), not a
+# new cron.
+
+REWORK_LIFT_PRIO = 90
+REWORK_LIFT_MARKER = "Watchdog: rework priority of an open PR."
+# A stale rework arm is archived, not raised. Why: a rework arm raised to
+# p90 started when the PR already lived on a newer head with APPROVED, and
+# the run was spent on work already done. A rework arm is built on the
+# verdict of an EXACT head; its basis disappears when the head moves or a
+# PASS arrives. Archive it: comment + archive (running cards are not
+# touched, a mid-run directive in comments serves them).
+REWORK_STALE_MARKER = "Watchdog: stale rework arm archived."
+_REWORK_LIFT_KEY_RE = re.compile(r"rework", re.I)
+_REWORK_LIFT_TITLE_RE = re.compile(
+    r"rework (?:by|per|after) (?:the )?verdict"
+    r"|^\s*(?:\[[^\]]*\]\s*)?fix PR #\d+", re.I)
+_REWORK_HEAD_KEY_RE = re.compile(r"rework-([0-9a-f]{7,40})", re.I)
+_REWORK_HEAD_TITLE_RE = re.compile(
+    r"(?:head)[ :]*`?([0-9a-f]{7,40})", re.I)
+# === Close gate "remaining: owner merge" ===================================
+#
+# One PR = one card: the executor card is not closed until the owner merges
+# the PR; the wait goes through needs_input with the condition "Release
+# condition: PR #N merged by the owner". The core has no done -> blocked
+# transition, so the hold lives in this layer: the gate finds closed
+# (done/archived) PR cards whose result reads like "remaining: owner merge"
+# and whose PR is not merged yet, keeps a signal (a finding every pass) and
+# leaves a comment with a checkable condition on the card. Why: a card was
+# closed before its PR was merged and the WCFY had to be chased by hand.
+OWNER_MERGE_LEFT_RE = re.compile(
+    r"(?i)(?:remain(?:s|ing|ed)?|left)\W{0,10}(?:owner\W{0,10})?merge"
+    r"|(?i:awaits?|waiting(?:\s+on)?)\W{0,10}(?:owner\W{0,10})?merge"
+    r"|owner'?s?\W+merge|merge\W+by\W+(?:the\W+)?owner")
+OWNER_MERGE_HOLD_MARKER = ("Watchdog: close gate (one PR = one"
+                           " card).")
+OWNER_MERGE_HOLD_WINDOW_S = 14 * 24 * 3600
+
+
+def _pr_merged(repo, number, memo):
+    """True: the PR is merged or closed. A gh error -> None (the pass skips)."""
+    if number in memo:
+        return memo[number]
+    memo[number] = None
+    try:
+        view = run(["gh", "pr", "view", str(number), "--repo", repo,
+                    "--json", "state,mergedAt"], timeout=60)
+        data = json.loads(view) or {}
+        memo[number] = data.get("state") in ("MERGED", "CLOSED")
+    except Exception:
+        pass
+    return memo[number]
+
+
+def owner_merge_hold_gate(slug, now=None, apply=True):
+    """Hold of closed PR cards whose result says "remaining: owner merge".
+
+    One PR = one card: a PR card is not closed before the owner merges the
+    PR. The gate scans recently closed cards (a 14-day window) whose result
+    names "remaining: merge" and checks the PR: not merged -> a finding
+    (owner class) plus a comment with a checkable release condition (dedup
+    by marker). The CLI archive is terminal (there is no unarchive) and the
+    status of a closed card cannot be returned, so the signal and the
+    comment are held, not the status.
+    """
+    repo = board_repo(slug)
+    if not repo:
+        return []
+    now = now if now is not None else time.time()
+    db = os.path.join(BOARDS, slug, "kanban.db")
+    if not os.path.exists(db):
+        return []
+    con = sqlite3.connect("file:%s?mode=ro" % db, uri=True, timeout=10)
+    try:
+        rows = con.execute(
+            "SELECT id, title, result, status, completed_at FROM tasks "
+            "WHERE status IN ('done', 'archived') "
+            "AND completed_at IS NOT NULL AND completed_at > ? "
+            "AND result IS NOT NULL "
+            "ORDER BY completed_at DESC",
+            (now - OWNER_MERGE_HOLD_WINDOW_S,)).fetchall()
+        findings = []
+        memo = {}
+        for tid, title, result, status, completed_at in rows:
+            if not OWNER_MERGE_LEFT_RE.search(result):
+                continue
+            m = (re.search(r"#(\d+)", result)
+                 or re.search(r"#(\d+)", title or ""))
+            if not m:
+                continue
+            number = int(m.group(1))
+            merged = _pr_merged(repo, number, memo)
+            if merged is None or merged:
+                continue
+            findings.append((
+                "%s:owner-merge-hold:%s:%d" % (slug, tid, number), 1, (
+                "    Close gate: card %s (%s) was closed with the result "
+                "\"remaining: owner merge\", PR #%d is not merged yet "
+                "(completed %s). Release condition: PR #%d merged by the "
+                "owner."
+                % (tid, (title or "")[:60], number,
+                   time.strftime("%Y-%m-%d %H:%MZ",
+                                 time.gmtime(completed_at)), number))))
+            if not apply:
+                continue
+            seen = con.execute(
+                "SELECT COUNT(*) FROM task_comments WHERE task_id = ? "
+                "AND body LIKE ?",
+                (tid, OWNER_MERGE_HOLD_MARKER[:40] + "%")).fetchone()[0]
+            if not seen:
+                run([HERMES, "kanban", "--board", slug, "comment", tid,
+                     "%s the card was closed before PR #%d was merged. "
+                     "Check the WCFY and the merge steps. Release "
+                     "condition: PR #%d merged by the owner (one PR = one "
+                     "card)." % (OWNER_MERGE_HOLD_MARKER, number, number)],
+                    timeout=90)
+    finally:
+        con.close()
+    return findings
+
+
+# PR number from a title. First the exact form "PR #N" (a rework card names
+# its PR), then any #N as the last resort.
+_REWORK_PR_TITLE_RE = re.compile(r"(?i)\bPR\s*#?(\d+)")
+
+
+def rework_arm_head7(key, title, body=""):
+    """head7 of the target of a rework arm: delegates to arm_head7."""
+    return arm_head7(key, title, body)
+
+
+# The head may be named only in the card body ("Rework PR #N (branch ...,
+# head 1228c709)"), while neither the key nor the title carries it. Body
+# forms: "head <sha>", "@ <sha>" (with an optional colon or backtick between
+# the word and the sha).
+_REWORK_HEAD_BODY_RES = (
+    re.compile(r"(?:head)[ \t]*:?[ \t]*`?([0-9a-f]{7,40})", re.I),
+    re.compile(r"@[ \t]*`?([0-9a-f]{7,40})", re.I),
+)
+
+
+def arm_head7(key, title, body=""):
+    """Single helper for the head of an arm, for rework, review and WCFY.
+
+    Order: key, title, body. The first match decides. None: the head is
+    named nowhere, a comparison with the live head is impossible
+    (conservatively, nothing is archived).
+    """
+    m = (_REWORK_HEAD_KEY_RE.search(key or "")
+         or _REWORK_HEAD_TITLE_RE.search(title or ""))
+    if m:
+        return m.group(1)[:7].lower()
+    for rx in _REWORK_HEAD_BODY_RES:
+        m = rx.search(body or "")
+        if m:
+            return m.group(1)[:7].lower()
+    return None
+
+
+def _rework_arm_stale(slug, number, head7, memo):
+    """Why the arm is stale, or None. memo caches _pr_review_state by PR
+    number for one pass of the gate (one gh call per PR). A gh failure or a
+    head not named in the card = not stale (conservative: archiving without
+    a basis costs more than a redundant run)."""
+    if not head7:
+        return None
+    repo = board_repo(slug)
+    if not repo:
+        return None
+    if number not in memo:
+        try:
+            memo[number] = _pr_review_state(repo, number)
+        except Exception:
+            memo[number] = None
+    st = memo[number]
+    if not st:
+        return None
+    if st.get("pr_state") in ("MERGED", "CLOSED"):
+        return ("PR #%d %s: the rework is no longer needed"
+                % (number, st.get("pr_state")))
+    live7 = (st.get("head") or "")[:7].lower()
+    if live7 and live7 != head7:
+        return ("head of PR #%d moved %s -> %s: the verdict the arm was "
+                "built on lived on the old head; on the new one the review "
+                "layer arms afresh if the CR repeats" % (number, head7, live7))
+    if live7 == head7 and st.get("head_kind") == "accept":
+        return ("PASS on the same head %s: the rework is already accepted"
+                % head7)
+    return None
+
+
+REWORK_DONE_ELSEWHERE_MARKER = (
+    "Watchdog: rework done by another run.")
+
+
+def _card_claims_head(db, tid, head7):
+    """Does the card claim head head7 in its own text?
+
+    The card's own push must differ from somebody else's: a run pushed a
+    commit and left a comment/summary with that sha; archiving on "the head
+    moved" would kill a live delivery cycle (the CI snapshot and
+    request_review are planned inside the card itself). A foreign push is
+    not named by the card: neither in its last comments, nor in run
+    summaries, nor in the reason of a scheduled parking.
+    """
+    if not head7:
+        return False
+    try:
+        con = sqlite3.connect("file:%s?mode=ro" % db, uri=True, timeout=10)
+    except Exception:
+        return False
+    parts = []
+    try:
+        parts += [r[0] or "" for r in con.execute(
+            "SELECT body FROM task_comments WHERE task_id=? "
+            "ORDER BY id DESC LIMIT 5", (tid,))]
+        parts += [r[0] or "" for r in con.execute(
+            "SELECT summary FROM task_runs WHERE task_id=? "
+            "AND summary IS NOT NULL ORDER BY id DESC LIMIT 2", (tid,))]
+        parts += [r[0] or "" for r in con.execute(
+            "SELECT payload FROM task_events WHERE task_id=? "
+            "AND kind='scheduled' ORDER BY id DESC LIMIT 2", (tid,))]
+    except Exception:
+        parts = []
+    finally:
+        con.close()
+    return head7 in " ".join(parts).lower()
+
+
+def _rework_done_elsewhere(slug, number, created_at, memo):
+    """The rework for this verdict was done by another run.
+
+    The head is named neither in the key, nor in the title, nor in the body
+    (the stale check cannot see such a card). Archive it if:
+      - the PR is open and its head changed AFTER the card was created
+        (a commit),
+      - the head commit belongs to the PR executor (the branch author),
+      - the PR holds an answer to the reject verdict (a non-verdict comment
+        after it and after the card was created: "## Rework: ... round N").
+    The card's own push (the card names the live head itself) is checked by
+    the caller through _card_claims_head: that is its own delivery cycle,
+    not a duplicate. Returns the reason or None (a gh failure =
+    conservatively None).
+    """
+    repo = board_repo(slug)
+    if not repo:
+        return None
+    if number not in memo:
+        try:
+            memo[number] = _pr_review_state(repo, number)
+        except Exception:
+            memo[number] = None
+    st = memo[number]
+    if not st or st.get("pr_state") != "OPEN":
+        return None
+    head_at = st.get("head_commit_at")
+    if not head_at or not created_at or head_at <= created_at:
+        return None
+    if not st.get("head_by_pr_author"):
+        return None
+    reply = st.get("reply_after_reject")
+    if not reply or reply < created_at:
+        return None
+    live7 = (st.get("head") or "")[:7].lower()
+    return ("head of PR #%d moved to an executor commit AFTER the card was "
+            "created (created %s, head now %s), the PR holds an answer to "
+            "the verdict: the rework for this verdict was done by another run"
+            % (number,
+               time.strftime("%m-%d %H:%MZ", time.gmtime(created_at)),
+               live7))
+
+
+def _rework_by_structure(slug, number, created_at, memo):
+    """Rework of an open PR recognised by structure, not by words.
+
+    Why: word lists ("rework" in the key, "rework by verdict" / "Fix PR #N"
+    in the title) missed the very first new spelling of a rework card; the
+    same disease hit the service-wait vocabulary before.
+
+    Structural signs of a rework (they decide; words are only a hint):
+      1. the card is bound to an OPEN PR (number in the key or the title):
+         gh pr view must resolve the number to OPEN. An issue number
+         resolves to None (it is not a PR), so a card of new work on an
+         issue is not raised;
+      2. the CURRENT head of this PR carries a reject verdict (CHANGES
+         REQUESTED / RETURN): head_kind from _pr_review_state, strictly
+         bound to the head. PASS or no verdict = not a rework;
+      3. the card was created AFTER the verdict (created_at >=
+         head_reject_at, the time of the FIRST reject on the head: a later
+         duplicate of the same RETURN does not disqualify the card): work
+         created before the verdict is not an answer to it.
+
+    "Does not start a new PR": a rework card does not open its own PR, it
+    names an existing open PR with a verdict on its head.
+
+    memo caches _pr_review_state by number for one pass of the gate (one gh
+    call per PR, shared with _rework_arm_stale). Returns an evidence string
+    (why this is a rework) or None.
+    """
+    repo = board_repo(slug)
+    if not repo:
+        return None
+    if number not in memo:
+        try:
+            memo[number] = _pr_review_state(repo, number)
+        except Exception:
+            memo[number] = None
+    st = memo[number]
+    if not st:
+        return None
+    if st.get("pr_state") != "OPEN":
+        return None
+    if st.get("head_kind") != "reject":
+        return None
+    at = st.get("head_reject_at") or st.get("head_at")
+    if created_at and at and created_at < at:
+        return None
+    return ("open PR #%d, reject verdict on the current head %s, "
+            "card created after the verdict"
+            % (number, (st.get("head") or "")[:7]))
+
+
+def rework_priority_lift(slug, apply=True):
+    """Archive stale rework arms and lift live ones of an open PR to p90.
+
+    Archiving sees ALL statuses except running (a blocked arm on a head that
+    already moved used to stay as a live tail through a head change, and
+    the hourly pass did not touch it). The priority lift stays on
+    ready/todo.
+
+    Card class: by STRUCTURE (_rework_by_structure: an open PR with a reject
+    verdict on the current head, card created after the verdict) or by a
+    hint word: a key with rework (coder-prN-rework-*,
+    reviewer-PRN-rework-verdict-*) or a title "rework by verdict" / "Fix PR
+    #N". Words stay a hint so that a worded card does not lose its priority
+    when gh fails (conservative). PR number from the key (more reliable),
+    otherwise the first #N of the title. Target = svc_priority(slug, number,
+    90): active band 90, inactive exact band, no data 90. Only a priority
+    below the target is edited.
+
+    Before the lift an arm with a named head is compared with the live head
+    of the PR. The head moved, PASS on the same head, or the PR is not OPEN:
+    the card is archived (comment + archive), its priority is not raised.
+    Arms in any status except running are archived.
+    Returns findings (key, rank, text).
+    """
+    db = os.path.join(BOARDS, slug, "kanban.db")
+    if not os.path.exists(db):
+        return []
+    con = sqlite3.connect("file:%s?mode=ro" % db, uri=True, timeout=10)
+    rows = list(con.execute(
+        "SELECT id, title, body, priority, idempotency_key, created_at,"
+        " status FROM tasks WHERE status NOT IN"
+        " ('done','archived','running')"
+        " AND assignee = 'coder'"))
+    con.close()
+    findings = []
+    memo = {}
+    for tid, title, body, prio, key, created_at, st in rows:
+        title = title or ""
+        body = body or ""
+        key = key or ""
+        # Structure decides, words are only a hint.
+        word_hint = bool(_REWORK_LIFT_KEY_RE.search(key)
+                         or _REWORK_LIFT_TITLE_RE.search(title))
+        structural = None
+        if not word_hint:
+            m_num = (re.search(r"[Pp][Rr](\d+)", key)
+                     or _REWORK_PR_TITLE_RE.search(title)
+                     or re.search(r"#(\d+)", title))
+            if not m_num:
+                continue
+            structural = _rework_by_structure(
+                slug, int(m_num.group(1)), created_at, memo)
+            if not structural:
+                continue
+        m = re.search(r"[Pp][Rr](\d+)", key) or re.search(r"#(\d+)", title)
+        if not m:
+            continue
+        number = int(m.group(1))
+        # A stale arm is archived before the lift. The head is also looked
+        # up in the card body (the single helper arm_head7), and a live head
+        # claimed by the card's own run (comment / summary / scheduled
+        # reason with that sha) is not archived: that is its own delivery
+        # cycle, not a foreign duplicate.
+        head7_card = rework_arm_head7(key, title, body)
+        why_stale = _rework_arm_stale(slug, number, head7_card, memo)
+        live_head7 = ((memo.get(number) or {}).get("head") or "")[:7].lower()
+        if why_stale and live_head7 \
+                and _card_claims_head(db, tid, live_head7):
+            why_stale = None
+        if not why_stale and not head7_card:
+            # The head is named nowhere, but the work on the verdict was
+            # already done by another run (the head moved by an executor
+            # commit after the card was created, the PR holds an answer to
+            # the verdict, the card did not claim the push as its own).
+            why_stale = _rework_done_elsewhere(slug, number, created_at,
+                                               memo)
+            if why_stale and live_head7 \
+                    and _card_claims_head(db, tid, live_head7):
+                why_stale = None
+        if why_stale and why_stale.startswith("head of PR #"):
+            marker = (REWORK_DONE_ELSEWHERE_MARKER
+                      if "another run" in why_stale
+                      else REWORK_STALE_MARKER)
+        else:
+            marker = REWORK_STALE_MARKER
+        if why_stale:
+            text = ("    Stale rework arm: " + tid + "\n"
+                    "      " + title[:70] + "\n"
+                    "      " + why_stale + ".")
+            if not apply:
+                findings.append(("%s:rework-stale:%s" % (slug, tid), 1,
+                                 text + " [dry-run: not archived]"))
+                continue
+            run([HERMES, "kanban", "--board", slug, "comment", tid,
+                 marker + " " + why_stale + ". The basis of the arm is "
+                 "gone: the watchdog archives the card, its priority is not "
+                 "raised. If the PR needs a fresh fix, the review layer "
+                 "arms a new card on the current head.",
+                 "--author", "watchdog"], timeout=90)
+            run([HERMES, "kanban", "--board", slug, "archive", tid],
+                timeout=90)
+            findings.append(("%s:rework-stale:%s" % (slug, tid), 1,
+                             text + "\n      Archived: comment + archive."))
+            continue
+        target = svc_priority(slug, number, REWORK_LIFT_PRIO)
+        if (prio or 0) >= target:
+            continue
+        # The lift stays on ready/todo. blocked/review are scanned only to
+        # archive stale arms above; raising the priority of a card that does
+        # not start is pointless.
+        if st not in ("ready", "todo"):
+            continue
+        text = ("    Rework of an open PR: " + tid + "\n"
+                "      " + title[:70] + "\n"
+                + (("      Sign (structure): " + structural
+                    + ".\n") if structural else "")
+                + ("      PR #%d, target p%d (band of the active milestone)."
+                   % (number, target)))
+        if not apply:
+            findings.append(("%s:rework-lift:%s" % (slug, tid), 1,
+                             text + " [dry-run: priority not raised]"))
+            continue
+        run([HERMES, "kanban", "--board", slug, "edit", tid,
+             "--priority", str(target)], timeout=90)
+        run([HERMES, "kanban", "--board", slug, "comment", tid,
+             REWORK_LIFT_MARKER + " PR #%d is open with a verdict, this card"
+             " closes it before the band starts new PRs. Priority"
+             " p%d -> p%d: below review p100 and WCFY p95, above new work of"
+             " the band p80 (finish before starting)."
+             % (number, prio or 0, target), "--author", "watchdog"],
+            timeout=90)
+        findings.append(("%s:rework-lift:%s" % (slug, tid), 1,
+                         text + "\n      Priority raised: p%d -> p%d."
+                         % (prio or 0, target)))
+    return findings
+
+
+# A live review arm in ready/todo is retired when the same PR+head already
+# has a stock review lane or a verdict on the exact head. Race it closes: the
+# watchdog arms a p100 card on an honest snapshot (no lane yet), seconds later
+# the executor requests review and the stock lane starts, while the arm waits
+# in ready for a free slot to run a SECOND review of the same head. The
+# create-time checks are honest only at the moment of create; nothing covered
+# the class "arm still in ready, stock lane already working". Same class as
+# retiring stale rework arms: a continuous rule in the 5-minute
+# --rework-gate-only pass, not a new cron. running is not touched: the run is
+# already paid for and its verdict is required anyway.
+REVIEW_ARM_STALE_MARKER = "Watchdog: review arm retired."
+_REVIEW_ARM_KEY_RE = re.compile(
+    r"^reviewer-pr(\d+)-([0-9a-f]{7,40})(?:-[rp]\d+)?$", re.I)
+
+# Arms on a head that has MOVED are retired too: an arm created on an honest
+# snapshot while the executor keeps pushing waits for a slot to review a head
+# that no longer exists. The stale-rework retirement (head moved = no reason
+# left), extended to every status except running, is shared by review and
+# WCFY arms.
+WCFY_ARM_STALE_MARKER = "Watchdog: WCFY arm retired."
+_WCFY_ARM_KEY_RE = re.compile(
+    r"^coder-pr(\d+)-wcfy-([0-9a-f]{7,40})(?:-r\d+)?$", re.I)
+
+
+def review_arm_liveness_gate(slug, apply=True):
+    """Live automatic review and WCFY arms are retired when their reason is gone.
+
+    Card class: a review arm (assignee reviewer, key
+    reviewer-pr<N>-<head7> with -rN/-pN suffixes) and a WCFY arm (assignee
+    coder, key coder-pr<N>-wcfy-<head7>[-rN]). Retirement sees ALL statuses
+    except running (the run is paid for, its verdict is required anyway).
+    Terminal statuses (done/completed/archived) are not scanned.
+
+    Reasons to retire a review arm:
+      1. the same PR+head already has a stock review lane
+         (_review_cycle_live: a card in review, or running with claim
+         source_status=review): the verdict comes through the stock channel;
+      2. the EXACT head already has a verdict (fresh _pr_review_state, the
+         verdict field is strictly bound to the head);
+      3. the PR head moved: the arm stands on a head that is no longer the
+         PR head. The review layer arms the final head once the executor
+         delivers or leaves the board;
+      4. the PR is not OPEN (MERGED/CLOSED): reviewing the head is pointless;
+      5. the PR is CONFLICTING: the merge ref is not computed, no
+         pull_request CI run is created at all, a PASS on this head is
+         impossible; after the rebase the head changes and the verdict
+         would be stale.
+    Reasons to retire a WCFY arm:
+      1. the head moved (same mechanism as for the review arm);
+      2. the PR is CLOSED without a merge: MERGED does not retire, a WCFY
+         after a merge still makes sense (the comment for users lives in
+         the merged branch too);
+      3. a fresh WCFY already stands on the EXACT head (wcfy_at not older
+         than the head): another channel did the card's work;
+      4. the PR is CONFLICTING: a PASS on such a head is impossible (no CI
+         run), so a WCFY "after PASS" cannot appear before the rebase that
+         changes the head.
+    A gh failure = conservatively not retired (retiring without a reason
+    costs more than an extra run). Returns findings (key, rank, text).
+    """
+    db = os.path.join(BOARDS, slug, "kanban.db")
+    if not os.path.exists(db):
+        return []
+    con = sqlite3.connect("file:%s?mode=ro" % db, uri=True, timeout=10)
+    rows = list(con.execute(
+        "SELECT id, title, body, idempotency_key, status FROM tasks"
+        " WHERE status NOT IN ('done','completed','archived','running')"
+        " AND ((assignee = 'reviewer'"
+        "       AND idempotency_key LIKE 'reviewer-pr%')"
+        "      OR (assignee = 'coder'"
+        "          AND idempotency_key LIKE 'coder-pr%'))"))
+    con.close()
+    findings = []
+    repo = None
+    memo = {}
+    for tid, title, body, key, status in rows:
+        key = key or ""
+        m_rev = _REVIEW_ARM_KEY_RE.match(key)
+        m_wcfy = None if m_rev else _WCFY_ARM_KEY_RE.match(key)
+        if m_rev or m_wcfy:
+            m = m_rev or m_wcfy
+            number, head7 = int(m.group(1)), m.group(2)[:7].lower()
+        else:
+            # A key without a head (reviewer-prN, coder-prN-wcfy-N without a
+            # sha): the head is taken from the title/body by the same helper
+            # arm_head7 used for rework (the head may be named only in the
+            # body). No head found = conservatively not touched. Non-arm keys
+            # (rework and others) are not classified: the class is set by the
+            # prefix reviewer-prN / coder-prN-wcfy.
+            m_rev = (re.match(r"reviewer-pr(\d+)", key, re.I)
+                     if key.lower().startswith("reviewer-pr") else None)
+            m_wcfy = (re.match(r"coder-pr(\d+)-wcfy", key, re.I)
+                      if m_rev is None else None)
+            if not m_rev and not m_wcfy:
+                continue
+            head7 = arm_head7("", title or "", body or "")
+            if not head7:
+                continue
+            number = int((m_rev or m_wcfy).group(1))
+        why = None
+        tail = None
+        if m_rev:
+            tail = ("The arm's reason disappeared after create (the stock"
+                    " lane started or a verdict landed on the head): the"
+                    " watchdog archives the card, the review of this head"
+                    " goes through the stock channel.")
+            busy = _review_cycle_live(slug, number, head7)
+            if busy:
+                why = ("card %s already carries the stock review cycle (%s)"
+                       " on PR #%d %s: the verdict comes through the stock"
+                       " lane, a second run on the same head is a duplicate"
+                       " review"
+                       % (busy[0][0], busy[0][1], number, head7))
+        else:
+            tail = ("The arm's reason disappeared after create: the"
+                    " watchdog archives the card.")
+        if why is None:
+            if repo is None:
+                repo = board_repo(slug)
+            if repo and number not in memo:
+                try:
+                    memo[number] = _pr_review_state(repo, number)
+                except Exception:
+                    memo[number] = None
+            st = memo.get(number)
+            if st is None:
+                continue   # gh failure: conservatively not retired
+            live_head7 = (st.get("head") or "")[:7].lower()
+            if live_head7 and live_head7 != head7:
+                why = ("the head of PR #%d moved: the arm stands on head %s,"
+                       " the live head is %s (the executor keeps pushing or"
+                       " the history was rewritten). A head that no longer"
+                       " exists carries no verdict: the review layer arms"
+                       " the final head once the PR work is delivered"
+                       % (number, head7, live_head7))
+            elif (st.get("mergeable") or "") == "CONFLICTING":
+                # A CONFLICTING head can neither merge nor get a CI run: a
+                # verdict on it would be preliminary and would not count as
+                # PASS.
+                why = ("PR #%d is CONFLICTING: the merge ref is not computed,"
+                       " no pull_request CI run is created, a PASS on head"
+                       " %s is impossible; after the rebase the head changes"
+                       " and the verdict would be stale"
+                       % (number, head7))
+                tail = ("A head under rebase is not confirmed by CI: the"
+                        " watchdog archives the card, the review comes back"
+                        " as an arm on the fresh head.")
+            elif m_wcfy:
+                if (st.get("pr_state") or "") == "CLOSED":
+                    why = ("PR #%d is closed without a merge: no WCFY is"
+                           " needed on its head" % number)
+                elif st.get("wcfy_at") is not None \
+                        and st.get("age") is not None \
+                        and st["wcfy_at"] >= time.time() - st["age"]:
+                    why = ("the exact head %s of PR #%d already has a fresh"
+                           " \"What changes for you\""
+                           % (head7, number))
+            else:
+                if st.get("verdict"):
+                    why = ("the exact head %s of PR #%d already has a verdict"
+                           % (head7, number))
+                elif (st.get("pr_state") or "") in ("MERGED", "CLOSED"):
+                    why = ("PR #%d %s: reviewing the head is no longer"
+                           " needed" % (number, st.get("pr_state")))
+                    tail = ("The PR left OPEN: the watchdog archives the"
+                            " card.")
+        if not why:
+            continue
+        marker = WCFY_ARM_STALE_MARKER if m_wcfy else REVIEW_ARM_STALE_MARKER
+        text = ("    %s arm retired: %s\n"
+                "      %s [%s]\n"
+                "      %s."
+                % ("WCFY" if m_wcfy else "Review", tid,
+                   (title or "")[:70], status, why))
+        if not apply:
+            findings.append(("%s:rev-arm-stale:%s" % (slug, tid), 1,
+                             text + " [dry-run: not retired]"))
+            continue
+        run([HERMES, "kanban", "--board", slug, "comment", tid,
+             marker + " " + why + ". " + tail,
+             "--author", "watchdog"], timeout=90)
+        run([HERMES, "kanban", "--board", slug, "archive", tid],
+            timeout=90)
+        findings.append(("%s:rev-arm-stale:%s" % (slug, tid), 1,
+                         text + "\n      Retired: comment + archive."))
     return findings
 
 
@@ -4681,6 +6950,22 @@ def active_pr_handoff_gate(slug, apply=True):
                              "(hermes kanban reassign %s <profile> and back)."
                              % c["tid"]))
             continue
+        # Bounce = a reassignment: it goes through the single helper. The
+        # detector itself is the check of the stock respawn: %d
+        # respawn_guarded ticks without a handoff event (the stock mechanism
+        # is silent), and that is written into why.
+        covered, guard = board_native_guard.native_or_live(
+            "active-pr-bounce-%s" % c["tid"],
+            live_keys=_live_keys(slug),
+            native_checked=[board_native_guard.NATIVE_RESPAWN],
+            why="%d respawn_guarded ticks without a handoff event: the stock "
+                "respawn does not lift the card, a bounce reassign cycle is "
+                "needed" % c["guard_count"])
+        if covered:
+            findings.append((key, 0,
+                             text + "      50b: bounce suppressed: "
+                             + str(guard)))
+            continue
         for target in (bounce, c["assignee"]):
             run([HERMES, "kanban", "--board", slug, "reassign", c["tid"],
                  target], timeout=90)
@@ -4737,6 +7022,107 @@ def active_pr_handoff_gate(slug, apply=True):
             "      The gate set a handoff: reassign %s->%s->%s, confirmed by "
             "an event in the database, + a comment with the reason."
             % (c["assignee"], bounce, c["assignee"]))))
+    return findings
+
+
+# --- The cause of a silent p>=80 layer, not the symptom of a busy slot ---
+
+GUARDED_READY_PRIO = 80          # the layer whose silence is a finding
+GUARDED_READY_MIN_S = 30 * 60    # a guard held for more than 30 minutes
+GUARDED_READY_KINDS = ("spawned", "assigned", "respawn_guarded")
+
+
+def guarded_ready_lint(slug):
+    """A ready p>=80 card held by respawn_guarded for more than 30 minutes: finding.
+
+    I3 (board_lint) fixes the symptom: it takes the slot from a p<50 card
+    while the p>=80 layer is non-empty, and says nothing about the cause. A
+    p80 card can sit in ready for hours under active_pr after its OWN
+    handoff comment with a PR URL (a case the foreign-link branch of
+    active_pr_handoff_gate deliberately does not touch: author == assignee,
+    fail closed), while I3 keeps cycling reclaim p40 -> respawn p40. Nobody
+    named the cause: the dispatcher quietly writes respawn_guarded every
+    ~2 min.
+
+    Condition: status=ready, priority>=80, the card's current event streak
+    (after the last spawned/assigned) consists of respawn_guarded and lasts
+    longer than 30 min. The cause in the text: counts by reason, who gave
+    the PR link within the 24 h window (assignee-self / another profile),
+    how many own runs. NO actions: lifting the guard for an own comment
+    stays a human decision (fail closed).
+    """
+    db = os.path.join(BOARDS, slug, "kanban.db")
+    if not os.path.exists(db):
+        return []
+    con = sqlite3.connect("file:%s?mode=ro" % db, uri=True, timeout=10)
+    now = time.time()
+
+    def _ts(value):
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return _iso_to_epoch(value) or None
+
+    findings = []
+    try:
+        rows = con.execute(
+            "select id, title, assignee, priority from tasks "
+            "where status = 'ready' and priority >= ?",
+            (GUARDED_READY_PRIO,)).fetchall()
+        for tid, title, assignee, prio in rows:
+            events = con.execute(
+                "select kind, payload, created_at from task_events "
+                "where task_id = ? and kind in (?, ?, ?) "
+                "order by created_at desc", (tid,) + GUARDED_READY_KINDS
+            ).fetchall()
+            streak = []
+            for kind, payload, at in events:
+                if kind != "respawn_guarded":
+                    break
+                streak.append((payload, _ts(at)))
+            if not streak:
+                continue
+            ats = [at for _, at in streak if at]
+            if not ats:
+                continue
+            first_at = min(ats)
+            if now - first_at < GUARDED_READY_MIN_S:
+                continue
+            reasons = {}
+            for payload, _ in streak:
+                try:
+                    reason = json.loads(payload or "{}").get("reason", "?")
+                except ValueError:
+                    reason = "?"
+                reasons[reason] = reasons.get(reason, 0) + 1
+            runs = con.execute(
+                "select count(*) from task_runs where task_id = ? and "
+                "outcome != 'scheduled'", (tid,)).fetchone()[0]
+            pr_author = None
+            for author, body, at in con.execute(
+                    "select author, body, created_at from task_comments "
+                    "where task_id = ? and created_at > ? order by created_at",
+                    (tid, now - ACTIVE_PR_PR_WINDOW_S)):
+                if at and ACTIVE_PR_PR_URL_RE.search(body or ""):
+                    pr_author = ("assignee-self (own handoff comment)"
+                                 if author == assignee
+                                 else "another profile %s" % author)
+                    break
+            cause = ", ".join("%s x%d" % kv for kv in sorted(reasons.items()))
+            src = ""
+            if "active_pr" in reasons:
+                src = (" The PR link within the 24 h window was given by %s,"
+                       " own runs %d." % (pr_author or "not found", runs))
+            findings.append(("%s:r48:guarded:%s" % (slug, tid), 1, (
+                "    READY-UNDER-GUARD: %s (p%d) in ready for %.0f min, the "
+                "dispatcher does not spawn it: %s.%s Lifting the active_pr "
+                "guard: a handoff event after the comment with the link "
+                "(reassign there and back) or the foreign-link branch of the "
+                "active_pr gate.\n      %s"
+                % (tid, prio, (now - first_at) / 60.0, cause, src,
+                   title[:70]))))
+    finally:
+        con.close()
     return findings
 def _stacked_workdir(slug):
     """default_workdir of the board from board.json (the same file board_repo reads)."""
@@ -4941,6 +7327,431 @@ def needs_input_tech_gate(slug, apply=True):
     return findings
 
 
+def initial_status_unstick_gate(slug, apply=True):
+    """An eternal initial_status block on the children of an accepted plan.
+
+    The architect creates decomposition children with
+    ``create --initial-status blocked`` + ``link <root> <child>`` and hands
+    the plan to the built-in review lane (``kanban_request_review``). The
+    core completes the root on ACCEPTED but does not lift the children:
+    recompute_ready treats any blocked status as sticky (the last event
+    kind='blocked' -> "only an explicit kanban unblock"), and the block with
+    reason='initial_status' hangs forever. The plan review gate runs in
+    DRAIN_ONLY and does not lead such roots.
+
+    Gate rule: a card in blocked whose last blocked/unblocked event carries
+    reason='initial_status' AND which has parents by links, ALL of them
+    closed (done/archived) -> unblock; the core re-gates by parents itself
+    (ready). Children with an open parent are not touched: the hourly pass
+    lifts them after the parent closes (the last event stays the
+    initial_status block). Operator blocks (another reason) and
+    initial_status cards without parents are not touched: the latter go to
+    the report as a finding without an action.
+    Idempotency: after the unblock the last event is 'unblocked', a repeated
+    pass is silent.
+    Returns findings (key, rank, text).
+    """
+    db = os.path.join(BOARDS, slug, "kanban.db")
+    if not os.path.exists(db):
+        return []
+    findings = []
+    con = sqlite3.connect("file:%s?mode=ro" % db, uri=True, timeout=10)
+    try:
+        rows = con.execute(
+            "SELECT id, title FROM tasks WHERE status = 'blocked'").fetchall()
+        for tid, title in rows:
+            ev = con.execute(
+                "SELECT payload FROM task_events WHERE task_id = ? "
+                "AND kind IN ('blocked', 'unblocked') "
+                "ORDER BY id DESC LIMIT 1", (tid,)).fetchone()
+            if not ev or not ev[0]:
+                continue
+            try:
+                payload = json.loads(ev[0])
+            except (ValueError, TypeError):
+                continue
+            if payload.get("reason") != "initial_status":
+                continue          # an operator/work block: not ours
+            parents = con.execute(
+                "SELECT p.status FROM task_links l "
+                "JOIN tasks p ON p.id = l.parent_id "
+                "WHERE l.child_id = ?", (tid,)).fetchall()
+            key = "%s:initial-status-unstick:%s" % (slug, tid)
+            if not parents:
+                findings.append((key, 1,
+                                 "    Eternal initial_status block without "
+                                 "parents: %s\\n      %s\\n"
+                                 "      Nobody will lift this card by "
+                                 "itself; move it to needs_input with a "
+                                 "release condition or close it."
+                                 % (tid, (title or "")[:70])))
+                continue
+            if any(p[0] not in ("done", "archived") for p in parents):
+                continue          # waits for a parent through a stock link
+            text = ("    Eternal initial_status block of a child of a closed "
+                    "root: %s\\n      %s\\n"
+                    "      The plan is accepted (root done), the core treats "
+                    "the block as sticky and does not lift the child."
+                    % (tid, (title or "")[:70]))
+            if not apply:
+                findings.append((key, 1, text +
+                                 " [dry-run: no unblock is done]"))
+                continue
+            run([HERMES, "kanban", "--board", slug,
+                 "unblock", tid], timeout=90)
+            st = None
+            try:
+                vcon = sqlite3.connect("file:%s?mode=ro" % db, uri=True,
+                                       timeout=10)
+                row = vcon.execute(
+                    "SELECT status FROM tasks WHERE id = ?", (tid,)).fetchone()
+                st = row[0] if row else None
+                vcon.close()
+            except sqlite3.Error:
+                st = None
+            if st not in ("ready", "todo", "review"):
+                findings.append((key, 1, text +
+                                 " unblock was sent, but the status is "
+                                 "\"%s\": check hermes kanban show %s."
+                                 % (st, tid)))
+                continue
+            run([HERMES, "kanban", "--board", slug, "comment", tid,
+                 "Watchdog: lifted an eternal initial_status block. "
+                 "The plan root is closed (ACCEPTED), but the core treats "
+                 "any blocked status as sticky and waits for an explicit "
+                 "unblock; children created with create --initial-status "
+                 "blocked are not lifted by themselves. From here the chain "
+                 "goes through stock links: the hourly watchdog lifts every "
+                 "closed link the same way.",
+                 "--author", "watchdog"], timeout=90)
+            findings.append((key, 1, text + " Unblocked -> %s." % st))
+    finally:
+        con.close()
+    return findings
+
+
+# Tails of closed issues: when the owner closes an issue (its PR merged), the
+# links of its chain on the board (root architect, stability check, an ops
+# "close #N" card) must not stay alive.
+CLOSED_TAIL_REPO = cfg("FACTORY_REPO")
+CLOSED_TAIL_CACHE = os.path.join(HOME, "cache", "closed-issue-tail.json")
+CLOSED_TAIL_TTL_S = 1800
+# an hour between closing the issue and retiring its tail: let the delivery
+# comments land and the closer card complete by itself
+CLOSED_TAIL_GRACE_S = 3600
+CLOSED_TAIL_MARKER = "closed-issue-tail"
+CLOSED_TAIL_REBIND_MARKER = "closed-dup-rebind"
+DUP_OF_RE = re.compile(r"[Dd]uplicate of #(\d{1,5})")
+CLOSED_TAIL_DUP_CACHE = os.path.join(HOME, "cache", "closed-issue-dups.json")
+
+
+def closed_tail_anchor_refs(title, body):
+    """Anchors of a card: #N in the title or in a body line "Issue: #N".
+
+    Passing mentions of #N inside the text are NOT anchors: an issue-link
+    comment may list an open issue in passing while the card belongs to the
+    chain of a closed one.
+    """
+    out = set()
+    out.update(int(n) for n in re.findall(r"#(\d{1,5})", title or ""))
+    for ln in (body or "").splitlines():
+        if re.match(r"\s*(issues?|mirror)\s*:", ln, re.I):
+            out.update(int(n) for n in re.findall(r"#(\d{1,5})", ln))
+    return out
+
+
+def closed_tail_fetch_states(now=None):
+    """(closed={N: close epoch}, opens={N}) for the issues of the board repo.
+
+    Two gh calls, cached for 30 minutes. A PR number (shared numbering with
+    issues) never appears in these lists: an anchor like "PR #N" is silently
+    ignored. Tests replace this function as a whole.
+    """
+    now = now if now is not None else time.time()
+    try:
+        data = json.load(open(CLOSED_TAIL_CACHE))
+        if now - (data.get("ts") or 0) <= CLOSED_TAIL_TTL_S:
+            return ({int(k): v for k, v in (data.get("closed") or {}).items()},
+                    set(data.get("open") or ()))
+    except Exception:
+        pass
+    closed = {}
+    raw = run(["gh", "issue", "list", "--repo", CLOSED_TAIL_REPO,
+               "--state", "closed", "--limit", "500", "--json",
+               "number,closedAt"], timeout=90)
+    for it in json.loads(raw or "[]"):
+        try:
+            epoch = datetime.fromisoformat(
+                (it.get("closedAt") or "").replace("Z", "+00:00")).timestamp()
+        except Exception:
+            epoch = 0
+        closed[int(it["number"])] = epoch
+    opens = set()
+    raw = run(["gh", "issue", "list", "--repo", CLOSED_TAIL_REPO,
+               "--state", "open", "--limit", "500", "--json", "number"],
+              timeout=90)
+    opens = {int(it["number"]) for it in json.loads(raw or "[]")}
+    try:
+        json.dump({"ts": now, "closed": closed, "open": sorted(opens)},
+                  open(CLOSED_TAIL_CACHE, "w"))
+    except OSError:
+        pass
+    return closed, opens
+
+
+def closed_tail_dup_lookup(n, repo=None):
+    """Original of a closed duplicate: #N from "Duplicate of #N" (issue body
+    or comment). Cached on disk: a duplicate does not change after closing.
+    Any failure -> None: no rebind, the closed-tail gate semantics apply.
+    """
+    repo = repo or CLOSED_TAIL_REPO
+    key = "%s#%d" % (repo, n)
+    try:
+        cache = json.load(open(CLOSED_TAIL_DUP_CACHE))
+        if key in cache:
+            return cache[key]
+    except Exception:
+        cache = {}
+    target = None
+    try:
+        raw = run(["gh", "issue", "view", str(n), "--repo", repo,
+                   "--json", "body,comments"], timeout=90)
+        data = json.loads(raw or "{}") or {}
+        texts = [data.get("body") or ""]
+        texts += [c.get("body") or ""
+                  for c in (data.get("comments") or [])]
+        for t in texts:
+            m = DUP_OF_RE.search(t)
+            if m:
+                target = int(m.group(1))
+                break
+    except Exception:
+        target = None
+    cache[key] = target
+    try:
+        json.dump(cache, open(CLOSED_TAIL_DUP_CACHE, "w"),
+                  ensure_ascii=False)
+    except OSError:
+        pass
+    return target
+
+
+def _rebind_anchor_text(title, body, pairs):
+    """#n -> #target in the title and in the "Issue:" lines of the body.
+
+    Prose is left alone: incidental #N have other roles (incident context,
+    guarantees of neighbouring issues) and are not anchors
+    (closed_tail_anchor_refs).
+    """
+
+    def sub(s):
+        for a, b in pairs.items():
+            s = re.sub(r"#%d\b" % a, "#%d" % b, s)
+        return s
+
+    title2 = sub(title or "")
+    out = []
+    for ln in (body or "").splitlines():
+        if re.match(r"\s*(issues?|mirror)\s*:", ln, re.I):
+            ln = sub(ln)
+        out.append(ln)
+    body2 = "\n".join(out)
+    if (body or "").endswith("\n"):
+        body2 += "\n"
+    return title2, body2
+
+
+def closed_duplicate_rebind(slug, apply=True, now=None, fetch=None,
+                            dup_of=None):
+    """Closing an issue as a DUPLICATE rebinds the live chain.
+
+    Why: an issue was closed with "Duplicate of #N" while a chain of cards
+    still carried the closed number as its anchor, and the closed-tail gate
+    archived the whole chain an hour later although the work was alive and
+    needed. A duplicate is a REBIND, not the death of the work.
+
+    Rule: an anchor of the card (closed_tail_anchor_refs) was closed more
+    than an hour ago (the same grace as for tails) and the issue has
+    "Duplicate of #N" with an OPEN #N -> along the closed task_links chain
+    the anchors are rewritten #duplicate -> #original (title and "Issue:"
+    lines) and a marker comment is put on every link. Statuses and runs are
+    not touched (the admission gate fixes the band: the anchor is now the
+    open original). The original is closed or there is no duplicate ->
+    silence, the closed_issue_tail_gate semantics apply.
+
+    Returns findings [(key, severity, text)].
+    """
+    db = os.path.join(BOARDS, slug, "kanban.db")
+    if not os.path.exists(db):
+        return []
+    now = now if now is not None else time.time()
+    fetch = fetch or closed_tail_fetch_states
+    dup_of = dup_of or closed_tail_dup_lookup
+    try:
+        closed, opens = fetch(now)[:2]
+    except Exception:
+        return []
+    con = sqlite3.connect("file:%s?mode=ro" % db, uri=True, timeout=10)
+    live = list(con.execute(
+        "SELECT id, title, coalesce(body,''), status FROM tasks"
+        " WHERE status NOT IN ('done','archived')"))
+    links = list(con.execute(
+        "SELECT parent_id, child_id FROM task_links"))
+    con.close()
+    parents, children = {}, {}
+    for pid, cid in links:
+        parents.setdefault(cid, []).append(pid)
+        children.setdefault(pid, []).append(cid)
+    info = {tid: (t or "", b or "", st) for tid, t, b, st in live}
+    live_ids = set(info)
+    findings = []
+    handled = set()
+    for tid in sorted(info):
+        if tid in handled:
+            continue
+        title, body, _status = info[tid]
+        a = closed_tail_anchor_refs(title, body)
+        stale = sorted(n for n in a if n in closed
+                       and CLOSED_TAIL_GRACE_S < now - closed[n])
+        pairs = {}
+        for n in stale:
+            t = dup_of(n)
+            if t and t in opens:
+                pairs[n] = t
+        if not pairs:
+            continue
+        # the chain: a closed walk in both directions over live links
+        chain, stack = {tid}, [tid]
+        while stack:
+            x = stack.pop()
+            for nxt in parents.get(x, []) + children.get(x, []):
+                if nxt in live_ids and nxt not in chain:
+                    chain.add(nxt)
+                    stack.append(nxt)
+        handled |= chain
+        note = ", ".join("#%d -> #%d" % (k, v)
+                         for k, v in sorted(pairs.items()))
+        for x in sorted(chain):
+            xtitle, xbody, _xst = info[x]
+            title2, body2 = _rebind_anchor_text(xtitle, xbody, pairs)
+            if apply and (title2 != xtitle or body2 != xbody):
+                cmd = [HERMES, "kanban", "--board", slug, "edit", x]
+                if title2 != xtitle:
+                    cmd += ["--title", title2]
+                if body2 != xbody:
+                    cmd += ["--body", body2]
+                run(cmd, timeout=90)
+            if apply:
+                run([HERMES, "kanban", "--board", slug, "comment", x,
+                     CLOSED_TAIL_REBIND_MARKER
+                     + ": the issue was closed as a duplicate of an open"
+                     " original (%s), anchor rebound, the chain lives on"
+                     % note], timeout=90)
+            findings.append((
+                "closedtail-rebind:%s:%s" % (slug, x), 5,
+                "    %s rebound to the original (%s): the duplicate is"
+                " closed, the work lives on" % (x, note)))
+    return findings
+
+
+def closed_issue_tail_gate(slug, apply=True, now=None, fetch=None):
+    """Retire the live links of the chain of a closed issue.
+
+    Stock paths checked before writing this (native-or-live rule; none of
+    them fires when an issue is closed):
+      - the kanban core reacts to GitHub events (issue closed) only by
+        mirroring comments into the card feed ("github: ..."), it takes no
+        action;
+      - dependency_wait releases children when a CARD closes, not an issue;
+      - pr-hygiene closes issues by merged PRs (the forward direction); the
+        reverse (issue closed -> retire cards) exists nowhere in scripts/.
+    Rule: all anchors of a card (closed_tail_anchor_refs) are issues closed
+    more than an hour ago -> the card is dead together with the issue. The
+    closed task_links chain of the anchor is retired: todo/ready/scheduled/
+    blocked are archived with a marker comment, running gives an owner
+    finding (the run burns quota). Follow-up exception: a link with an
+    anchor on an OPEN issue continues the work and is not retired.
+    """
+    db = os.path.join(BOARDS, slug, "kanban.db")
+    if not os.path.exists(db):
+        return []
+    now = now if now is not None else time.time()
+    fetch = fetch or closed_tail_fetch_states
+    closed, opens = fetch(now)
+    con = sqlite3.connect("file:%s?mode=ro" % db, uri=True, timeout=10)
+    try:
+        rows = list(con.execute(
+            "select id, status, title, body from tasks"
+            " where status not in ('done','archived','cancelled')"))
+        links = list(con.execute(
+            "select parent_id, child_id from task_links"))
+    except sqlite3.Error:
+        return []
+    finally:
+        con.close()
+    live = {r[0] for r in rows}
+    info = {r[0]: (r[1], r[2] or "", r[3] or "") for r in rows}
+    adj = {}
+    for a, b in links:
+        adj.setdefault(a, set()).add(b)
+        adj.setdefault(b, set()).add(a)
+
+    def anchors(tid):
+        status, title, body = info[tid]
+        return closed_tail_anchor_refs(title, body)
+
+    def dead_anchors(tid, a):
+        return (a and all(n in closed and now - closed[n] > CLOSED_TAIL_GRACE_S
+                          for n in a))
+
+    findings = []
+    handled = set()
+    mutatable = {"todo", "ready", "scheduled", "blocked"}
+    for tid in sorted(live):
+        if tid in handled:
+            continue
+        a = anchors(tid)
+        if not dead_anchors(tid, a):
+            continue
+        chain, stack = set(), [tid]
+        while stack:
+            x = stack.pop()
+            if x in chain or x not in live:
+                continue
+            chain.add(x)
+            stack.extend(adj.get(x, ()))
+        for x in sorted(chain):
+            if x in handled:
+                continue
+            handled.add(x)
+            status, _title, _body = info[x]
+            xa = anchors(x)
+            open_a = sorted(n for n in xa if n in opens)
+            if open_a:
+                findings.append(("closedtail-keep:%s:%s" % (slug, x), 5,
+                                 "    %s kept: follow-up on the open "
+                                 "issue %s" % (x, open_a)))
+                continue
+            if status in mutatable:
+                if apply:
+                    run([HERMES, "kanban", "--board", slug, "comment", x,
+                         CLOSED_TAIL_MARKER + ": issue %s closed by the owner, "
+                         "the chain link was retired by the watchdog; card "
+                         "anchors: %s" % (sorted(a), sorted(xa))], timeout=90)
+                    run([HERMES, "kanban", "--board", slug, "archive", x],
+                        timeout=90)
+                findings.append(("closedtail:%s:%s" % (slug, x), 5,
+                                 "    %s archived: tail of the closed "
+                                 "issue %s" % (x, sorted(a))))
+            elif status == "running":
+                findings.append(("closedtail-run:%s:%s" % (slug, x), 5,
+                                 "    %s RUNNING on the tail of the closed issue "
+                                 "%s: the run burns quota, stop the run or "
+                                 "retire the card after it finishes"
+                                 % (x, sorted(a))))
+    return findings
+
+
 def stacked_rework_gate(slug, apply=True):
     """Alert on a live stack on top of an open PR without an owner decision.
     Idempotency is a marker comment on the PR: while the marker is there,
@@ -5114,46 +7925,6 @@ def board_lint(slug, dry_run=False):
                             and parent in gave_up))
         if parent_stuck:
             i1_planned.append((parent, child, kind))
-    # --- Children of one PR under one blocked parent go parallel after
-    #     unlink (two coders on one branch). Before the parent is released,
-    #     the children of one PR are chained with link <earlier> <later>
-    #     (rebase/WCFY as the last link): the first one is released, the
-    #     others wait in dependency_wait.
-    i1_pkg = {}
-    for parent, child, kind in i1_planned:
-        if kind != "rework":
-            continue
-        pr = _serial_card_pr(tasks[child]["title"], tasks[child]["key"])
-        if pr:
-            i1_pkg.setdefault((parent, pr), []).append(child)
-    for (parent, pr), members in sorted(i1_pkg.items()):
-        if len(members) < 2:
-            continue
-        order = serial_rework_order(
-            [{"id": c, "title": tasks[c]["title"], "created": tasks[c]["created"]}
-             for c in members])
-        ids = [c["id"] for c in order]
-        for prev, nxt in zip(ids, ids[1:]):
-            if (prev, nxt) in links or (nxt, prev) in links:
-                continue
-            if dry_run:
-                found.append(("%s:lint:i1c:%s:%s-%s" % (slug, parent, prev, nxt), 1, (
-                    "    I1 (dry-run): children of one PR #%s are chained "
-                    "%s -> %s before releasing %s." % (pr, prev, nxt, parent))))
-                continue
-            kanban("link", prev, nxt)
-            links.add((prev, nxt))
-            if not any(SERIAL_REWORK_MARKER in b for b in comments.get(nxt, [])):
-                kanban("comment", nxt,
-                       SERIAL_REWORK_MARKER + " Link %s -> %s was added "
-                       "before releasing the blocked parent %s: children of "
-                       "one PR #%s run strictly in sequence. "
-                       "The platform will pick the card up when %s closes."
-                       % (prev, nxt, parent, pr, prev))
-            found.append(("%s:lint:i1c:%s:%s-%s" % (slug, parent, prev, nxt), 1, (
-                "    I1: children of one PR #%s are chained %s -> %s "
-                "before releasing %s (parallel release is ruled out)."
-                % (pr, prev, nxt, parent))))
     for parent, child, kind in i1_planned:
         key = "%s:lint:i1:%s:%s" % (slug, parent, child)
         title = tasks[child]["title"][:70]
@@ -5267,29 +8038,65 @@ def board_lint(slug, dry_run=False):
                                            len(high_ready), LINT_HIGH_PRIO,
                                            high_ready[0], title))))
             continue
-        kanban("move", tid, "todo")
-        if not has_marker(tid, 3):
-            kanban("comment", tid,
-                   "Watchdog lint I3: the card went back to todo: with %d "
-                   "ready cards p>=%d (first %s) slots are not held by "
-                   "cards p<%d. It returns to work when the layer empties."
-                   % (len(high_ready), LINT_HIGH_PRIO, high_ready[0],
-                      LINT_START_FLOOR))
+        # There is no "move" subcommand in the kanban CLI, so an old call
+        # always failed and its "went back to todo" comment was false. The
+        # stock action that really takes a card off its run: reclaim
+        # (terminates the worker, clears the claim, returns the retry status
+        # ready/todo, writes the reason into the event).
+        kanban("reclaim", tid, "--reason",
+               "board-watchdog lint I3: slot p%d with %d ready p>=%d"
+               % (t["priority"], len(high_ready), LINT_HIGH_PRIO))
         t2 = _lint_data(slug)[0].get(tid)
         if t2 and t2["status"] == "running" and (t2["priority"] or 0) < LINT_START_FLOOR:
             found.append(("%s:lint:i3f:%s" % (slug, tid), 1, (
-                "    I3 NOT FIXED: %s (p%d) did not leave running with %d ready "
-                "p>=%d.\n      %s" % (tid, t["priority"], len(high_ready),
+                "    I3 NOT FIXED: %s (p%d) did not leave running after "
+                "reclaim with %d ready p>=%d.\n      %s"
+                % (tid, t2["priority"], len(high_ready),
                                       LINT_HIGH_PRIO, title))))
         else:
+            # The comment is written only after re-reading the board: the
+            # reclaim is confirmed, the card is no longer running.
+            if not has_marker(tid, 3):
+                kanban("comment", tid,
+                       "Watchdog lint I3: the run was taken off by reclaim: "
+                       "with %d ready cards p>=%d (first %s) slots are not "
+                       "held by cards p<%d. It returns to work when the "
+                       "layer empties."
+                       % (len(high_ready), LINT_HIGH_PRIO, high_ready[0],
+                          LINT_START_FLOOR))
             found.append((key, 1, (
-                "    I3 FIXED: %s (p%d) had started with %d ready p>=%d, "
-                "moved to todo with a comment.\n      %s"
+                "    I3 FIXED: %s (p%d) taken off its slot by reclaim with "
+                "%d ready p>=%d, status after re-read: %s.\n      %s"
                 % (tid, t["priority"], len(high_ready), LINT_HIGH_PRIO,
-                   title))))
+                   (t2 or {}).get("status", "?"), title))))
 
-    # --- I4: ready without an assignee: the stock stranded_in_ready diagnostic
-    #     (a custom detector was removed as a duplicate of the stock one)
+    # --- I4: ready without an assignee, alert
+    #     A custom detector was once removed as a duplicate of the stock
+    #     stranded_in_ready, but the stock rule skips an empty assignee on
+    #     purpose (kanban_diagnostics.py returns nothing for it and points
+    #     at the dispatcher's skipped_unassigned), and skipped_unassigned is
+    #     only a field of the tick result: the gateway dispatcher notifies
+    #     nobody about it. A card created past admission without an assignee
+    #     (a cron, by hand) dies silently. So the detector is back as an
+    #     ALERT: the watchdog does not fill in the assignee (the assignee is
+    #     required at creation, the creator picks the profile by the meaning
+    #     of the card; a silent kanban.default_assignee would break profile
+    #     routing).
+    for tid, t in sorted(live.items()):
+        if t["status"] != "ready" or (t["assignee"] or "").strip():
+            continue
+        since = status_since.get(tid) or max(t["completed"], t["started"],
+                                             t["created"])
+        age = now - since
+        if age < UNASSIGNED_AFTER:
+            continue
+        found.append(("%s:lint:i4:%s" % (slug, tid), 1, (
+            "    I4: %s has been in ready without an assignee for %.1f h: the "
+            "dispatcher skips it silently (skipped_unassigned), the stock "
+            "stranded_in_ready does not see an empty assignee.\n"
+            "      %s\n      fix by hand: hermes kanban --board %s "
+            "assign %s <profile> (or close the card)"
+            % (tid, age / 3600, t["title"][:70], slug, tid))))
 
     # --- I5: nonstandard status for over an hour, alert
     for tid, t in sorted(tasks.items()):
@@ -5734,6 +8541,15 @@ def _gate_board_comment(key, state, now, body):
     """Alert comment on the gate board (dedup REPEAT_AFTER, like all others)."""
     if now - state.get(key, 0) <= REPEAT_AFTER:
         return ""
+    # Native-or-live rule: the shared helper before create.
+    covered, guard = board_native_guard.native_or_live(
+        GATE_ALERT_KEY,
+        live_keys=_live_keys(GATE_BOARD),
+        native_checked=[board_native_guard.NATIVE_RESPAWN],
+        why="alert of the kanban.max_in_progress gate for a human: there "
+            "is no stock delivery of the gate diagnostics (delivery side)")
+    if covered:
+        return ""
     card = ""
     out = run([HERMES, "kanban", "--board", GATE_BOARD, "create",
                "max_in_progress gate: watchdog alerts",
@@ -5872,9 +8688,25 @@ def twin_blocked_missing_module_detector(slug):
         )
 
         # Create an ops card with the escalation (the idempotency key prevents a duplicate)
+        # Native-or-live rule: the shared helper before create.
+        covered, guard = board_native_guard.native_or_live(
+            "twin-missing-module:%s:%s" % (slug, task_id),
+            live_keys=_live_keys(slug),
+            native_checked=[
+                board_native_guard.NATIVE_TASK_LINKS,
+                board_native_guard.NATIVE_RESPAWN],
+            why="twin blocked by >=2 runs on a missing module: there is no "
+                "stock detector for \"the dependency does not exist on the "
+                "target branch\", the owner's choice needs an escalation")
+        if covered:
+            result.append((key, 0,
+                           text + "\n      native-or-live: ops card not created: "
+                           + str(guard)))
+            continue
         run([HERMES, "kanban", "--board", slug, "create",
              "[ops] Twin blocked: port prerequisite module for %s" % task_id[:12],
              "--body",
+             board_native_guard.guard_section(guard) +
              "Twin card `%s` (\"%s\") is blocked after >=2 runs:\n"
              "the dependent module does not exist on the target branch.\n\n"
              "Options:\n"
@@ -6081,20 +8913,23 @@ def conflict_debt_gate(slug, state, now=None, apply=True):
     return None
 
 
-# ---------------- Backlog owner gate ----------------
+# ---------------- Backlog gate: the owner of the backlog ----------------
 # Owner rules:
 #   1) cards of the factory's own initiative live in triage; once a day the
-#      watchdog collects a triage digest (id, why, estimate) into the owner
+#      watchdog gathers a triage digest (id, why, estimate) into the owner's
 #      report; only what the owner raises, or what carries the label of a
 #      milestone issue, goes to work;
-#   2) ready = cards of issues/PRs of the repository's OPEN milestones
-#      (an issue by its GitHub milestone, a PR by Refs/Closes of such an
-#      issue) plus ops; everything else goes back to triage with a comment
-#      giving the reason. The list of active milestones comes from GitHub
-#      state=open, no release names live in the code. A closed milestone
-#      stops applying by itself, a new one starts without a code change.
-#      With no open milestones at all the gate parks nothing and says so in
-#      the report.
+#   2) REMOVED: the admission mechanics (rule 2 "outside milestone", parking
+#      of ready cards and the raise by owner review) were merged into the
+#      admission gate (admission_gate), which was built for the same job.
+#      Both gates once fired against each other: admission returned a card,
+#      the backlog gate parked it again, and cards stayed in scheduled
+#      because admission did not know the backlog marker. The exceptions
+#      moved to admission_gate (ops, a direct PR milestone, owner review).
+#      What remains here is the digest (rule 1) and the p0 archive (rule 3);
+#      the linkage cache feeds only them and is reset when milestones change
+#      (see backlog_cache_reset_on_milestone_change); board actions are no
+#      longer taken from it;
 #   3) a p0 in todo/ready/triage with no movement for more than 14 days is
 #      archived with a reason; movement = a run or a status event, comments
 #      do not count (stale candidates may carry fresh owner comments with
@@ -6258,48 +9093,37 @@ def backlog_linkage(now=None):
     return None, False
 
 
-def backlog_refs(card):
-    text = "%s\n%s" % (card.get("title") or "", card.get("body") or "")
-    refs = set(int(x) for x in re.findall(r"#(\d+)", text))
-    refs |= set(int(x) for x in re.findall(r"/issues/(\d+)", text))
-    return refs
+def backlog_cache_reset_on_milestone_change(states):
+    """Reset the linkage cache when milestones change.
 
-
-def backlog_classify(card, linkage):
-    """(action, category, info): keep|demote by rule 2 of the backlog gate."""
-    if (card.get("assignee") or "") == "ops":
-        return "keep", "ops", None
-    refs = backlog_refs(card)
-    if not refs:
-        return "demote", "no_ref", None
-    ms_issues = linkage.get("ms_issues") or {}
-    open_pr_refs = linkage.get("open_pr_refs") or {}
-    direct = set(linkage.get("direct_ms_prs") or [])
-    linked_issues = sorted(n for n in refs if n in ms_issues)
-    via_pr = sorted(set(n for n in refs if n in open_pr_refs
-                        for m in open_pr_refs[n] if m in ms_issues))
-    if linked_issues or via_pr:
-        if via_pr or any(ms_issues[n] == "open" for n in linked_issues):
-            return "keep", "milestone", linked_issues or via_pr
-        return "keep", "milestone_stale_closed", linked_issues
-    pr_refs = sorted(n for n in refs if n in open_pr_refs)
-    if pr_refs:
-        if set(pr_refs) & direct:
-            # Owner decision: a direct milestone label on a PR counts as
-            # linkage, the card stays in ready. A missing Refs/Closes on the
-            # issue stays a hygiene violation, which pr-hygiene catches; the
-            # backlog gate no longer demotes for it.
-            return "keep", "milestone", pr_refs
-        if set(pr_refs) & set(linkage.get("owner_review_prs") or []):
-            # The owner's formal review (APPROVED/CHANGES_REQUESTED) is the
-            # owner's decision to work on the PR. Cards of such a PR are not
-            # parked: otherwise the Before/After item of the verdict can end
-            # up in a parked visual-delta card and the merge stalls over a
-            # two-line formality. The backlog parks what is "outside the
-            # owner's attention", and a review is attention.
-            return "keep", "pr_owner_review", pr_refs
-        return "demote", "pr_not_milestone", pr_refs
-    return "demote", "issue_not_milestone", sorted(refs)
+    Why: milestones were assigned to issues, but the gate took the linkage
+    from its cache (TTL 6 h, stale-ok up to a day) and parked cards as
+    "outside milestone" by a stale cache. Every open issue with a milestone
+    that the cache does not know (or the other way round, one that left the
+    live list) drops the cache: the next backlog_linkage re-reads GitHub and
+    a fresh milestone applies on the next run. Called from admission_gate.
+    """
+    try:
+        with open(BACKLOG_CACHE) as fh:
+            data = json.load(fh)
+    except Exception:
+        return
+    if not isinstance(data, dict) or "ms_titles" not in data:
+        return
+    cached = set()
+    for num, st in (data.get("ms_issues") or {}).items():
+        try:
+            if st == "open":
+                cached.add(int(num))
+        except (TypeError, ValueError):
+            continue
+    for num, (milestone, _labels, *_rest) in states.items():
+        if bool(milestone) != (num in cached):
+            try:
+                os.remove(BACKLOG_CACHE)
+            except OSError:
+                pass
+            return
 
 
 def backlog_estimate(card):
@@ -6307,91 +9131,12 @@ def backlog_estimate(card):
     return "S" if nlines <= 12 else ("M" if nlines <= 30 else "L")
 
 
+# classify/park_backlog/raise_owner_reviewed were removed together with
+# rule 2: admission is done by admission_gate (see the section comment
+# above). BACKLOG_PARK_MARKER stays: the digest collects old parkings by it,
+# and admission_gate returns them once a linkage appears (it understands
+# both markers).
 BACKLOG_PARK_MARKER = "backlog: outside milestone"
-
-
-def backlog_park(slug, task_id, cat, ms_names):
-    """Parks a card outside the open milestones through kanban schedule.
-
-    ms_names: names of the open milestones for the reason text (taken from
-    GitHub, none in the code).
-
-    A block/unblock cycle was rejected by the owner: block_task
-    (kanban_db.py) has three side effects in the core code: every call
-    synthesizes a task_run with outcome='blocked' (_end_or_synthesize_run),
-    fires the task hook 'kanban_task_blocked' (the notifier fans out to the
-    notify subscriptions, which are inherited from parents), and the feed
-    gets blocked/unblock/block_loop_detected events. So N parkings mean 2N
-    synthetic runs and notifications. schedule parks without runs and hooks,
-    and the reason is written as a comment by itself (kanban_parser.py).
-    Return: unblock, by the owner; the digest collects parkings by
-    BACKLOG_PARK_MARKER in the comment.
-    """
-    ms_label = "/".join(ms_names) if ms_names else "none open"
-    reason = ("%s (backlog gate, rule 2, category: %s): no link to the"
-              " open milestones (%s); return to ready with the unblock"
-              " command after the owner decides"
-              % (BACKLOG_PARK_MARKER, cat, ms_label))
-    out = run([HERMES, "kanban", "--board", slug, "schedule", task_id,
-               reason], timeout=90)
-    if not out.startswith("Scheduled"):
-        return False
-    return _card_status(slug, task_id) == "scheduled"
-
-
-# The reverse side of parking. A verdict card can hand its Before/After item
-# to a parked visual-delta card (the dedup subtracts the item from the
-# verdict); that card then sits in scheduled and the merge stands still over
-# a formality nobody is left to do. Rule: the owner's formal review on a PR
-# (APPROVED/CHANGES_REQUESTED) is the owner's decision to work on that PR;
-# cards of such a PR are not parked (classify above), and cards already
-# parked as pr_not_milestone are raised. The raise is an unblock with a
-# reason (core: scheduled -> ready); the pair "parking marker + category" in
-# the comment is the source of truth and survives a loss of the watchdog's
-# state.
-BACKLOG_RAISE_MARKER = "raise by owner review"
-
-
-def backlog_raise_owner_reviewed(slug, linkage, apply=True):
-    """Raises parked pr_not_milestone cards of PRs with a formal owner
-    review. Returns [(tid, prs, title)], at most BACKLOG_SWEEP_CAP actions
-    per run. Idempotent: a raised card leaves scheduled and drops out of the
-    selection; it is not parked again (classify returns keep by
-    owner_review_prs).
-
-    Other parking categories (issue_not_milestone, no_ref) are not touched:
-    they have no PR to which the owner's decision applies.
-    """
-    owner = set(linkage.get("owner_review_prs") or [])
-    if not owner:
-        return []
-    db = os.path.join(BOARDS, slug, "kanban.db")
-    con = sqlite3.connect("file:%s?mode=ro" % db, uri=True, timeout=10)
-    rows = {r[0]: r[1:] for r in con.execute(
-        "select id, title, body from tasks where status = 'scheduled'")}
-    con.close()
-    todo = []
-    for tid, cat in backlog_parked_by_marker(slug).items():
-        if cat != "pr_not_milestone" or tid not in rows:
-            continue
-        title, body = rows[tid]
-        hits = sorted(backlog_refs(
-            {"title": title, "body": body}) & owner)
-        if not hits:
-            continue
-        todo.append((tid, hits, (title or "").strip()))
-    if not apply:
-        return todo
-    for tid, hits, _title in todo[:BACKLOG_SWEEP_CAP]:
-        run([HERMES, "kanban", "--board", slug, "unblock", tid,
-             "--reason",
-             "Backlog gate, %s: PR %s has a formal owner review"
-             " (APPROVED/CHANGES_REQUESTED), which is the owner's decision"
-             " to work on the PR. The pr_not_milestone parking is lifted,"
-             " the card goes to work." % (
-                 BACKLOG_RAISE_MARKER,
-                 ", ".join("#%d" % p for p in hits))], timeout=90)
-    return todo
 
 
 def backlog_p0_stale(slug, now):
@@ -6563,8 +9308,7 @@ def backlog_digest(slug, swept, linkage, now, archived_today):
 
 def backlog_gate(slug, state, now=None, apply=True,
                          ignore_hold=False):
-    """Backlog gate: triage digest (rule 1), ready cleanup (rule 2), p0
-    archive (rule 3).
+    """Backlog gate: triage digest (rule 1) and p0 archive (rule 3).
 
     Returns a list of (key, text) for the watchdog report. An empty list =
     silent. apply=False changes nothing and leaves state untouched.
@@ -6580,83 +9324,19 @@ def backlog_gate(slug, state, now=None, apply=True,
         return [("backlog-nolinkage",
                  "  BACKLOG GATE: no milestone linkage (cache empty, gh"
                  " is silent). Board untouched.")]
-    ms_titles = linkage.get("ms_titles") or {}
     if apply:
         state6 = state.setdefault("backlog", {})
     else:
         state6 = dict(state.get("backlog") or {})
     swept = dict(state.get("backlog_swept") or {})
     archived = dict(state.get("backlog_archived") or {})
-    # Rule 2: ready = issues/PRs of the open milestones plus ops; everything
-    # else goes back to triage with a comment giving the category. Actions
-    # go only by a fresh cache; cards already returned (in swept) are not
-    # touched again.
-    # No open milestones at all: the gate parks nothing and says so in the
-    # report (parking "everything outside an empty focus" is not allowed:
-    # it would stop the pipeline once the release milestones are closed).
-    if fresh and not ms_titles:
-        out.append(("backlog-nomilestones",
-                    "  BACKLOG GATE: the repository has no open milestones,"
-                    " rule 2 parks nothing. Create a milestone or lift the"
-                    " gate's focus."))
-    if fresh and ms_titles:
-        ms_names = sorted(ms_titles.values())
-        db = os.path.join(BOARDS, slug, "kanban.db")
-        con = sqlite3.connect("file:%s?mode=ro" % db, uri=True, timeout=10)
-        ready_rows = list(con.execute(
-            "select id, title, body, assignee, coalesce(priority,0)"
-            " from tasks where status = 'ready'"))
-        con.close()
-        keep, todo = 0, []
-        for tid, title, body, assignee, prio in ready_rows:
-            action, cat, info = backlog_classify(
-                {"title": title, "body": body, "assignee": assignee},
-                linkage)
-            if action == "keep":
-                keep += 1
-                continue
-            if tid in swept:
-                continue
-            todo.append((prio, tid, cat, info, title))
-        todo.sort(key=lambda item: -item[0])
-        if todo:
-            lines = ["  BACKLOG GATE, rule 2: outside the open milestones"
-                     " (%s) there are %d cards in ready (milestone/ops"
-                     " stays: %d). Parking through schedule with the marker"
-                     " '%s', up to %d per run; the owner returns cards with"
-                     " unblock."
-                     % (", ".join(ms_names), len(todo), keep,
-                        BACKLOG_PARK_MARKER, BACKLOG_SWEEP_CAP)]
-            for prio, tid, cat, info, title in todo[:BACKLOG_SWEEP_CAP]:
-                if apply:
-                    if backlog_park(slug, tid, cat, ms_names):
-                        swept[tid] = {"cat": cat, "ts": now}
-                    else:
-                        lines.append("    %s NOT parked (status %s),"
-                                     " resolve manually"
-                                     % (tid, _card_status(slug, tid)))
-                        continue
-                lines.append("    %s p%d %s %s"
-                             % (tid, prio, cat, (title or "")[:70]))
-            if apply:
-                state["backlog_swept"] = swept
-            out.append(("backlog-sweep:%d" % len(todo), "\n".join(lines)))
-    # Raise parked pr_not_milestone cards of PRs with a formal owner review
-    # (the owner decided to work on the PR). Only by a fresh cache, like
-    # parking.
-    if fresh:
-        raised = backlog_raise_owner_reviewed(slug, linkage, apply=apply)
-        if raised:
-            lines = ["  BACKLOG GATE, owner review: owner review on a PR,"
-                     " %d to raise from parking (up to %d per run):"
-                     % (len(raised), BACKLOG_SWEEP_CAP)]
-            for tid, hits, title in raised:
-                lines.append("    %s PR %s | %s"
-                             % (tid, ",".join(str(p) for p in hits),
-                                title[:76]))
-            out.append(("backlog-raise:%d" % len(raised), "\n".join(lines)))
+    # Rule 2 was removed: parking of ready cards and the raise by owner
+    # review moved to admission_gate. Old parkings are still collected by
+    # the digest through BACKLOG_PARK_MARKER (categories live in the marker
+    # comments and in swept); admission_gate does the return.
     # Rule 3: a p0 in todo/ready/triage with no movement for more than 14
-    # days is archived with a reason comment. Actions only by a fresh cache.
+    # days goes to the archive with a reason comment. Actions only by a
+    # fresh cache.
     arch_today = []
     if fresh:
         stale = backlog_p0_stale(slug, now)
@@ -7229,13 +9909,33 @@ def classify_finding(key):
     if ":silent:" in key or ":stalled:" in key or ":nooutput:" in key \
             or key.startswith("massfail:"):
         return "stop"
+    # The factory idle for more than an hour while the backlog of the
+    # admissible band is not empty is an owner finding (one, keyed per day).
+    if ":idlefactory:" in key:
+        return "owner"
     if ":cap:" in key or ":budget:" in key or ":budget-gate:" in key:
         return "owner"
     if key.startswith(("staleblock:", "samepr:", "dup:", "dup2:", "twin")):
         return "owner"
+    # A live run on the tail of a closed issue burns the quota; only the
+    # owner can stop it.
+    if key.startswith("closedtail-run:"):
+        return "owner"
     # An owner question open for more than a day is an owner action, not
     # routine.
     if key.startswith("ownerq:"):
+        return "owner"
+    # A release blocker without an executor is an owner action (threshold
+    # one cycle, not a day). REPEAT_AFTER holds the repeat.
+    if ":admission:blk-no-executor:" in key:
+        return "owner"
+    # A delivered but still open issue is a question to the owner ("what
+    # remains?"), not a task for an executor.
+    if ":admission:delivered-open:" in key:
+        return "owner"
+    # A closed PR card whose PR is not merged is an owner action (the
+    # merge); the signal is held until the merge.
+    if ":owner-merge-hold:" in key:
         return "owner"
     # A recorded race (both links in progress on one branch) needs
     # coordination, not routine.
@@ -7295,7 +9995,7 @@ def main():
                 digest.append(text6)
                 seen_keys.append(key6)
         except Exception as exc:
-            digest.append("  [%s] Backlog-owner gate failed: %s: %s"
+            digest.append("  [%s] Backlog gate failed: %s: %s"
                           % (slug, type(exc).__name__, exc))
         # A stack of rework on top of a live PR without an owner decision.
         # Idempotency lives inside the gate (a marker comment on the PR),
@@ -7322,16 +10022,56 @@ def main():
         for key50, rank50, text50 in gate50:
             digest.append(text50)
             seen_keys.append(key50)
+        # A permanent initial_status block on a child of a closed root (the
+        # plan was ACCEPTED, but the Hermes core treats blocked as sticky
+        # and never lifts children created with --initial-status blocked).
+        try:
+            gate63 = initial_status_unstick_gate(slug)
+        except Exception as exc:
+            gate63 = [("r63unstick-fail:%s" % slug, 1,
+                       "  [%s] initial_status block gate failed: %s: %s"
+                       % (slug, type(exc).__name__, exc))]
+        for key63, rank63, text63 in gate63:
+            digest.append(text63)
+            seen_keys.append(key63)
+        # Closing an issue as a duplicate rebinds the live chain to the open
+        # original BEFORE the closed-tail gate runs (otherwise the tail gate
+        # would retire the whole chain an hour later).
+        try:
+            for key57, rank57, text57 in closed_duplicate_rebind(slug):
+                if not digest or not digest[-1].startswith("["):
+                    digest.append("[%s]" % slug)
+                digest.append(text57)
+                seen_keys.append(key57)
+        except Exception as exc:
+            digest.append("  [%s] Duplicate rebind failed: %s: %s"
+                          % (slug, type(exc).__name__, exc))
+        # Tails of closed issues. Retires the links of the chain of an issue
+        # the owner closed (archive with a marker comment); a running card
+        # on the tail goes to the owner (the run burns the quota).
+        try:
+            for key52, rank52, text52 in closed_issue_tail_gate(slug):
+                if key52.startswith("closedtail-run:"):
+                    push_owner = True
+                    push.append("[%s]\n%s" % (slug, text52))
+                else:
+                    if not digest or not digest[-1].startswith("["):
+                        digest.append("[%s]" % slug)
+                    digest.append(text52)
+                seen_keys.append(key52)
+        except Exception as exc:
+            digest.append("  [%s] Closed-issue tail gate failed: %s: %s"
+                          % (slug, type(exc).__name__, exc))
         try:
             found = check(slug, state)
         except sqlite3.Error as exc:
             # A broken schema or a truncated db on one board must not kill
             # the whole run: the other boards would be left unsupervised
-            # (an archived dispatch-proof board with a 0-byte kanban.db
-            # once crashed main() in graph() before the remaining boards
-            # were processed). Supervision impossible is a real stop: a
-            # stop-class push, deduplicated for a day by a synthetic key
-            # (a repeat no more than once a day).
+            # (an archived board with a 0-byte kanban.db once crashed main()
+            # in graph() before the remaining boards were processed).
+            # Supervision impossible is a real stop: a stop-class push,
+            # deduplicated for a day by a synthetic key (a repeat no more
+            # than once a day).
             key = "dbread:%s" % slug
             if now - state.get(key, 0) > REPEAT_AFTER:
                 push.append("[%s]\n  kanban.db is not readable: %s: %s"
@@ -7364,7 +10104,9 @@ def main():
                 state["ticks:" + key] = 0
                 if now - state.get(key, 0) <= REPEAT_AFTER:
                     continue  # already pushed within a day, stay silent
-            elif now - state.get(key, 0) <= REPEAT_AFTER:
+            elif now - state.get(key, 0) <= (
+                    STALEBLOCK_REPEAT if key.startswith("staleblock:")
+                    else REPEAT_AFTER):
                 continue
             bucket = push if cls in ("stop", "owner") else digest
             if cls == "stop":
@@ -7487,8 +10229,8 @@ if __name__ == "__main__":
             print(out[1])
         print("TOTAL (dry-run): gates fired %d" % total)
     elif "--backlog-dry-run" in sys.argv:
-        # What the backlog-owner gate would do right now. Read only: the
-        # board and state are not touched, the hold does not interfere (no
+        # What the backlog gate would do right now. Read only: the board
+        # and state are not touched, the hold does not interfere (no
         # mutations, so reading through the hold is safe).
         now = time.time()
         state = json.load(open(STATE)) if os.path.exists(STATE) else {}
@@ -7502,21 +10244,21 @@ if __name__ == "__main__":
             for key, text in entries:
                 print("[%s] %s\n%s" % (slug, key, text))
                 total += 1
-        print("TOTAL (backlog-owner dry-run): entries %d" % total)
+        print("TOTAL (backlog gate dry-run): entries %d" % total)
     elif "--prototype-dry-run" in sys.argv:
         # Dry run of the prototype gate. Read only: the board and state are
         # not touched, the hold does not interfere (no mutations).
         protogate_dry_run()
     elif "--rework-gate-only" in sys.argv:
-        # A fast pass of only the size gate, for a cron every 5 minutes. It
-        # closes the race with fresh rework cards (the dispatcher ticks
-        # every ~6 minutes, the full watchdog once an hour). It also does
-        # the automatic return on a "fits-in-one-run" verdict (the
-        # decomposition is closed, the parent is stuck at the architect),
-        # the dedup of verdict items (a verdict card subtracts items
-        # covered by a live card of the same PR before the dispatcher hands
-        # it to a worker), and the merge-unblocker priority (a card with
-        # only merge formalities on a PR accepted by code is raised to
+        # A fast pass of the size gate and its neighbours, for a cron every
+        # 5 minutes. It closes the race with fresh rework cards (the
+        # dispatcher ticks every ~6 minutes, the full watchdog once an
+        # hour). It also does the automatic return on a "fits-in-one-run"
+        # verdict (the decomposition is closed, the parent is stuck at the
+        # architect), the dedup of verdict items (a verdict card subtracts
+        # items covered by a live card of the same PR before the dispatcher
+        # hands it to a worker), and the merge-unblocker priority (a card
+        # with only merge formalities on a PR accepted by code is raised to
         # p90). Card recreations and automatic gate actions are routine:
         # they go to the daily digest for metrics-evening, and Telegram
         # stays silent (empty stdout).
@@ -7532,6 +10274,18 @@ if __name__ == "__main__":
                     _dg.append("[%s]\n%s" % (slug, text))
                 for _, _, text in merge_unblocker_gate(slug):
                     _dg.append("[%s]\n%s" % (slug, text))
+                # Rework of an open PR (rework or fix) goes up to p90
+                # inside the active band, ahead of new work.
+                for _, _, text in rework_priority_lift(slug):
+                    _dg.append("[%s]\n%s" % (slug, text))
+                # A live review arm (ready/todo) is retired when the stock
+                # review lane already runs on the same PR and head, or a
+                # verdict exists (race of arm creation against
+                # request_review). Retirement applies in any status except
+                # running; review AND WCFY arms on a head the PR has moved
+                # away from are retired too.
+                for _, _, text in review_arm_liveness_gate(slug):
+                    _dg.append("[%s]\n%s" % (slug, text))
                 # A stack of rework on top of a live PR without an owner
                 # decision. A worker opens a stack within minutes, this pass
                 # sets the marker and alerts before a review card is hung
@@ -7544,10 +10298,6 @@ if __name__ == "__main__":
                 # hourly watchdog.
                 for _, _, text in active_pr_handoff_gate(slug):
                     _dg.append("[%s]\n%s" % (slug, text))
-                # Serialisation of cards of one PR (a race of pushes to one
-                # branch). Must manage to run before the second link
-                # starts: the dispatcher ticks every ~6 minutes.
-                for _, _, text in serial_rework_gate(slug):
                     _dg.append("[%s]\n%s" % (slug, text))
             except Exception as exc:
                 # a gate failure needs investigation, the only push
@@ -7588,16 +10338,15 @@ if __name__ == "__main__":
             except Exception as exc:
                 print("[%s] merge-unblocker failed: %s: %s"
                       % (slug, type(exc).__name__, exc))
-    elif "--serial-rework-only" in sys.argv:
-        # A single pass of the gate that serialises rework of one PR
-        # (manual application to a live board and diagnosis). Actions at
-        # once, output like --rework-gate-only.
+    elif "--owner-merge-only" in sys.argv:
+        # A single pass of the close gate "remaining: owner merge" (manual
+        # application and diagnosis).
         for slug in board_slugs():
             try:
-                for _, _, text in serial_rework_gate(slug):
+                for _, _, text in owner_merge_hold_gate(slug):
                     print("[%s]\n%s" % (slug, text))
             except Exception as exc:
-                print("[%s] serial-rework failed: %s: %s"
+                print("[%s] owner-merge-hold failed: %s: %s"
                       % (slug, type(exc).__name__, exc))
     elif "--needs-input-tech-only" in sys.argv:
         # A single pass of the gate for false needs_input blocks (manual
@@ -7621,5 +10370,31 @@ if __name__ == "__main__":
             except Exception as exc:
                 print("[%s] active-pr failed: %s: %s"
                       % (slug, type(exc).__name__, exc))
+    elif "--closed-dup-rebind-only" in sys.argv:
+        # A single pass of the duplicate rebind (manual application to a
+        # live board and diagnosis). Actions at once, output like
+        # --rework-gate-only.
+        for slug in board_slugs():
+            try:
+                for _key, _rank, text in closed_duplicate_rebind(slug):
+                    print("[%s]\n%s" % (slug, text))
+            except Exception as exc:
+                print("[%s] closed-dup-rebind failed: %s: %s"
+                      % (slug, type(exc).__name__, exc))
+    elif "--initial-status-unstick-only" in sys.argv or \
+            "--initial-status-unstick-dry" in sys.argv:
+        # A single pass of the gate for permanent initial_status blocks
+        # (manual application to a live board and diagnosis). The dry
+        # variant only reads (no unblock), for a positive control.
+        dry = "--initial-status-unstick-dry" in sys.argv
+        for slug in board_slugs():
+            try:
+                for _, _, text in initial_status_unstick_gate(
+                        slug, apply=not dry):
+                    print("[%s]\n%s" % (slug, text))
+            except Exception as exc:
+                print("[%s] initial-status-unstick failed: %s: %s"
+                      % (slug, type(exc).__name__, exc))
     else:
         main()
+

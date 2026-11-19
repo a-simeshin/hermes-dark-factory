@@ -8,9 +8,11 @@ Invariants:
   I2. the reviewer card of an open PR is p100, a rework for an owner review
       is not below p80: raised automatically;
   I3. while the ready layer p>=80 is non-empty, a card p<50 does not hold a
-      slot: it goes back to todo with a comment;
-  I4. ready without an assignee: left to the stock stranded_in_ready
-      diagnostic, the lint must stay silent and touch nothing;
+      slot: the stock `kanban reclaim` takes it off and a comment follows
+      only after a reread confirms it left running;
+  I4. ready without an assignee or with a dead profile for over 30 min:
+      an alert only (the stock stranded_in_ready skips an empty assignee on
+      purpose), the lint touches nothing;
   I5. a card in a nonstandard status (completed and the like) for over an
       hour: alert;
   I6. a live verify/port/force-push/re-review card whose parents are ALL
@@ -22,8 +24,12 @@ fake_run applies edits to the test kanban.db: the lint rereads the database
 after every edit, and "FIXED" must be confirmed by a real change, not by
 optimism.
 
-This file is also the harness of the serial rework and ancestor priority
-tests (they import make_board, fake_run, with_board, texts and mod).
+This file is also the harness of the ancestor priority test (it imports
+make_board, fake_run, with_board, texts and mod).
+
+test_kanban_actions_exist_in_cli checks every `hermes kanban` subcommand the
+watchdog calls against the live CLI help; it is skipped when no hermes CLI
+is installed.
 
 BOARD_WATCHDOG_SCRIPT overrides the script path so that mutation runs can
 test a copy of the script with a mutation; the copy must sit next to
@@ -35,8 +41,10 @@ import atexit
 import importlib.util
 import json
 import os
+import re
 import shutil
 import sqlite3
+import subprocess
 import sys
 import tempfile
 import time
@@ -55,9 +63,7 @@ os.environ.update({
     "FACTORY_OWNER_LOGIN": "owner-login",
     "FACTORY_OWNER_CHAT": "telegram:000000000",
     "FACTORY_BASE_BRANCHES": "develop/1.x,develop/2.x",
-    "FACTORY_PILOT_EXEMPT_BRANCHES": "hermes/example-pilot-branch",
 })
-PILOT_BRANCH = "hermes/example-pilot-branch"
 
 SCRIPT = os.environ.get("BOARD_WATCHDOG_SCRIPT") or os.path.join(
     HERE, "board-watchdog.py")
@@ -68,6 +74,9 @@ if spec is None or spec.loader is None:
     sys.exit(0)
 mod = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(mod)
+# The milestone cache goes to the sandbox, never to a real Hermes home.
+if hasattr(mod, "milestone_bands"):
+    mod.milestone_bands.CACHE_PATH = os.path.join(_HOME, "ms.json")
 
 
 def make_board(tasks=(), links=(), runs=(), events=(), comments=()):
@@ -143,6 +152,12 @@ def fake_run(db, calls, open_prs=(154,)):
     def _run(cmd, timeout=120):
         calls.append(cmd)
         if cmd[0] == "gh":
+            # Milestone bands come from GitHub: the fixture gives an active
+            # milestone (band 80) and the next one (band 40).
+            if cmd[1] == "api" and any("milestones" in t for t in cmd):
+                return json.dumps([
+                    {"title": "2.3.0", "due_on": "2026-11-23T00:00:00Z"},
+                    {"title": "2.4.0", "due_on": "2026-12-20T00:00:00Z"}])
             if "list" in cmd:
                 return json.dumps([{"number": n} for n in sorted(open_prs)])
             return ""
@@ -161,9 +176,11 @@ def fake_run(db, calls, open_prs=(154,)):
                     val = cmd[7]
                     con.execute("update tasks set priority=? where id=?",
                                 (int(val), tid))
-                elif action == "move":
-                    con.execute("update tasks set status=? where id=?",
-                                (cmd[6], tid))
+                elif action == "reclaim":
+                    # I3 calls the stock reclaim; the retry status of a
+                    # running card (kanban_db._retry_status_for_run) is ready.
+                    con.execute("update tasks set status='ready' where id=?",
+                                (tid,))
                 elif action == "block":
                     # CLI: block tid [--kind K] reason... ; reason
                     # is appended as a comment, the card goes to blocked.
@@ -421,17 +438,62 @@ def test_i3_running_under_high_layer():
         found = mod.board_lint(slug)
         txt = texts(found)
         assert "I3 FIXED" in txt and "t_lo" in txt, txt
-        assert any(c[4] == "move" and c[5] == "t_lo" and c[6] == "todo"
+        # There is no kanban move: I3 takes the card off with the stock
+        # reclaim and a --reason.
+        assert any(c[4] == "reclaim" and c[5] == "t_lo"
+                   and "I3" in " ".join(c[6:])
                    for c in calls), calls
+        # The comment comes only AFTER the reread: reclaim precedes it.
+        rc = [i for i, c in enumerate(calls) if c[4] == "reclaim"][0]
+        cc = [i for i, c in enumerate(calls) if c[4] == "comment"]
+        assert cc and cc[0] > rc, calls
         assert any(c[4] == "comment" and c[5] == "t_lo"
                    and "Watchdog lint I3" in c[6] for c in calls), calls
         con = sqlite3.connect(os.path.join(mod.BOARDS, slug, "kanban.db"))
         st = con.execute("select status from tasks where id='t_lo'").fetchone()[0]
         con.close()
-        assert st == "todo", st
+        assert st == "ready", st
     finally:
         restore()
     print("OK test_i3_running_under_high_layer")
+
+
+def test_i3_unknown_subcommand_no_comment():
+    """An earlier I3 called a subcommand the CLI does not have, and wrote a
+    "back to todo" comment before checking, so the comment was false. When
+    the CLI action fails (rc != 0, the database is unchanged), there must be
+    no comment, only "NOT FIXED"."""
+    slug, calls, restore = with_board(
+        tasks=[
+            {"id": "t_hi", "title": "[reviewer] PR #154", "status": "ready",
+             "key": "reviewer-pr154-ff6dcdf", "priority": 100,
+             "assignee": "reviewer"},
+            {"id": "t_lo", "title": "background task", "status": "running",
+             "priority": 40},
+        ])
+    real_run = mod.run
+    try:
+        def dying_run(cmd, timeout=120):
+            calls.append(cmd)
+            # an unknown subcommand: rc != 0, the database is untouched
+            if len(cmd) > 4 and cmd[1] == "kanban" and cmd[4] == "reclaim":
+                return ""
+            return real_run(cmd, timeout=timeout)
+
+        mod.run = dying_run
+        found = mod.board_lint(slug)
+        txt = texts(found)
+        assert "I3 NOT FIXED" in txt and "t_lo" in txt, txt
+        assert not any(c[4] == "comment" for c in calls), calls
+        con = sqlite3.connect(os.path.join(mod.BOARDS, slug, "kanban.db"))
+        st = con.execute("select status from tasks where id='t_lo'").fetchone()[0]
+        n = con.execute("select count(*) from task_comments").fetchone()[0]
+        con.close()
+        assert st == "running" and n == 0, (st, n)
+    finally:
+        mod.run = real_run
+        restore()
+    print("OK test_i3_unknown_subcommand_no_comment")
 
 
 def test_i3_no_high_layer_no_action():
@@ -441,31 +503,74 @@ def test_i3_no_high_layer_no_action():
     try:
         found = mod.board_lint(slug)
         assert "I3" not in texts(found), texts(found)
-        assert not any(c[4] == "move" for c in calls), calls
+        assert not any(c[4] == "reclaim" for c in calls), calls
     finally:
         restore()
     print("OK test_i3_no_high_layer_no_action")
 
 
+def run_local(cmd, timeout=60):
+    """Direct call of an external command (bypasses the patched mod.run)."""
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    except OSError:
+        return None
+    return r.stdout + r.stderr
+
+
+def test_kanban_actions_exist_in_cli():
+    """Guard of the class "the lint calls a subcommand that does not exist"
+    (I3 once failed silently on kanban move with a false comment). Every
+    action board-watchdog passes to `hermes kanban` must be in the list of
+    subcommands of the live CLI, taken from `hermes kanban --help`."""
+    if not os.path.exists(mod.HERMES):
+        print("SKIP test_kanban_actions_exist_in_cli: no hermes CLI at %s"
+              % mod.HERMES)
+        return
+    help_out = run_local([mod.HERMES, "kanban", "--help"]) or ""
+    m = re.search(r"\{([a-z-, -]+)\}", help_out)
+    assert m, "no subcommand list in the output of kanban --help:\n%s" \
+        % help_out[:400]
+    handlers = set(m.group(1).split(","))
+    with open(mod.__file__, encoding="utf-8") as fh:
+        src = fh.read()
+    # kanban("action", ...) calls inside board_lint and
+    # [HERMES, "kanban", ...] with the action at position 4 (after --board slug)
+    used = set(re.findall(r'\bkanban\(\s*"([a-z-]+)"', src))
+    used |= set(re.findall(r'\[HERMES,\s*"kanban",\s*'
+                           r'(?:--board",\s*[A-Za-z_0-9]+,\s*)?'
+                           r'"([a-z][a-z-]*)"', src))
+    missing = sorted(a for a in used if a not in handlers)
+    assert not missing, ("board-watchdog calls kanban subcommands that do "
+                         "not exist: %s (the CLI has: %s)"
+                         % (missing, sorted(handlers)))
+    print("OK test_kanban_actions_exist_in_cli (%d actions checked against "
+          "the CLI)" % len(used))
+
+
 def test_i4_unassigned_ready():
-    # The own I4 detector is gone (the stock stranded_in_ready covers it):
-    # board_lint must not fail and must touch nothing.
+    # The stock stranded_in_ready skips an empty assignee on purpose and the
+    # dispatcher only counts skipped_unassigned. Lint I4 is an alert: the
+    # card is in the report, the watchdog does not touch the board.
     slug, calls, restore = with_board(
         tasks=[{"id": "t_u", "title": "ready without an assignee",
                 "status": "ready", "assignee": "", "age": 2 * 3600}])
     try:
         found = mod.board_lint(slug)
-        assert not any(c[4] in ("move", "unlink", "edit", "comment")
+        txt = texts(found)
+        assert "I4" in txt and "t_u" in txt, txt
+        assert not any(c[4] in ("reclaim", "move", "unlink", "edit",
+                                "comment", "assign")
                        for c in calls), calls
     finally:
         restore()
-    print("OK test_i4_unassigned_ready")
+    print("OK test_i4_unassigned_ready (alert without an automatic fix)")
 
 
 def test_i4_holdout_card_boundary():
-    """A holdout cron card without --assignee: board_lint stays silent and
-    touches nothing at the threshold boundary (the stock stranded_in_ready
-    diagnostic covers it)."""
+    """A holdout cron card without --assignee. The threshold is 30 min:
+    below it the lint is silent, above it the card is in the I4 report.
+    No automatic actions, only the alert."""
     slug, calls, restore = with_board(
         tasks=[
             {"id": "t_hold29", "title": "holdout FAIL card, 29 min",
@@ -477,11 +582,15 @@ def test_i4_holdout_card_boundary():
         ])
     try:
         found = mod.board_lint(slug)
-        assert not any(c[4] in ("move", "unlink", "edit", "comment")
+        txt = texts(found)
+        assert "t_hold31" in txt and "I4" in txt, txt
+        assert "t_hold29" not in txt, txt
+        assert not any(c[4] in ("reclaim", "move", "unlink", "edit",
+                                "comment", "assign")
                        for c in calls), calls
     finally:
         restore()
-    print("OK test_i4_holdout_card_boundary")
+    print("OK test_i4_holdout_card_boundary (29 min silent, 31 min in I4)")
 
 
 def test_i5_nonstandard_status():
@@ -753,7 +862,9 @@ def main():
     test_i2_architect_followup_open_pr_floor_not_ceiling()
     test_i1_unremovable_link_reported()
     test_i3_running_under_high_layer()
+    test_i3_unknown_subcommand_no_comment()
     test_i3_no_high_layer_no_action()
+    test_kanban_actions_exist_in_cli()
     test_i4_unassigned_ready()
     test_i4_holdout_card_boundary()
     test_i5_nonstandard_status()

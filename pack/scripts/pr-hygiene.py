@@ -18,6 +18,12 @@ findings, and four of them are computed by a git command, not by reading code:
 
 None of the four needs a model, and none should be caught by a human eyeballing
 a list of PRs.
+
+The native-or-live rule: before creating a card, check whether a native
+Hermes mechanism or a live card already does it. The shared helper
+board_native_guard.native_or_live is mandatory for every card generator here
+(visual delta, rebase, rework, triage); the full text of the rule is
+RULE_50B in board_native_guard.py.
 """
 import json
 import os
@@ -101,6 +107,30 @@ else:                              # for mutants/copies outside scripts
         return None
     board_watchdog.lint_card_kind = _stub_lint_card_kind
 
+# The active milestone is not a constant: a hard-coded active milestone here
+# and a band table in board-watchdog silently drifted apart at every release.
+# Bands and the active milestone are computed from GitHub on every run; the
+# logic lives in milestone_bands.py, one definition for pr-hygiene and
+# board-watchdog. Loaded through the same cycle guard (key
+# "hermes_sibling:<path>"); copies outside scripts (mutant runs) stay on the
+# "no data" stub: the checks are skipped, which does not mask format mutants.
+_MB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        "milestone_bands.py")
+if os.path.exists(_MB_PATH):
+    _mb_key = "hermes_sibling:" + os.path.abspath(_MB_PATH)
+    milestone_bands = sys.modules.get(_mb_key)
+    if milestone_bands is None:
+        _mb_spec = _ilu.spec_from_file_location("milestone_bands_ph",
+                                                _MB_PATH)
+        milestone_bands = _ilu.module_from_spec(_mb_spec)
+        sys.modules[_mb_key] = milestone_bands
+        _mb_spec.loader.exec_module(milestone_bands)
+else:                              # for mutants/copies outside scripts
+    import types as _t3
+    milestone_bands = _t3.ModuleType("milestone_bands_stub")
+    milestone_bands.resolve = lambda repo, fetch=None: {
+        "active": None, "next": None, "bands": {}, "source": "nodata"}
+
 HOME = hermes_home()
 STATE = os.path.join(HOME, "kanban", "pr-hygiene-state.json")
 REPO_DIR = cfg("FACTORY_REPO_PATH")
@@ -125,7 +155,17 @@ ABSORBED_KEEP = {}
 # here, not in a GitHub review event: a bot cannot formally review its own PR.
 REJECT_MARKER = "review verdict: changes requested"
 ACCEPT_MARKERS = ("verdict: pass", "review verdict: approve", "review verdict: accept")
+# A QA verdict is not a reviewer verdict. "## Review verdict (QA): PASS" once
+# passed as an accept in board-watchdog. The newer form "## QA verdict: PASS"
+# is dangerous here too: it contains the substring "verdict: pass". A QA
+# verdict comment is skipped entirely, both heading forms.
+QA_VERDICT_RE = re.compile(
+    r"(?im)^#{1,4}\s*(?:review\s+verdict\s*\(\s*qa\s*\)|"
+    r"qa\s+verdict)(?=\s|:|$)")
 
+def qa_verdict_comment(body):
+    """True: the comment is a QA verdict, not a reviewer verdict."""
+    return bool(QA_VERDICT_RE.search(body or ""))
 
 def git(*args, cwd=REPO_DIR, timeout=120):
     _t0 = time.time()
@@ -136,7 +176,6 @@ def git(*args, cwd=REPO_DIR, timeout=120):
     finally:
         _prof_add("git " + (args[0] if args else "?"), time.time() - _t0)
 
-
 def gh(*args, timeout=120):
     _t0 = time.time()
     try:
@@ -146,7 +185,6 @@ def gh(*args, timeout=120):
     finally:
         _prof_add("gh " + " ".join(args[:2]), time.time() - _t0)
 
-
 # Per-stage timing. A run that took several times longer than usual showed that
 # without instrumentation there is no telling "gh got slow" from "git
 # merge-tree got slow". The accounting is cheap (two time.time() calls per
@@ -154,19 +192,16 @@ def gh(*args, timeout=120):
 # runs, wrapping from outside would only see the sum.
 PROFILE = {"t0": time.time(), "last": time.time(), "stages": {}, "calls": {}}
 
-
 def _prof_add(sig, dt):
     slot = PROFILE["calls"].setdefault(sig, [0.0, 0])
     slot[0] += dt
     slot[1] += 1
-
 
 def _mark(name):
     """Time from the previous mark to this one: stages of check() without reindenting."""
     now = time.time()
     PROFILE["stages"][name] = now - PROFILE["last"]
     PROFILE["last"] = now
-
 
 def profile_report():
     lines = ["PROFILE (total %.1f s):" % (time.time() - PROFILE["t0"])]
@@ -180,13 +215,11 @@ def profile_report():
         lines.append("    %-26s %7.1f s / %d" % (sig, dt, cnt))
     return "\n".join(lines)
 
-
 def open_prs():
     raw = gh_read("pr", "list", "--state", "open", "--limit", "100",
                   "--json", "number,title,url,body,baseRefName,headRefName,"
                             "updatedAt,isDraft")
     return json.loads(raw) if raw else []
-
 
 # Read cache for one run. Who duplicated what and why: review_state
 # (comments,commits), has_user_summary (comments,body) and pr_activity
@@ -197,15 +230,14 @@ def open_prs():
 # and between runs verdicts and commits must be read fresh, so a TTL cache on
 # disk would be a mistake (it would serve yesterday's verdict).
 GH_READ_CACHE = {}
+
 GH_READ_VERBS = frozenset((("pr", "list"), ("issue", "list"),
                            ("pr", "view"), ("issue", "view")))
-
 
 def reset_run_caches():
     """Reset the caches of a "new run". Cron does not need it (fresh process),
     tests need it between cases."""
     GH_READ_CACHE.clear()
-
 
 def gh_read(*args, **kwargs):
     """A gh read with a per-run cache. White list of reads: lists and view.
@@ -218,9 +250,7 @@ def gh_read(*args, **kwargs):
         GH_READ_CACHE[key] = gh(*args, **kwargs)
     return GH_READ_CACHE[key]
 
-
 PR_PAYLOAD_FIELDS = "comments,commits,body,headRefOid"
-
 
 def pr_payload(number):
     """comments/commits/body/headRefOid in one call per PR per run.
@@ -235,7 +265,6 @@ def pr_payload(number):
                                 PR_PAYLOAD_FIELDS, timeout=60)
     raw = GH_READ_CACHE[key]
     return json.loads(raw) if raw else {}
-
 
 def detail(number):
     """Exact state of a PR: mergeable comes as UNKNOWN in `pr list`.
@@ -280,7 +309,6 @@ def detail(number):
         "files": files,
     }
 
-
 def issue_state():
     """Open issues and the state of the PRs that reference them.
 
@@ -306,7 +334,6 @@ def issue_state():
     issues = json.loads(raw) if raw else []
     return issues, refs
 
-
 def review_state(number):
     """What the reviewer said last and whether it was before the last commit.
 
@@ -323,7 +350,10 @@ def review_state(number):
         return "none", "could not read the PR"
     verdicts = []
     for comment in data.get("comments") or []:
-        low = (comment.get("body") or "").lower()
+        body = comment.get("body") or ""
+        low = body.lower()
+        if qa_verdict_comment(body):
+            continue
         if REJECT_MARKER in low:
             verdicts.append((comment.get("createdAt") or "", "rejected"))
         elif any(m in low for m in ACCEPT_MARKERS):
@@ -344,7 +374,6 @@ def review_state(number):
         return "stale", "accepted %s, but there were commits after that (%s)" % (when[:16], last_commit[:16])
     return "ok", "accepted %s" % when[:16]
 
-
 def board_cards():
     """All cards of the board, read only.
 
@@ -359,7 +388,6 @@ def board_cards():
     con.close()
     return [{"id": r[0], "status": r[1], "assignee": r[2] or "-",
              "title": r[3] or "", "body": r[4] or ""} for r in rows]
-
 
 def close_blockers(issue, cards):
     """Reasons why it is too early to close an issue even if all PRs are merged.
@@ -390,7 +418,6 @@ def close_blockers(issue, cards):
         blockers.append("live cards on the board: %s" % ", ".join(live))
     return blockers
 
-
 def open_cards_for_pr(number):
     """Live board cards that name this PR.
 
@@ -409,7 +436,6 @@ def open_cards_for_pr(number):
     return [(r[0], r[3], r[4] or "-", (r[1] or "")[:56]) for r in rows
             if r[3] not in ("done", "archived")
             and pattern.search((r[1] or "") + " " + (r[2] or ""))]
-
 
 def issues_without_cards(issues, refs):
     """Issues cleared from triage that never made it into work.
@@ -444,7 +470,6 @@ def issues_without_cards(issues, refs):
             stale.append(issue)
     return stale
 
-
 # === Visual delta =======================================================
 #
 # The owner's rule: a wall of text is useless, the owner wants two visual
@@ -458,20 +483,71 @@ def issues_without_cards(issues, refs):
 # screenshot from the e2e test is enough when a UI test is run. The PR branch of
 # the check was removed, the issue branch (our hermes* labels) remains.
 HERMES_BIN = os.path.expanduser("~/.local/bin/hermes")
-BOARD_SLUG = cfg("FACTORY_BOARD", "main")
-REPO_SLUG = cfg("FACTORY_REPO")
-BA_HEADING = "## Before / After"
-BA_HEADING_RE = re.compile(r"^##\s*Before\s*/\s*After\s*$", re.I | re.M)
-BA_FIRST_RE = re.compile(r"^\s*##\s*Before\s*/\s*After\s*$", re.I | re.M)
-MD_IMAGE_RE = re.compile(r"!\[[^\]]*\]\((\S+?)\)")
-# Whether a diff is "UI" is decided by a VISIBLE change on the screen, not by
-# file extensions in the diff (the old is_ui_path predicate over *.tsx/*.css
-# was removed as dead and misleading). No real visible change (for example an
-# effect guard in a UI framework, with test output rendered into a PNG just to
-# get "two different pictures", which is fitting to a formal check) means a
-# mermaid delta, not screenshots. Rendering text or test output into a PNG to
-# pass the check is FORBIDDEN.
 
+BOARD_SLUG = cfg("FACTORY_BOARD", "main")
+
+# The shared native-or-live helper (the full rule is in the module).
+try:
+    _bng_spec = _ilu.spec_from_file_location(
+        "board_native_guard",
+        os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                     "board_native_guard.py"))
+    if _bng_spec is None or _bng_spec.loader is None:
+        raise RuntimeError("board_native_guard: spec was not built")
+    _existing = sys.modules.get("board_native_guard")
+    if _existing is not None and hasattr(_existing, "native_or_live"):
+        # one copy of the module for all scripts: one GuardNote class
+        board_native_guard = _existing
+    else:
+        board_native_guard = _ilu.module_from_spec(_bng_spec)
+        sys.modules["board_native_guard"] = board_native_guard
+        try:
+            _bng_spec.loader.exec_module(board_native_guard)
+        except Exception:
+            sys.modules.pop("board_native_guard", None)
+            raise
+except Exception:
+    board_native_guard = None
+
+def _live_keys():
+    """Keys of live board cards (not done/archived) for the native guard."""
+    if not os.path.exists(BOARD_DB):
+        return []
+    try:
+        con = sqlite3.connect("file:%s?mode=ro" % BOARD_DB, uri=True,
+                              timeout=10)
+        rows = con.execute(
+            "SELECT idempotency_key FROM tasks "
+            "WHERE status NOT IN ('done','archived') "
+            "AND idempotency_key IS NOT NULL").fetchall()
+        con.close()
+        return [r[0] for r in rows]
+    except sqlite3.Error:
+        return []
+
+REPO_SLUG = cfg("FACTORY_REPO")
+
+BA_HEADING = "## Before / After"
+
+def _ms_open_milestones(repo):
+    """Open milestones of the repository for milestone_bands.resolve, through
+    gh_read (the run cache). Empty or garbage instead of JSON -> None, and
+    resolve takes the last successful result from disk or "no data"."""
+    out = gh_read("api",
+                  "repos/%s/milestones?state=open&per_page=100" % repo,
+                  timeout=60)
+    try:
+        items = json.loads(out or "[]")
+    except Exception:
+        return None
+    return [{"title": m.get("title"), "due_on": m.get("due_on")}
+            for m in items]
+
+BA_HEADING_RE = re.compile(r"^##\s*Before\s*/\s*After\s*$", re.I | re.M)
+
+BA_FIRST_RE = re.compile(r"^\s*##\s*Before\s*/\s*After\s*$", re.I | re.M)
+
+MD_IMAGE_RE = re.compile(r"!\[[^\]]*\]\((\S+?)\)")
 
 def ba_section(body):
     """(section text up to the next ## heading | None, section_is_first)."""
@@ -484,7 +560,6 @@ def ba_section(body):
     end = m.end() + (nxt.start() if nxt else len(rest))
     return text[m.start():end], bool(BA_FIRST_RE.match(text))
 
-
 def http_fetch(url, timeout=12):
     """(HTTP status, bytes | None). Images must open."""
     _t0 = time.time()
@@ -495,7 +570,6 @@ def http_fetch(url, timeout=12):
         return 0, None
     finally:
         _prof_add("http", time.time() - _t0)
-
 
 def visual_delta_verdict(body, ui, fetcher=None, cache=None):
     """List of Before / After format violations. Empty = format respected.
@@ -555,11 +629,22 @@ def visual_delta_verdict(body, ui, fetcher=None, cache=None):
                        "of the delta of a process, protocol or structure")
     return bad
 
-
 def visual_delta_card(kind, number, violations, url):
     """A card to the author with key visual-delta-<N>. Idempotent by key."""
+    # The native-or-live helper before create.
+    if board_native_guard is None:
+        return False, "native guard unavailable: card not created"
+    covered, guard = board_native_guard.native_or_live(
+        "visual-delta-%d" % number, live_keys=_live_keys(),
+        native_checked=[board_native_guard.NATIVE_VERDICT],
+        why="the issue has no Before/After section: no native mechanism "
+        "requires it (the rule lives only in this pack); a card removed by "
+        "the owner is not recreated")
+    if covered:
+        return False, "native guard: card not created: %s" % guard
     title = "[visual-delta] %s #%d: Before / After section" % (kind, number)
     body = (
+        board_native_guard.guard_section(guard) +
         "%s #%d violates the visual-delta rule (visual-delta lives in the "
         "issue, at the prototype stage):\n\n"
         "%s\n\n"
@@ -591,20 +676,60 @@ def visual_delta_card(kind, number, violations, url):
     os.unlink(path)
     return done.returncode == 0, (done.stdout or done.stderr).strip()[:200]
 
+# The visual-delta rule applies ONLY to issues whose change is visible in the
+# interface (an owner decision): a ui/ux/mobile label (including the suffixes
+# -ui/-ux/-mobile) or a [ux]/[ui] prefix in the title. Bugs in a proxy, CI,
+# tests or infrastructure fall outside the rule: no cards, no findings.
+# Precedent: the generator recreated a card the owner had removed, only
+# because the issue got a milestone. A card removed by the owner is not
+# recreated: if the generator still thinks it is needed, that is a question
+# to the owner (a line in the report), not a new card.
+VISUAL_DELTA_UI_RE = re.compile(r"^(?:ui|ux|mobile)(?:$|-)", re.I)
+
+VISUAL_DELTA_UI_SUFFIX = ("-ui", "-ux", "-mobile")
+
+VISUAL_DELTA_PREFIX_RE = re.compile(r"^\s*\[\s*(?:ui|ux)\s*\]", re.I)
+
+# Issues whose visual-delta card the owner removed: comma-separated numbers.
+VISUAL_DELTA_SUPPRESSED = {
+    int(n) for n in cfg_list("FACTORY_VISUAL_DELTA_SUPPRESSED")}
+
+def visual_delta_is_ui(labels, title):
+    """Whether an issue is a UI one for the visual-delta rule: label or prefix."""
+    names = [n.lower() for n in (labels or [])]
+    if any(VISUAL_DELTA_UI_RE.match(n) or n.endswith(VISUAL_DELTA_UI_SUFFIX)
+           for n in names):
+        return True
+    return bool(VISUAL_DELTA_PREFIX_RE.search(title or ""))
 
 def visual_delta_check(issues, dry_run=False):
     """Format check over our issues (PRs are not checked).
 
-    Our issues: those with our own labels (hermes*). Prototyping stage: if the
+    Our issues: those with our own labels (hermes*) AND only UI ones (a
+    ui/ux/mobile label or a [ux]/[ui] title prefix); bugs in a proxy, CI,
+    tests and infrastructure are outside the rule. Prototyping stage: if the
     UI changes, Before/After; if it does not, mermaid. Cards are created only
     outside dry-run; the key visual-delta-<N> keeps it idempotent.
     """
     lines, cards, ok, numbers = [], [], 0, []
+    # The active milestone comes from GitHub (memo per process), not a
+    # constant. None = no data (gh failed and no cache): admission is
+    # skipped, the old "no data" behaviour.
+    active = milestone_bands.resolve(REPO_SLUG,
+                                     fetch=_ms_open_milestones)["active"]
     for issue in issues:
         labels = {l["name"] for l in issue.get("labels", [])}
         if not any(l.startswith("hermes") for l in labels):
             continue                     # the rule does not bind other people's issues
         number = issue["number"]
+        if number in VISUAL_DELTA_SUPPRESSED:
+            lines.append(
+                "    issue #%d: visual-delta card removed by the owner,"
+                " the generator does not recreate it: a question to the"
+                " owner, not a new card" % number)
+            continue
+        if not visual_delta_is_ui(labels, issue.get("title")):
+            continue          # non-UI issue: outside the visual-delta rule
         body = issue.get("body") or ""
         section, first = ba_section(body)
         bad = []
@@ -634,10 +759,20 @@ def visual_delta_check(issues, dry_run=False):
         # already knew about the section, and the format can be conveyed with a
         # comment in the issue.
         if not dry_run and section is None:
+            # Admission BEFORE create. A card for an issue outside the active
+            # milestone (or without one) would be parked right away by the
+            # admission gate or the review layer.
+            ms = (issue.get("milestone") or {}).get("title")
+            if active and ms != active:
+                lines.append(
+                    "      card not created: issue in milestone %s,"
+                    " outside the active %s (admission before create;"
+                    " the active one comes from GitHub)"
+                    % (ms or "none", active))
+                continue
             cards.append(visual_delta_card("issue", number, bad,
                                            issue.get("url", "")))
     return ok, lines, cards, numbers
-
 
 # === Prototype before implementation ====================================
 #
@@ -649,17 +784,21 @@ def visual_delta_check(issues, dry_run=False):
 # Sides (a)(b), the block and the lifting of cards, are held by prototype_gate
 # in board-watchdog.py.
 PROTO_LABELS = ("feature", "ux")
+
 PROTO_OWNER = cfg("FACTORY_OWNER_LOGIN")
+
 PROTO_ACCEPT_RE = re.compile(r"prototype\s+accepted", re.I)
+
 PROTO_REFS_RE = re.compile(
     r"\b(?:closes|fixes|resolves|refs|ref)\s+#(\d{1,5})\b", re.I)
+
 # Recognize both the label and the [ux]/[feature] title prefix.
 PROTO_PREFIX_RE = re.compile(r"^\s*\[\s*(?:ux|feature)\s*\]", re.I)
+
 # Issues exempt from the gate by an owner decision (the implementation is
 # already open, so a prototype after the fact checks nothing). Empty here: it
 # holds dated owner decisions and is filled per project.
 PROTO_EXEMPT = {int(n) for n in cfg_list("FACTORY_PROTOTYPE_EXEMPT_ISSUES")}
-
 
 def proto_is_feature(labels, title):
     """Label feature/ux OR a [ux]/[feature] prefix in the title.
@@ -673,7 +812,6 @@ def proto_is_feature(labels, title):
     if "bug" in names:                              # p8-bug
         return False
     return bool(PROTO_PREFIX_RE.match(title or ""))      # p6-prefix
-
 
 def prototype_verdict(pr_body, issue):
     """List of "implementation before prototype" violations. Empty = allowed.
@@ -703,6 +841,149 @@ def prototype_verdict(pr_body, issue):
             "in the issue"
             % issue.get("number")]
 
+# === Promises of work on a retired line in live artifacts ===================
+#
+# Origin: a "twin plan" section ("This PR is the new-line half; the old-line
+# twin PR follows against <old branch> once this lands", "the issue stays
+# open until both halves ship") was written while two release lines were
+# maintained and lived in the PR body until the merge: through the owner's
+# end-of-life decision for the old line and two PASS reviews. The skill
+# forbade CREATING twins but did not check bodies already written against the
+# decision. The detector catches promises of old-line work in the bodies of
+# open PRs and issues; lines already closed by a cancellation (dropped, EOL,
+# removed in the same or a neighbouring line) do not count.
+#
+# Configure FACTORY_EOL_BRANCH (the retired branch, for example
+# release/1.x) and optionally FACTORY_EOL_KEEP_BRANCH (the branch that
+# remains). Without FACTORY_EOL_BRANCH the detector is off.
+EOL_BRANCH = cfg("FACTORY_EOL_BRANCH", "")
+EOL_KEEP_BRANCH = cfg("FACTORY_EOL_KEEP_BRANCH", "")
+_EOL_LINE = re.escape(EOL_BRANCH.rsplit("/", 1)[-1]) if EOL_BRANCH else ""
+EOL_TWIN_PROMISE_RE = re.compile(
+    r"twin pr follows|twin follows|follows against [`']?%s"
+    r"|%s twin pr|stays open until both halves"
+    r"|both halves ship|%s twin plan"
+    r"|both (?:release )?lines \(twin"
+    % (re.escape(EOL_BRANCH), _EOL_LINE, _EOL_LINE), re.I) \
+    if EOL_BRANCH else None
+EOL_TWIN_DROP_RE = re.compile(
+    r"dropped|removed|eol|end.of.life|not created|no twins"
+    r"|removed from scope|cancelled|canceled"
+    + (r"|only %s|%s only" % ((re.escape(EOL_KEEP_BRANCH),) * 2)
+       if EOL_KEEP_BRANCH else ""), re.I)
+
+def eol_twin_hits(body):
+    """Lines promising old-line work outside a cancellation context. Read only."""
+    if EOL_TWIN_PROMISE_RE is None:
+        return []
+    lines = (body or "").splitlines()
+    hits = []
+    for i, line in enumerate(lines):
+        if not EOL_TWIN_PROMISE_RE.search(line):
+            continue
+        ctx = "\n".join(lines[max(0, i - 1):i + 3]).lower()
+        if EOL_TWIN_DROP_RE.search(ctx):
+            continue                     # the line is already marked as dropped
+        hits.append(line.strip()[:120])
+    return hits
+
+def _promise_scan(prs, issues, hits_of):
+    """(finding lines, {'pr': [...], 'issue': [...]}). Read only.
+
+    Numbers in kinds go one per artifact (dedup), finding lines one per
+    promising line."""
+    lines, kinds = [], {"pr": [], "issue": []}
+    for kind, label, items in (("pr", "PR", prs), ("issue", "issue", issues)):
+        for it in items:
+            for hit in hits_of(it.get("body")):
+                if it["number"] not in kinds[kind]:
+                    kinds[kind].append(it["number"])
+                lines.append("    %s #%d: \"%s\"" % (label, it["number"], hit))
+    return lines, kinds
+
+def eol_twin_promise(prs, issues):
+    """(finding lines, {'pr': [...], 'issue': [...]}). Read only."""
+    return _promise_scan(prs, issues, eol_twin_hits)
+
+# === A follow-up promise without a number ===================================
+#
+# Origin: a PR body had a section "Known limitation: ... which is tracked as a
+# follow-up". No such issue existed: the promise belonged to nobody, and the
+# owner had to file the issue himself. Rule: a phrase about tracking a
+# follow-up in a PR or issue body must reference an issue number (#N) or a
+# card (t_xxxxxxxx) in the same or a neighbouring line. Same mechanism as
+# eol_twin_promise: read-only detectors over bodies, no new state.
+FOLLOWUP_WORD_RE = re.compile(r"follow[ -]?ups?", re.I)
+FOLLOWUP_TRACK_RE = re.compile(
+    r"track\w*|defer\w*|limitation|postpone\w*|needed|future"
+    r"|later|known", re.I)
+FOLLOWUP_REF_RE = re.compile(r"#\d+|t_[0-9a-f]{8}", re.I)
+
+def followup_untracked_hits(body):
+    """Lines promising to track a follow-up without a number. Read only.
+
+    "follow-up" outside a promise context (track/defer/limitation/known
+    nearby) does not count; a reference to a number in the same or a
+    neighbouring line cancels the hit."""
+    lines = (body or "").splitlines()
+    hits = []
+    for i, line in enumerate(lines):
+        if not FOLLOWUP_WORD_RE.search(line):
+            continue
+        ctx = "\n".join(lines[max(0, i - 1):i + 3])
+        if not FOLLOWUP_TRACK_RE.search(ctx):
+            continue          # the word is there, no tracking promise
+        if FOLLOWUP_REF_RE.search(ctx):
+            continue          # an issue/card number nearby: the promise has
+                              # an owner
+        hits.append(line.strip()[:120])
+    return hits
+
+def followup_untracked_promise(prs, issues):
+    """(finding lines, {'pr': [...], 'issue': [...]}). Read only."""
+    return _promise_scan(prs, issues, followup_untracked_hits)
+
+# === A claim about external state without an artifact =======================
+#
+# The third case in two days after the follow-up one: a worker wrote "E2E
+# flaked (SomeIT, known)" without any issue (the issue appeared only later,
+# after the owner asked). The rule is wider than follow-ups: any claim about
+# state OUTSIDE the worker's own run (known, tracked, duplicated, fixed,
+# posted, merged, reported) in a PR or issue body must reference an artifact
+# (#N, t_xxxxxxxx, URL) in the same or a neighbouring line. Same mechanism: a
+# read-only detector over bodies, no new state. A false claim WITH a
+# reference ("duplicated in PR #N" when it was not) is not caught here: that
+# is the reviewer's job (a live check, the adversarial-review contract).
+EXTERNAL_CLAIM_RE = re.compile(
+    r"known\s+(?:issue|flake|failure|problem|limitation)"
+    r"|(?:already|previously)\s+(?:fixed|merged|posted|reported|tracked"
+    r"|duplicated)"
+    r"|duplicat\w*\s+(?:in|as|by)\b"
+    r"|is\s+tracked\s+in",
+    re.I)
+EXTERNAL_REF_RE = re.compile(r"#\d+|t_[0-9a-f]{8}|https?://\S+", re.I)
+
+def external_claim_untracked_hits(body):
+    """Lines claiming external state without an artifact. Read only.
+
+    Trigger: a known/already-*/duplicated... phrase WITHOUT an issue number,
+    a card or a URL in the same or a neighbouring line. "known issue" next to
+    #N or t_xxxxxxxx is cancelled: the claim has an owner.
+    """
+    lines = (body or "").splitlines()
+    hits = []
+    for i, line in enumerate(lines):
+        if not EXTERNAL_CLAIM_RE.search(line):
+            continue
+        ctx = "\n".join(lines[max(0, i - 1):i + 3])
+        if EXTERNAL_REF_RE.search(ctx):
+            continue
+        hits.append(line.strip()[:120])
+    return hits
+
+def external_claim_untracked_promise(prs, issues):
+    """(finding lines, {'pr': [...], 'issue': [...]}). Read only."""
+    return _promise_scan(prs, issues, external_claim_untracked_hits)
 
 def prototype_check(prs, issues):
     """Findings over open PRs: (lines, PR numbers). Read only."""
@@ -735,7 +1016,6 @@ def prototype_check(prs, issues):
                              % (pr["number"], number, bad[0]))
     return lines, numbers
 
-
 # === Library contract: calibrate against a run, not a guess ============
 #
 # A detector modelled the text of a library's error as "top message + first
@@ -748,26 +1028,29 @@ def prototype_check(prs, issues):
 # <class>#<method>"; whether the fixture is a real run is checked by the
 # reviewer (the Calibration item "library contract" in adversarial-review).
 TEST_DIR_RE = re.compile(r"(^|/)(?:src/)?(?:tests?|it|e2e|__tests__)/", re.I)
+
 TEST_NAME_RE = re.compile(
     r"^(?:.*(?:[Tt]est|[Ss]pec)s?\.java$|.*ITs?\.java$"
     r"|.*\.(?:test|spec)\.[a-z0-9]+)$")
+
 _LIB_WORDS = r"upstream\w*|librar\w*"
+
 _FORM_WORDS = r"two[- ]lines?|shape|format|output\w*"
+
 LIBMODEL_RE = re.compile(
     r"(?i)(?:\b(?:%s)\b[^\n]{0,120}\b(?:%s)\b"
     r"|\b(?:%s)\b[^\n]{0,120}\b(?:%s)\b)"
     % (_LIB_WORDS, _FORM_WORDS, _FORM_WORDS, _LIB_WORDS))
+
 LIBCONTRACT_RE = re.compile(
     r"(?im)^\s*(?:[-*]\s*)?library contract:\s*[\w.\-]+:[\w.\-]*\d[\w.\-]*"
     r"\s+[\w.$]+#\w+")
-
 
 def is_test_file(path):
     """A test file by path or name (src/test/, *Tests.java, *.test.tsx)."""
     p = "/" + (path or "")
     return bool(TEST_DIR_RE.search(p)) or bool(
         TEST_NAME_RE.match(p.rsplit("/", 1)[-1]))
-
 
 def lib_contract_verdict(body, added_test_lines):
     """(violations, sign). Empty violations = calibration present or not needed.
@@ -789,7 +1072,6 @@ def lib_contract_verdict(body, added_test_lines):
     if LIBCONTRACT_RE.search(body or ""):
         return [], sign
     return [sign], sign
-
 
 def lib_contract_scan(prs):
     """{PR number: sign} of open PRs that model library output without a
@@ -814,7 +1096,6 @@ def lib_contract_scan(prs):
             out[p["number"]] = sign
     return out
 
-
 def _is_summary_header_line(line):
     """The line is the section heading SUMMARY_MARKER.
 
@@ -822,7 +1103,6 @@ def _is_summary_header_line(line):
     (backticks, continuation of a line) is not a heading. Case does not matter.
     """
     return line.strip().lower() == SUMMARY_MARKER.lower()
-
 
 def _comment_is_summary(body):
     """The comment is a summary: it starts with the heading line."""
@@ -832,11 +1112,9 @@ def _comment_is_summary(body):
         return _is_summary_header_line(line)
     return False
 
-
 def _body_has_summary_section(body):
     """The PR body has a section with the heading line SUMMARY_MARKER."""
     return any(_is_summary_header_line(l) for l in (body or "").splitlines())
-
 
 def has_user_summary(number):
     """Whether the PR has a summary comment about the user-visible effect.
@@ -853,12 +1131,10 @@ def has_user_summary(number):
     return any(_comment_is_summary(c.get("body") or "")
                for c in (data.get("comments") or []))
 
-
 def fetch_heads(numbers):
     """Pull PR heads into a separate refs namespace, the working tree is untouched."""
     specs = ["+refs/pull/%d/head:refs/prs/%d" % (n, n) for n in numbers]
     git("fetch", "-q", "origin", *specs, timeout=300)
-
 
 def merges_clean(base_ref, first, second):
     """Whether second stays mergeable after first has been merged."""
@@ -874,7 +1150,6 @@ def merges_clean(base_ref, first, second):
                     "refs/prs/%d" % second)
     return "CONFLICT" not in out
 
-
 def conflict_paths(base_ref, first, second):
     code, tree = git("merge-tree", "--write-tree", base_ref, "refs/prs/%d" % first)
     head = tree.splitlines()[0] if tree else None
@@ -887,7 +1162,6 @@ def conflict_paths(base_ref, first, second):
     return sorted({m.group(1) for m in
                    re.finditer(r"CONFLICT \([^)]+\): Merge conflict in (.+)", out)})
 
-
 # === Merge flow instead of a big jump ===================================
 #
 # The goal: few CONFLICTING PRs and few PRs without movement for more than 48 h.
@@ -896,21 +1170,40 @@ def conflict_paths(base_ref, first, second):
 # not work as text, so the machine tracks the base shift and the rebase card:
 # a conflict is caught in the same run, while it is fresh.
 LINES = tuple(cfg_list("FACTORY_BASE_BRANCHES", ("main",)))
+
 CONFLICT_DEBT_LIMIT = 3
+
 STALE_PR_HOURS = 48
+
 STALE_GOAL = 2
+
 MERGE_WATCH = os.path.join(HOME, "cache", "pr-hygiene-merge-watch.json")
+
 DEBT_CACHE = os.path.join(HOME, "cache", "pr-hygiene-conflict-debt.json")
+
 # Hold: the live bootstrap of this flow is not accepted by the owner. While the
 # file exists, all actions of the flow are dry-run (cards, comments, state
 # files). It is lifted by the owner's word "accepted" (the file is deleted).
 MERGEFLOW_HOLD = os.path.join(HOME, "cache", "mergeflow-hold")
+
 # Meta of the owner's dispatcher stop: a PR's idle time does not tick while the
 # owner holds the dispatcher.
 STOP_META = os.path.join(HOME, "cache", "kanban-dispatch-hold.meta.json")
-REBASE_KEY_RE = re.compile(r"^coder-pr(\d+)-rebase-([0-9a-f]{7,40})$")
-TRIAGE_KEY_RE = re.compile(r"^architect-pr(\d+)-triage-48h$")
 
+REBASE_KEY_RE = re.compile(r"^coder-pr(\d+)-rebase-([0-9a-f]{7,40})$")
+
+# "One PR = one card": the owner card of a PR is found by the decomposition
+# convention. PR branch <prefix><issue>-<tail>, card key coder-<issue>-<slug>;
+# a match is tail.endswith(slug) (a real case: branch
+# <prefix>120-client-demo-e2e and key coder-120-demo-e2e, the branch slug is
+# longer than the key). Keys coder-pr<N>-rebase-... do not match \d+ (the
+# letters "pr"). FACTORY_ISSUE_BRANCH_PREFIX is the branch prefix agents use.
+ISSUE_BRANCH_PREFIX = cfg("FACTORY_ISSUE_BRANCH_PREFIX", "hermes/")
+ISSUE_BRANCH_RE = re.compile(r"^%s(\d+)-(.+)$" % re.escape(ISSUE_BRANCH_PREFIX))
+
+CODER_ISSUE_KEY_RE = re.compile(r"^coder-(\d+)-(.+)$")
+
+TRIAGE_KEY_RE = re.compile(r"^architect-pr(\d+)-triage-48h$")
 
 def line_heads():
     """SHAs of the base-line heads with one ls-remote, the working tree is untouched."""
@@ -922,7 +1215,6 @@ def line_heads():
         if len(parts) == 2:
             heads[parts[1].replace("refs/heads/", "")] = parts[0]
     return {b: sha for b, sha in heads.items() if b in LINES}
-
 
 def stack_parents(numbers, info):
     """{child: parent}: the parent's head is an ancestor of the child's head, same base.
@@ -945,7 +1237,6 @@ def stack_parents(numbers, info):
                 parents[b] = a
     return parents
 
-
 def rebase_priority(verdict_ok, is_root):
     """Rebase order of the merge flow: pairs with a reviewer verdict (closer
     to merge) first, then stack roots (they hold their children), then the rest."""
@@ -955,18 +1246,21 @@ def rebase_priority(verdict_ok, is_root):
         return 97
     return 96
 
-
 def live_cards_by_pr(head_of):
     """{PR: [(id, title, rank, key, assignee)]} of live cards by the owner's
     rule "one card = one PR" from factory-metrics: carriers are branch (0) >
-    key (1) > title (2), the body does not count. Live = not done/archived.
-    Assignee is needed by the rebase addressee filter: only a coder card of
-    kind rework/rebase absorbs.
+    key (1) > title (2) > decomposition owner (3), the body does not count.
+    Live = not done/archived. Assignee is needed by the rebase addressee
+    filter: a coder card of kind rework/rebase absorbs, or the owner of the
+    branch by the key coder-<issue>-<slug>.
 
     Live rebase cards carry different key conventions: rebase-<N>-<head7>,
     owner-review-<pr>-<head7>, decomp-<parent>-..., coder-pr<N>-rebase-<sha7>.
     KEY_PR_RE sees the first two, decompositions and keyless cards are caught
-    by the title.
+    by the title. Rank 3: a decomposition card without a PR number in its
+    title ("issue #120 C4") is linked to a PR by the branch
+    <prefix><issue>-<tail> and the key coder-<issue>-<slug>; when ambiguous
+    (several open PRs of the same issue fit one slug) no carrier is counted.
     """
     if not os.path.exists(BOARD_DB):
         return {}
@@ -978,10 +1272,16 @@ def live_cards_by_pr(head_of):
     con.close()
     branch_to = {branch: n for n, branch in head_of.items() if branch}
     numbers = set(head_of)
+    # (issue, branch tail) -> numbers of open PRs of that line
+    issue_pr = {}
+    for branch, n in branch_to.items():
+        m = ISSUE_BRANCH_RE.match(branch)
+        if m:
+            issue_pr.setdefault((int(m.group(1)), m.group(2)), []).append(n)
     out = {}
     for tid, title, key, branch, assignee in rows:
-        # carriers in order of strength: branch (0), key (1), title (2);
-        # the body does not count. The subject of a card at equal rank is the
+        # carriers in order of strength: branch (0), key (1), title (2),
+        # decomposition owner (3); the body does not count. The subject of a card at equal rank is the
         # FIRST number in the title ("Rebase #224 onto #223" is the card of
         # #224, not of #223).
         cand = []
@@ -996,6 +1296,14 @@ def live_cards_by_pr(head_of):
             num = int(num_s)
             if num in numbers:
                 cand.append((num, 2))
+        m = CODER_ISSUE_KEY_RE.match(key or "")
+        if m:
+            issue, slug = int(m.group(1)), m.group(2)
+            hits = sorted({n2 for (iss, tail), ns in issue_pr.items()
+                           if iss == issue and tail.endswith(slug)
+                           for n2 in ns})
+            if len(hits) == 1:
+                cand.append((hits[0], 3))
         if not cand:
             continue
         # rank of a PR: the strongest of all carriers of this PR in the card
@@ -1010,28 +1318,25 @@ def live_cards_by_pr(head_of):
             (tid, title, rank_of[best], key, assignee))
     return out
 
-
 def rebase_key(number, base7):
     return "coder-pr%d-rebase-%s" % (number, base7)
 
-
 def live_rebase_cards():
-    """{PR number: (card id, key)} of live rebase cards."""
+    """{PR number: (card id, key, status)} of live rebase cards."""
     if not os.path.exists(BOARD_DB):
         return {}
     con = sqlite3.connect("file:%s?mode=ro" % BOARD_DB, uri=True, timeout=10)
     rows = list(con.execute(
-        "select id, idempotency_key from tasks "
+        "select id, idempotency_key, status from tasks "
         "where idempotency_key like 'coder-pr%-rebase-%' "
         "and status not in ('done','archived')"))
     con.close()
     live = {}
-    for task_id, key in rows:
+    for task_id, key, status in rows:
         m = REBASE_KEY_RE.match(key or "")
         if m:
-            live[int(m.group(1))] = (task_id, key)
+            live[int(m.group(1))] = (task_id, key, status)
     return live
-
 
 def rebase_card_body(number, base, sha7, parent, url, head_ref):
     lines = [
@@ -1062,10 +1367,21 @@ def rebase_card_body(number, base, sha7, parent, url, head_ref):
     ]
     return "\n".join(lines)
 
-
 def create_rebase_card(number, base, sha7, parent, url, head_ref, prio):
+    # The native-or-live helper before create.
+    if board_native_guard is None:
+        return False, "native guard unavailable: card not created"
+    covered, guard = board_native_guard.native_or_live(
+        rebase_key(number, sha7), live_keys=_live_keys(),
+        native_checked=[board_native_guard.NATIVE_VERDICT,
+                        board_native_guard.NATIVE_TASK_LINKS],
+        why="rebase conflict with %s at head %s: Hermes has no native rebase "
+        "generator (stacked-layer-card is a pack layer)" % (base, sha7))
+    if covered:
+        return False, "native guard: card not created: %s" % guard
     title = "rebase PR #%d onto %s@%s" % (number, base, sha7)
-    body = rebase_card_body(number, base, sha7, parent, url, head_ref)
+    body = (board_native_guard.guard_section(guard)
+            + rebase_card_body(number, base, sha7, parent, url, head_ref))
     fd, path = tempfile.mkstemp(suffix=".md")
     with os.fdopen(fd, "w", encoding="utf-8") as fh:
         fh.write(body)
@@ -1087,7 +1403,6 @@ def create_rebase_card(number, base, sha7, parent, url, head_ref, prio):
     os.unlink(path)
     return done.returncode == 0, (done.stdout or done.stderr).strip()[:200]
 
-
 def comment_card(task_id, text):
     done = subprocess.run(
         [HERMES_BIN, "kanban", "--board", BOARD_SLUG, "comment",
@@ -1095,21 +1410,25 @@ def comment_card(task_id, text):
         capture_output=True, text=True, timeout=90)
     return done.returncode == 0
 
-
 def absorbs_rebase(title, key, assignee):
     """Whether a live card absorbs the rebase work.
 
     Yes: assignee is coder AND the kind from lint_card_kind(title, key) is
-    rework/rebase. Visual-delta, reviewer, decomposition and twin-port
-    cards, and cards without an assignee, do not absorb a rebase: their
-    executor would not do it, so a separate rebase card is created. The
+    rework/rebase, OR the decomposition key coder-<issue>-<slug>: that is the
+    owner of the PR branch, under "one PR = one card" it does the rebase and
+    no separate card is created (a real case: a rebase card was created on
+    top of the live owner, two coder cards of one PR in ready).
+    Visual-delta, reviewer, decomposition cards without the key convention
+    and cards without an assignee do not absorb a rebase: their executor
+    would not do it, so a separate rebase card is created. The
     "one card = one PR" rule stays for credit attribution (factory-metrics)
     but not for absorbing work.
     """
     if (assignee or "") != "coder":
         return False
+    if CODER_ISSUE_KEY_RE.match(key or ""):
+        return True
     return board_watchdog.lint_card_kind(title, key) in ("rework", "rebase")
-
 
 def post_merge_watch(info, ancestors, by_pr=None, dry_run=False):
     """Merge watcher: rebase cards for conflicts with the NEW base head.
@@ -1125,7 +1444,9 @@ def post_merge_watch(info, ancestors, by_pr=None, dry_run=False):
       Only a live CODER card of kind rework/rebase (lint_card_kind) absorbs
       the work; visual-delta, reviewer and decomposition cards and cards
       without an assignee will not do the rebase, so a rebase card is
-      created for them;
+      created for them. The owner also absorbs: a live coder decomposition
+      card (key coder-<issue>-<slug>, rank 3 in live_cards_by_pr) gets a
+      comment with the rebase target instead of a new card;
     - no card at all (or the live one does not absorb) -> create one with
       the key coder-pr<N>-rebase-<sha7>.
 
@@ -1176,10 +1497,12 @@ def post_merge_watch(info, ancestors, by_pr=None, dry_run=False):
                         if absorbs_rebase(c[1], c[3], c[4])]
             if existing:
                 best = min(existing, key=lambda c: (c[2], c[0]))
+                owner = bool(CODER_ISSUE_KEY_RE.match(best[3] or ""))
                 plan.append((prio, n, base, sha7, ancestors.get(n),
                              info[n].get("url", ""),
                              info[n].get("headRefName") or "",
-                             "existing", best[0]))
+                             "existing-owner" if owner else "existing",
+                             best[0]))
                 continue
             plan.append((prio, n, base, sha7, ancestors.get(n),
                          info[n].get("url", ""),
@@ -1194,6 +1517,18 @@ def post_merge_watch(info, ancestors, by_pr=None, dry_run=False):
                                  "  REBASE (dry-run) p%d #%d [%s] key %s"
                                  % (prio, n, base, key)))
                 continue
+            # Admission BEFORE create. A PR outside the active milestone or
+            # without a link to an approved issue would be parked by the gate
+            # right after creation.
+            admit_fn = getattr(board_watchdog, "gen_admission", None)
+            if admit_fn:
+                admit, why = admit_fn(BOARD_SLUG, n)
+                if not admit:
+                    findings.append((
+                        "mergeflow-rebase-noadmit:%s" % key,
+                        "  REBASE #%d not created: %s (admission before"
+                        " create)" % (n, why)))
+                    continue
             ok, out = create_rebase_card(
                 n, base, sha7, parent, url, head_ref, prio)
             findings.append((
@@ -1202,6 +1537,26 @@ def post_merge_watch(info, ancestors, by_pr=None, dry_run=False):
                 "  REBASE p%d #%d [%s] card %s%s" % (
                     prio, n, base, "created" if ok else "NOT created",
                     "" if ok else ": %s" % out)))
+        elif action == "existing-owner":
+            if dry_run:
+                findings.append(
+                    ("mergeflow-existing-owner-would:%d:%s" % (n, target),
+                     "  CONFLICT (dry-run) p%d #%d [%s]: live owner %s"
+                     " (decomposition key coder-<issue>-<slug>): it absorbs"
+                     " the rebase, no new card"
+                     % (prio, n, base, target)))
+                continue
+            comment_card(target,
+                         "Conflict with the new head of %s (%s): rebase"
+                         " target of PR #%d. This card does the rebase: it"
+                         " owns the PR branch (one PR = one card), no"
+                         " separate rebase card is created. Mechanics: the"
+                         " stacked-layer-card skill." % (base, sha7, n))
+            findings.append((
+                "mergeflow-existing-owner:%d:%s" % (n, target),
+                "  CONFLICT p%d #%d [%s]: comment on the live owner"
+                " %s (decomposition) with the target %s@%s, no new card"
+                % (prio, n, base, target, base, sha7)))
         elif action == "existing":
             if dry_run:
                 findings.append(("mergeflow-existing-would:%d:%s" % (n, target),
@@ -1252,6 +1607,70 @@ def post_merge_watch(info, ancestors, by_pr=None, dry_run=False):
                             ", ".join("#%d" % n for n in top[:5]))))
     return findings, total
 
+REBASE_STALE_MARKER = ("Watchdog: rebase card quenched: its acceptance "
+                       "criterion is already met.")
+
+def stale_rebase_gate(info, dry_run=False):
+    """Quench rebase cards of PRs that are already MERGEABLE.
+
+    A real case: a rebase card was created while the PR conflicted; by the
+    time a worker claimed it, the PR head already sat on the target base,
+    MERGEABLE, CI green and a reviewer PASS on that head. Any push from the
+    card would have reset the PASS. The same class as a stale rework arm,
+    but with a higher stake: not an empty run, a lost ready verdict.
+
+    Rule: a live rebase card is quenched (comment + archive) when its PR is
+    already MERGEABLE (the card's acceptance criterion was met another way)
+    or left OPEN. running is not archived (the run is paid for): it gets a
+    stop directive "do not push, close as already-done". A read failure and
+    mergeable UNKNOWN are conservatively not quenched. Called on EVERY run,
+    regardless of base movement: a card can go stale at any moment between
+    create and claim.
+    """
+    findings = []
+    for number, (task_id, key, status) in sorted(
+            live_rebase_cards().items()):
+        if number not in info:
+            why = ("PR #%d is no longer OPEN: no rebase is needed" % number)
+        else:
+            mergeable = (info[number].get("detail") or {}).get("mergeable")
+            if mergeable != "MERGEABLE":
+                continue
+            why = ("PR #%d is already MERGEABLE: the card's acceptance "
+                   "criterion (gh pr view --json mergeable = MERGEABLE) is "
+                   "met without it, any push would reset the green CI and "
+                   "the verdict on the head" % number)
+        if dry_run:
+            findings.append(("mergeflow-stale-rebase-would:%d" % number,
+                             "  REBASE QUENCH (dry-run) %s [%s] key %s:"
+                             " %s" % (task_id, status, key, why)))
+            continue
+        if status == "running":
+            comment_card(task_id,
+                         "STOP directive: %s. Do NOT push: a force push "
+                         "would reset the ready verdict. Close the card with "
+                         "an already-done comment without changing the "
+                         "branch." % why)
+            findings.append((
+                "mergeflow-stale-rebase-running:%d" % number,
+                "  REBASE QUENCH %s [%s]: the PR is already MERGEABLE, a "
+                "stop directive was sent to the running card"
+                % (task_id, status)))
+            continue
+        comment_card(task_id, REBASE_STALE_MARKER + " " + why)
+        done = subprocess.run(
+            [HERMES_BIN, "kanban", "--board", BOARD_SLUG, "archive",
+             task_id],
+            capture_output=True, text=True, timeout=120)
+        findings.append((
+            "mergeflow-stale-rebase:%d" % number if done.returncode == 0
+            else "mergeflow-stale-rebase-fail:%d" % number,
+            "  REBASE QUENCH %s [%s] key %s: %s; card %s"
+            % (task_id, status, key, why,
+               "archived" if done.returncode == 0
+               else "NOT archived: %s"
+               % (done.stderr or done.stdout).strip()[:120])))
+    return findings
 
 def _iso_to_epoch(value):
     """GitHub ISO time to epoch, or None. None means "unknown", not "never
@@ -1265,7 +1684,6 @@ def _iso_to_epoch(value):
         return dt.timestamp()
     except Exception:
         return None
-
 
 def owner_stop_since():
     """Timestamp when the owner's dispatcher stop began, or None (no stop).
@@ -1281,7 +1699,6 @@ def owner_stop_since():
     since = meta.get("since")
     return since if isinstance(since, (int, float)) else None
 
-
 def effective_age_s(last_ts, now, stop_since=None):
     """Age without the owner-stop window: the idle clock does not tick while
     the stop stands. An event after the stop began does not age at all (the
@@ -1293,7 +1710,6 @@ def effective_age_s(last_ts, now, stop_since=None):
             return 0.0
         age = stop_since - last_ts
     return age
-
 
 def pr_activity(number):
     """(commit ts, verdict ts, verdict state, head40) in one call.
@@ -1311,7 +1727,10 @@ def pr_activity(number):
                                                    or "")
         last_commit = max(last_commit, stamp)
     for comment in data.get("comments") or []:
-        low = (comment.get("body") or "").lower()
+        body = comment.get("body") or ""
+        if qa_verdict_comment(body):
+            continue
+        low = body.lower()
         state = ""
         if REJECT_MARKER in low:
             state = "rejected"
@@ -1324,7 +1743,6 @@ def pr_activity(number):
             verdict, verdict_state = stamp, state
     return (_iso_to_epoch(last_commit), _iso_to_epoch(verdict),
             verdict_state, data.get("headRefOid") or "")
-
 
 def classify_stale(commit_ts, verdict_ts, now, hours=STALE_PR_HOURS,
                    stop_since=None):
@@ -1342,6 +1760,24 @@ def classify_stale(commit_ts, verdict_ts, now, hours=STALE_PR_HOURS,
         return False
     return True
 
+def rework_card_priority(number):
+    """Rework of an open PR goes before new work of the band.
+
+    The svc_priority semantics of board-watchdog (one place for bands:
+    milestone_bands.band_of_ref): the active milestone band holds 90 (below
+    review 100 and the owner summary 95, above new work 80), an inactive
+    milestone gives its exact band, no data -> 90.
+    """
+    band = None
+    fn = getattr(milestone_bands, "band_of_ref", None)
+    if fn:
+        try:
+            band = fn(REPO_SLUG, number, is_pr=True)
+        except Exception:
+            band = None
+    if band is None or band == getattr(milestone_bands, "ACTIVE_BAND", 80):
+        return 90
+    return band
 
 def create_rework_card(number, url, head40, verdict_ts):
     """Rework card for an owner verdict: one card per verdict.
@@ -1350,6 +1786,26 @@ def create_rework_card(number, url, head40, verdict_ts):
     there are no commits after the verdict, so the verdict head is the
     current head. A repeated run with the same verdict is deduplicated by
     the live card (factory-metrics sees the key too: carrier coder-pr<N>-)."""
+    # The native-or-live helper before create.
+    if board_native_guard is None:
+        return False, "native guard unavailable: card not created"
+    # One key through the shared helper (board_native_guard.rework_key),
+    # the same as the watchdog and the reviewer on RETURN.
+    if not str(head40 or "").strip():
+        return False, "rework_key: the PR head is unknown, card not created"
+    key = board_native_guard.rework_key(number, head40)
+    covered, guard = board_native_guard.native_or_live(
+        key,
+        live_keys=_live_keys(),
+        native_checked=[board_native_guard.NATIVE_VERDICT,
+                        board_native_guard.NATIVE_REVIEW_LANE],
+        why="owner verdict CHANGES REQUESTED %s ago without an author "
+        "answer: Hermes has no native rework on an owner verdict (a pack "
+        "generator)" % (
+            ("%.0f h" % (effective_age_s(verdict_ts, time.time()) / 3600)
+             if verdict_ts else "long")))
+    if covered:
+        return False, "native guard: card not created: %s" % guard
     now = time.time()
     age_v = ("%.0f h" % (effective_age_s(verdict_ts, now) / 3600)
              if verdict_ts else "unknown")
@@ -1371,18 +1827,17 @@ def create_rework_card(number, url, head40, verdict_ts):
     ])
     fd, path = tempfile.mkstemp(suffix=".md")
     with os.fdopen(fd, "w", encoding="utf-8") as fh:
-        fh.write(body)
+        fh.write(board_native_guard.guard_section(guard) + body)
     done = subprocess.run(
         [HERMES_BIN, "kanban", "--board", BOARD_SLUG, "create", title,
          "--body-file", path, "--assignee", "coder",
-         "--priority", "80",
-         "--idempotency-key", "coder-pr%d-rework-%s" % (number, head7),
+         "--priority", str(rework_card_priority(number)),
+         "--idempotency-key", key,
          "--created-by", "pr-hygiene", "--skill", "stacked-layer-card",
          "--json"],
         capture_output=True, text=True, timeout=120)
     os.unlink(path)
     return done.returncode == 0, (done.stdout or done.stderr).strip()[:200]
-
 
 def stale_scan(prs, by_pr=None, dry_run=False):
     """Staleness without a live card.
@@ -1471,9 +1926,20 @@ def stale_scan(prs, by_pr=None, dry_run=False):
            stats["carded"], stats["acted"])))
     return findings, len(stale)
 
-
 def create_triage_card(number, url, commit_ts, verdict_ts):
     """Architect triage card with the key architect-pr<N>-triage-48h."""
+    # The native-or-live helper before create.
+    if board_native_guard is None:
+        return False, "native guard unavailable: card not created"
+    covered, guard = board_native_guard.native_or_live(
+        "architect-pr%d-triage-48h" % number, live_keys=_live_keys(),
+        native_checked=[board_native_guard.NATIVE_RESPAWN,
+                        board_native_guard.NATIVE_TASK_LINKS],
+        why="PR without movement for more than %d h: Hermes has no native "
+        "stale triage (a live card for the PR was checked above, no live "
+        "links)" % STALE_PR_HOURS)
+    if covered:
+        return False, "native guard: card not created: %s" % guard
     now = time.time()
     age_c = ("%.0f h" % ((now - commit_ts) / 3600)
              if commit_ts else "unknown")
@@ -1500,7 +1966,7 @@ def create_triage_card(number, url, commit_ts, verdict_ts):
     ])
     fd, path = tempfile.mkstemp(suffix=".md")
     with os.fdopen(fd, "w", encoding="utf-8") as fh:
-        fh.write(body)
+        fh.write(board_native_guard.guard_section(guard) + body)
     done = subprocess.run(
         [HERMES_BIN, "kanban", "--board", BOARD_SLUG, "create", title,
          "--body-file", path, "--assignee", "architect",
@@ -1510,7 +1976,6 @@ def create_triage_card(number, url, commit_ts, verdict_ts):
         capture_output=True, text=True, timeout=120)
     os.unlink(path)
     return done.returncode == 0, (done.stdout or done.stderr).strip()[:200]
-
 
 def stack_comment_present(child, parent):
     """True/False: our stack advice already hangs in the PR; None = unknown."""
@@ -1524,14 +1989,12 @@ def stack_comment_present(child, parent):
             return True
     return False
 
-
 def post_stack_comment(child, parent):
     body = ("Stack order: PR #%d sits on the open PR #%d."
             " Add the stack order to the PR body: who merges first, who"
             " waits. For example: stack: #%d -> #%d."
             % (child, parent, parent, child))
     gh("pr", "comment", str(child), "--body", body, timeout=60)
-
 
 def stack_lint(prs, info, ancestors, dry_run=False):
     """Stack check: a PR base is always one of the long-lived branches, and
@@ -1569,11 +2032,9 @@ def stack_lint(prs, info, ancestors, dry_run=False):
             post_stack_comment(child, parent)
     return findings
 
-
 def mergeflow_enabled():
     """False = owner hold: the merge-flow mechanisms run as dry-run only."""
     return not os.path.exists(MERGEFLOW_HOLD)
-
 
 def duplicate_rebase_findings(by_pr):
     """Two or more live rebase cards for one PR: show them to the owner.
@@ -1593,7 +2054,6 @@ def duplicate_rebase_findings(by_pr):
                    ", ".join("%s (%s...)" % (tid, t[:34])
                              for tid, t in rebase_like))))
     return findings
-
 
 def check():
     prs = open_prs()
@@ -1898,6 +2358,67 @@ def check():
                              " an owner comment saying"
                              " \"prototype accepted\"."])))
 
+    # 7c. Promises of work on a retired release line in live bodies. A
+    #     "twin plan" section lived in a PR body from the time of two lines
+    #     until the merge: through the end-of-life decision and two PASS
+    #     reviews. The skill forbade CREATING twins, but nothing checked the
+    #     bodies already written against the decision.
+    eol_lines, eol_kinds = eol_twin_promise(prs, issues)
+    if eol_lines:
+        found.append(("eoltwin:%s" % ",".join(
+            "%s%d" % (k, n) for k in ("pr", "issue")
+            for n in sorted(set(eol_kinds[k]))), "\n".join(
+            ["  Work promised on %s (end of life):" % EOL_BRANCH]
+            + eol_lines
+            + ["  %s is end of life by an owner decision." % EOL_BRANCH,
+               "  For the reviewer: [BLOCK] for a promising section in the"
+               " body",
+               "  (the PR body must match the code and the owner's"
+               " decisions). For the",
+               "  author of the next touch of the PR (rework/summary/rebase):"
+               " remove the",
+               "  section or rewrite it as \"dropped: EOL\"; an issue with"
+               " acceptance",
+               "  criteria for both lines gets a scope comment \"scope %s"
+               " only\"." % (EOL_KEEP_BRANCH or "the remaining line")])))
+
+    # 7d. A follow-up promise without a number. "Known limitation: ... which
+    #     is tracked as a follow-up" without an issue number in the body:
+    #     the promise belongs to nobody and the work is lost. Same mechanism
+    #     as 7c: reading the bodies of open PRs and issues.
+    fu_lines, fu_kinds = followup_untracked_promise(prs, issues)
+    if fu_lines:
+        found.append(("followup:%s" % ",".join(
+            "%s%d" % (k, n) for k in ("pr", "issue")
+            for n in sorted(set(fu_kinds[k]))), "\n".join(
+            ["  A follow-up promised without an issue/card number:"]
+            + fu_lines
+            + ["  Rule: a phrase about tracking a follow-up must reference",
+               "  a number (#N or t_xxxxxxxx) in the same or a neighbouring",
+               "  line, otherwise the promise belongs to nobody. Reviewer:",
+               "  [BLOCK] until the number appears; author: file the issue",
+               "  or card and write its number next to the phrase."])))
+
+    # 7e. A claim about external state (known/tracked/duplicated/already
+    #     fixed|merged|posted|reported) without an issue/card number or a
+    #     URL in the body. An extension of 7d: "known flake" without an
+    #     artifact is a claim nobody owns.
+    ec_lines, ec_kinds = external_claim_untracked_promise(prs, issues)
+    if ec_lines:
+        found.append(("extclaim:%s" % ",".join(
+            "%s%d" % (k, n) for k in ("pr", "issue")
+            for n in sorted(set(ec_kinds[k]))), "\n".join(
+            ["  A claim about external state without an artifact:"]
+            + ec_lines
+            + ["  Rule: known/tracked/duplicated/fixed/merged/",
+               "  posted/reported is written only with a reference to an",
+               "  artifact (#N, t_xxxxxxxx, URL) in the same or a",
+               "  neighbouring line; otherwise \"not verified\". Reviewer:",
+               "  [BLOCK] until the number appears; author: file the issue",
+               "  or card and write its number. False claims with a",
+               "  reference are caught by the reviewer's live check, not by",
+               "  this detector."])))
+
     # 8. Merge watcher (rebase cards, conflict debt).
     _mark("09_visual_delta")
     # Owner hold: until the owner accepts the bootstrap, everything is dry-run.
@@ -1914,6 +2435,9 @@ def check():
     # Duplicate rebases are always shown: this is a finding, not an action,
     # so the hold does not silence it.
     found.extend(duplicate_rebase_findings(by_pr))
+    # Quench rebase cards of already MERGEABLE PRs (every run, before
+    # post_merge_watch: a card can go stale between create and claim).
+    found.extend(stale_rebase_gate(info, dry_run=l5_dry))
     l5_findings, debt_count = post_merge_watch(info, ancestors, by_pr,
                                                dry_run=l5_dry)
     found.extend(l5_findings)
@@ -1933,12 +2457,13 @@ def check():
                l5_stale, STALE_GOAL)))
     return found
 
-
 DRY_RUN = "--dry-run" in sys.argv or "--mergeflow-dry-run" in sys.argv
-VD_ONLY = "--visual-delta" in sys.argv
-L5_ONLY = "--mergeflow-dry-run" in sys.argv
-LIB_ONLY = "--lib-contract" in sys.argv
 
+VD_ONLY = "--visual-delta" in sys.argv
+
+L5_ONLY = "--mergeflow-dry-run" in sys.argv
+
+LIB_ONLY = "--lib-contract" in sys.argv
 
 def main():
     if DRY_RUN:
@@ -1994,11 +2519,10 @@ def main():
     digest_add("pr-hygiene", "PR HYGIENE\n" + "\n".join(report))
     _profile_maybe()
 
-
 def _profile_maybe():
     if "--profile" in sys.argv:
         print(profile_report(), file=sys.stderr)
 
-
 if __name__ == "__main__":
     main()
+

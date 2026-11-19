@@ -140,7 +140,8 @@ class TestMutants(unittest.TestCase):
         with open(mut, "w", encoding="utf-8") as fh:
             fh.write(src.replace(old, new, 1))
         # the mutant lives outside the pack directory: it needs factory_config
-        shutil.copy(os.path.join(os.path.dirname(REAL), "factory_config.py"), d)
+        for _dep in ("factory_config.py", "scripts_digest.py"):
+            shutil.copy(os.path.join(os.path.dirname(REAL), _dep), d)
         r = subprocess.run(
             [sys.executable, os.path.abspath(__file__),
              "TestCronFailureAlerts.test_red_jobs_alerted_healthy_silent"],

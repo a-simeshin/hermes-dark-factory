@@ -14,7 +14,8 @@
 #      extensions of FACTORY_HOLDOUT_PRODUCT_EXT); the build runs inside
 #      run-bounded.sh (TTL 50 min); a fresh ready artifact is not rebuilt
 #      (idempotent);
-#   4) one JSON on stdout: the date, the shas of the base heads, the list of
+#   4) one JSON on stdout: the date, the shas of the base heads (null for a
+#      base branch missing on origin), the list of
 #      targets with worktree and artifact paths (or null when no build is
 #      needed or it failed).
 #
@@ -66,10 +67,24 @@ EXT_RE=$(printf '%s' "$PRODUCT_EXT" | sed 's/[ ]//g; s/,/|/g')
 # cron:holdout-nightly; foreign ones are not touched.
 "$SCRIPTS/holdout-stands-kill.py" || true
 
-git fetch origin "${BRANCHES[@]}" --quiet
+# The head of a base branch, or nothing with a note on stderr. A branch that
+# disappeared from origin (an end-of-life line deleted on its last day) is
+# SKIPPED and shows as null in the JSON; the run goes on and the remaining
+# branches are not affected. One shared git fetch of all branches used to
+# kill the whole nightly run under set -e. The note goes to stderr because
+# the call runs inside $(...).
+resolve_head() {  # $1 = branch; stdout: short sha, or empty when it is gone
+  if git fetch origin "$1" --quiet 2>/dev/null \
+     && git rev-parse --verify -q "origin/$1" >/dev/null 2>&1; then
+    git rev-parse --short "origin/$1"
+  else
+    echo "# holdout-nightly: branch $1 not found on origin (deleted?), skipped" >&2
+  fi
+}
 HEADS=""
 for b in "${BRANCHES[@]}"; do
-  HEADS="$HEADS\"$b\":\"$(git rev-parse --short "origin/$b")\","
+  SHA_B=$(resolve_head "$b")
+  [ -n "$SHA_B" ] && HEADS="$HEADS\"$b\":\"$SHA_B\"," || HEADS="$HEADS\"$b\":null,"
 done
 HEADS="${HEADS%,}"
 

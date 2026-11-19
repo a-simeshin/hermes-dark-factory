@@ -226,4 +226,9 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    # Stands start through run-bounded.sh, which needs GNU timeout (Linux).
+    if shutil.which("timeout") is None:
+        print("SKIP test_visual_delta_capture (needs GNU timeout for"
+              " run-bounded.sh; Linux only)")
+        sys.exit(0)
     sys.exit(main())
