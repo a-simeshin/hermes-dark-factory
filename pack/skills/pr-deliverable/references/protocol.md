@@ -83,15 +83,22 @@ owner as merge-ready until it exists. The summary does not duplicate the
 tester's verdict: the verdict answers "does it work", the summary answers
 "what does a person get".
 
-### WCFY is written once, after the reviewer's PASS, on the final head
+### WCFY is written before kanban_request_review, as part of the handoff
 
-WCFY is published ONCE, after the reviewer's PASS, on the final head. Before
-PASS it is neither published nor updated: rounds of changes are described in
-the PR body. An extra WCFY reads to the owner as readiness that does not
-exist.
+WCFY is published BEFORE `kanban_request_review`, on the head that goes to
+review: it is part of the handoff, not a step after PASS. A missing WCFY on
+the head under review means the handoff is incomplete and no PASS is posted;
+a WCFY promise that the code and tests do not keep means CHANGES REQUESTED.
+A step after the approval never runs: in the native review lane the
+reviewer's approval closes the card in one transition, and the implementer
+gets no turn after done. "One per PR" still holds: on a rework after CHANGES
+REQUESTED, the old WCFY is marked outdated and the new one is posted on the
+new head before the repeated review request. An extra WCFY reads to the
+owner as readiness that does not exist.
 
-WCFY is published by the card that owns the PR; there is no separate WCFY
-card. When the head moves past the old WCFY, mark the old comment outdated by PATCH (numeric id), with the marker placed BEFORE
+WCFY is published by the card that owns the PR; the only separate WCFY card
+is the watchdog's safety-net task card for a card that closed without one.
+When the head moves past the old WCFY, mark the old comment outdated by PATCH (numeric id), with the marker placed BEFORE
 the heading, so the old comment's first line is no longer `## What changes
 for you` and exactly one candidate remains. "One per PR" beats any
 instruction in a card.
@@ -116,8 +123,8 @@ The other side of the same rule: WCFY must EXIST and match the current head.
 A missing WCFY on delivered PRs and a WCFY for an old head are the same
 defect: the text fell behind the code. Before delivering each round:
 
-- WCFY for the current head: if the head changed after PASS, PATCH the same
-  comment, never add a new one;
+- WCFY for the current head: if the head changed since WCFY was posted,
+  PATCH the old one outdated and keep exactly one current WCFY;
 - before publishing a WCFY drafted in an earlier run: (a) check that the PR
   has no WCFY already (a second one is forbidden even if a card asks for it);
   (b) refresh EVERY number for the final head: mutation counts and red-test
@@ -160,7 +167,7 @@ rights can do, the agent does before handing the PR over:
   owner will wait";
 - `gh run rerun` for an infrastructure flake (empty commits and close/reopen
   are forbidden);
-- a fresh WCFY and a repeat review of the new head.
+- a fresh WCFY on the new head, then a repeat review of it.
 
 All of this is done by the card that owns the PR. A rebase or update-branch
 is absorbed by that live card; a separate rebase card next to it is a
@@ -391,8 +398,8 @@ Authorization) verbatim in browser storage.
 - the visual delta is where the project keeps it (references/visual-delta.md;
   for a UI-facing issue kept in the issue: the body starts with
   `## Before / After` and the PR has no Before/After section);
-- the PR has a `## What changes for you` comment (one, after the reviewer's
-  PASS, on the final head);
+- the PR has a `## What changes for you` comment (one, posted before
+  `kanban_request_review` on the head under review);
 - every closed blocker has a production-line mutation or a red run on the
   base attached;
 - tests that model a third-party library's output: a `Library contract:

@@ -453,7 +453,7 @@ is the base branch protection's required contexts:
 
 A red required check cancels PASS whatever the cause. "PASS on this PR's
 diff" with a red required job is not a PASS: machines read the verdict as an
-accept for the whole head and start post-PASS work (WCFY, owner-ready signals)
+accept for the whole head and start post-PASS work (owner-ready signals)
 for a head that is about to change. Wording on such a head: CHANGES REQUESTED
 with a link to the red job, or for a stack "Verdict: blocked by #N". The word
 PASS does not appear at all.
@@ -507,10 +507,15 @@ Grep the PR body for the issue number in ANY wording. A body that says
 "Issue: #N" instead of `Refs #N` slips past machine gates; apply the gate
 yourself and report the wording as a separate text finding.
 
-The `## What changes for you` comment is published AFTER your PASS, once, on
-the final head (pr-deliverable). Demanding it before the verdict creates
-noise (several premature WCFY on one PR). After PASS, a missing WCFY on the
-final head is an unfinished delivery step, not a review finding.
+The `## What changes for you` comment is part of the handoff
+(pr-deliverable): the implementer posts it BEFORE `kanban_request_review` on
+the head under review. The reviewer checks WCFY as part of the deliverable:
+a missing WCFY means the handoff is incomplete and no PASS is posted; WCFY
+promises are checked against the code and tests like PR body promises, and a
+mismatch is CHANGES REQUESTED. A WCFY posted after the approval never comes:
+the native review lane closes the card with the approval in one transition,
+and the implementer has no turn after it. Duplicates stay forbidden: one
+current WCFY candidate per PR, older ones marked outdated by PATCH.
 
 ## Every WCFY promise on every entry kind
 

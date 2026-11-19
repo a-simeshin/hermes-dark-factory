@@ -144,14 +144,22 @@ There are no separate reviewer, rework, rebase or summary cards for a PR.
   what is already in the PR;
 - a card closed with "remaining: owner merge" keeps a signal and a release
   condition until the PR is merged;
-- WCFY is a step of the owner card: between the reviewer's accept verdict on
-  the exact head and `kanban_complete`, the same card posts a fresh
-  "## What changes for you" comment (pr-deliverable). Closing without WCFY on
-  the accepted head does not finish the card: the native completion contract
-  checks only CI gates of the head, so the watchdog's owner-merge hold flags a
+- WCFY is part of the owner card's handoff: the card posts the
+  "## What changes for you" comment BEFORE `kanban_request_review` and
+  updates it before each repeated request after CHANGES REQUESTED
+  (pr-deliverable); the reviewer checks it as part of the deliverable
+  (adversarial-review). Safety net: the watchdog's owner-merge hold flags a
   closed card whose open PR has an accept verdict and no WCFY newer than the
   head (marker `WCFY_HOLD_MARKER`, owner class; the PR number is also read
-  from the summary of the finishing run);
+  from the summary of the finishing run) and files a task card for the
+  implementer of the closed card (key `wcfy-hold-<slug>-<tid>-<PR>`, addressee
+  from the latest review_requested, native-or-live receipt);
+- a mandatory step goes where the actor surely has a turn. A step placed in a
+  gap that a native mechanism closes in one transition never runs: the
+  native review lane closes the card with the approval, so nothing "between
+  approval and close" is ever executed. Put such a step into the handoff
+  before the transition, and make the safety net create work, not only a
+  report;
 - an owner CHANGES REQUESTED after the card closed opens one new card for
   the cycle; decompose from the LATEST verdict of the PR (all reviewers):
   the head may already have closed older blockers;

@@ -99,3 +99,8 @@ This document collects the lessons from running the factory that were expensive 
 
 **Rule.** When a native gate reads a field your agents fill in, write it in the exact format the gate parses. For the PR completion contract, `metadata.published_pr` is the full PR URL, not a number.
 **Why.** A value the gate cannot parse is not reported as a format error; it surfaces later as a completion that does not behave as the contract promises.
+
+## A mandatory step goes where the actor surely has a turn
+
+**Rule.** Place every mandatory step at a point where the actor who owns it is guaranteed a turn, and have the next actor check it there. A step in a gap that a native mechanism closes in one transition never runs.
+**Why.** The owner-facing summary of a PR was required "after approval, before close", but the native review lane closes the card with the reviewer's approval in one transition: the implementer never got that turn, and PRs reached the owner without the summary. The step now belongs to the handoff before the review request, the reviewer checks it, and the watchdog's safety net files a task card instead of only reporting.

@@ -256,9 +256,14 @@ A deferred finding: an issue plus a card (`--triage`) plus the line
   "prototype accepted" in the issue is [BLOCK], however green CI is. A comment
   by anyone else does not count. The implementation branch starts from the
   integration branch, not from the prototype branch.
-- WCFY is published AFTER your PASS (do not demand it earlier). A missing
-  WCFY after PASS on the final head is an unfinished delivery step, not a
-  review finding.
+- WCFY is part of the handoff, checked on EVERY review: the head under review
+  carries a `## What changes for you` comment that the implementer posted
+  BEFORE `kanban_request_review`. A missing WCFY means the handoff is
+  incomplete: no PASS (return it without a verdict, marked "unfinished
+  handoff step"). WCFY promises are checked against the code and tests like
+  PR body promises; a mismatch is CHANGES REQUESTED. On a repeat review after
+  CHANGES REQUESTED, check that WCFY was updated for the new head (the old
+  one marked `outdated PATCH-<id>`).
 - Every WCFY promise is checked by a live scenario on every kind of entry the
   feature distinguishes (for example a saved item and an ad-hoc one). A live
   run of only one entry kind proves nothing about the others.

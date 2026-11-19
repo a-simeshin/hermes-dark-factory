@@ -58,20 +58,31 @@ that has a PR.
 - a PR or issue number in text comes only from a live `gh pr view N --json
   ...` in this session, with the PR title next to it; never from memory.
 
-## WCFY: one comment, after PASS, on the final head
+## WCFY: part of the handoff, BEFORE kanban_request_review
 
-The `## What changes for you` (WCFY) comment is published ONCE by the card
-that owns the PR, after the reviewer's PASS, on the final head; rounds of
-changes live in the PR body. Three parts: what changes for the user / how it
-is proven (screenshots, output, diff) / what was run (commands and numbers).
+The `## What changes for you` (WCFY) comment is part of the handoff, next to
+the code and the tests: the card that owns the PR publishes it BEFORE
+`kanban_request_review`, on the head that goes to review. The reviewer
+checks WCFY as part of the deliverable: a missing WCFY means the handoff is
+incomplete and no PASS is posted; a WCFY promise that the code and tests do
+not keep means CHANGES REQUESTED (adversarial-review). WCFY is not a step
+after the approval: in the native review lane the reviewer's approval closes
+the card in one transition, and the implementer gets no turn after it.
+Three parts: what changes for the user / how it is proven (screenshots,
+output, diff) / what was run (commands and numbers).
 
-- The head moved on: PATCH the old WCFY by its NUMERIC comment id (not the
-  node id) and put the marker `outdated PATCH-<id>` before its heading, so
-  exactly one WCFY candidate remains for machines.
+- Rework after CHANGES REQUESTED: update WCFY before the REPEATED
+  `kanban_request_review` (numbers from live commands on the new head).
+  PATCH the old WCFY by its NUMERIC comment id (not the node id) and put the
+  marker `outdated PATCH-<id>` before its heading, so exactly one WCFY
+  candidate remains for machines.
 - "Is there a WCFY yet?" is answered by the FIRST LINE of each comment, not
   by a substring grep (prose mentions give false positives).
 - Every number (test counts, hashes) comes from a live command of THIS run on
-  the final head, not from an old battery.
+  the head under review, not from an old battery.
+- Safety net, not the normal path: the watchdog's WCFY close gate catches a
+  closed card whose open PR has an accept verdict and no WCFY, and files a
+  task card for the implementer.
 - Exception: when the closing recipe explicitly lists WCFY among its steps,
   publishing it is executing that decision; every earlier step of the recipe
   is verified by live commands first.
@@ -83,6 +94,8 @@ carried the work, must:
 
 - post a rework response in the PR: one answer per BLOCK item of the verdict
   (what was done, the commit, the mutation or red run that proves it);
+- update WCFY on the new head (see the WCFY section): the reviewer checks it
+  as part of the handoff;
 - request review again with `kanban_request_review` naming the reviewer
   explicitly (without a reviewer the card is not reassigned and the author
   reviews itself), then exit; the verdict is not awaited inside the run.
@@ -189,7 +202,9 @@ owner.
 - `gh pr view <N> --json baseRefName,files` matches the card (dozens of
   unrelated files mean the wrong base);
 - the visual delta is where the project keeps it (references/visual-delta.md);
-- WCFY: one, after PASS, on the final head, numbers from live commands;
+- WCFY: posted before kanban_request_review on the head under review,
+  updated before each repeated request after a rework, numbers from live
+  commands;
 - every closed blocker has a mutation or a red run on the base attached;
 - after a rework: a rework response per BLOCK item and review re-requested
   with the reviewer named;

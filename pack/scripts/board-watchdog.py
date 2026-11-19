@@ -6186,13 +6186,50 @@ OWNER_MERGE_LEFT_RE = re.compile(
 OWNER_MERGE_HOLD_MARKER = ("Watchdog: close gate (one PR = one"
                            " card).")
 OWNER_MERGE_HOLD_WINDOW_S = 14 * 24 * 3600
-# WCFY close gate: once review lives on the owner card, the WCFY step
-# belongs to that card too. A card was closed with its PR open, an accept
-# verdict on the head and no WCFY; the owner does not merge without WCFY
+# WCFY close gate: a card was closed with its PR open, an accept verdict
+# on the head and no WCFY; the owner does not merge without WCFY
 # (pr-deliverable), so the gate holds a signal on the closed card until a
-# WCFY is posted on the head.
+# WCFY is posted on the head. The normal path is a process step: the owner
+# card posts WCFY BEFORE kanban_request_review, as part of the handoff, and
+# the reviewer checks it. A step "between the accept verdict and closing"
+# never runs: the native review lane closes the card with the approval in
+# one transition and the implementer gets no turn after done. So this gate
+# is the safety net and must create work (a task card for the implementer
+# of the closed card), not only report. The marker text is kept as is:
+# comment dedup matches its first 40 characters, and it names the trigger
+# (an accept verdict without WCFY), not where WCFY is posted.
 WCFY_HOLD_MARKER = ("Watchdog: WCFY close gate (WCFY after accept, one PR"
                     " = one card).")
+
+
+def _task_implementer(con, tid):
+    """Implementer of a closed card, the addressee of the WCFY task card.
+
+    The implementer from the latest review_requested event, then the
+    assignee of the tasks row. None when neither is known.
+    """
+    try:
+        row = con.execute(
+            "SELECT payload FROM task_events WHERE task_id = ? "
+            "AND kind = 'review_requested' AND payload IS NOT NULL "
+            "ORDER BY id DESC LIMIT 1", (tid,)).fetchone()
+    except sqlite3.Error:
+        row = None
+    if row:
+        try:
+            v = (json.loads(row[0]) or {}).get("implementer")
+            if isinstance(v, str) and v.strip():
+                return v.strip()
+        except Exception:
+            pass
+    try:
+        row = con.execute(
+            "SELECT assignee FROM tasks WHERE id = ?", (tid,)).fetchone()
+    except sqlite3.Error:
+        row = None
+    if row and row[0] and str(row[0]).strip():
+        return str(row[0]).strip()
+    return None
 
 
 def _closed_card_pr_numbers(result, title, summary=""):
@@ -6252,7 +6289,12 @@ def owner_merge_hold_gate(slug, now=None, apply=True):
     Second branch (WCFY close gate): a closed card whose PR is open, has a
     reviewer accept verdict on the exact head and no WCFY newer than the
     head keeps a signal and a comment (marker WCFY_HOLD_MARKER). The PR
-    number is also looked up in the summary of the finishing run.
+    number is also looked up in the summary of the finishing run. The
+    branch also creates a task card for the implementer of the closed card
+    (addressee from the latest review_requested, then the assignee, then
+    coder; key wcfy-hold-<slug>-<tid>-<PR>, native-or-live receipt).
+    Reopening is not an option: reopen-review works only from status
+    review, and the card is done.
     """
     repo = board_repo(slug)
     if not repo:
@@ -6346,6 +6388,59 @@ def owner_merge_hold_gate(slug, now=None, apply=True):
                        (st.get("head") or "")[:7], number))))
                 if not apply:
                     break
+                # The gate creates work, not only a report: a task card for
+                # the implementer of the closed card. Reopening is not an
+                # option: reopen-review lifts only status review.
+                head7 = (st.get("head") or "")[:7]
+                implementer = _task_implementer(con, tid) or "coder"
+                card_key = "wcfy-hold-%s-%s-%d" % (slug, tid, number)
+                covered, guard = board_native_guard.native_or_live(
+                    card_key,
+                    live_keys=_live_keys(slug),
+                    native_checked=[
+                        board_native_guard.NATIVE_RESPAWN,
+                        board_native_guard.NATIVE_REVIEW_LANE],
+                    why="card %s is done, PR #%d is open with an accept "
+                        "verdict on head %s and no WCFY: the native review "
+                        "lane closes the card with the approval in one "
+                        "transition, the implementer has no turn after "
+                        "done, and neither respawn nor reopen-review (status "
+                        "review only) lifts it; the WCFY step goes to a "
+                        "separate task card" % (tid, number, head7))
+                card_id = ""
+                if not covered:
+                    out = run([HERMES, "kanban", "--board", slug, "create",
+                               "WCFY: PR #%d (card %s closed without WCFY)"
+                               % (number, tid),
+                               "--body",
+                               board_native_guard.guard_section(guard) +
+                               "Card %s is done, its PR #%d is open with an "
+                               "accept verdict on head %s, and no WCFY "
+                               "(## What changes for you) stands on that "
+                               "head. WCFY is part of the handoff before "
+                               "kanban_request_review (pr-deliverable); this "
+                               "safety net catches the missed step. Post the "
+                               "WCFY comment on the head of PR #%d by the "
+                               "pr-deliverable protocol (numbers from live "
+                               "commands of this run), then close this card "
+                               "with the result \"WCFY PR #%d\"."
+                               % (tid, number, head7, number, number),
+                               "--assignee", implementer,
+                               "--priority",
+                               str(svc_priority(slug, number, 80)),
+                               "--idempotency-key", card_key,
+                               "--json"], timeout=90)
+                    try:
+                        card_id = (json.loads(out) or {}).get("id", "")
+                    except Exception:
+                        card_id = ""
+                if covered:
+                    assign_phrase = "Task card not created: %s" % guard
+                else:
+                    assign_phrase = ("Task card for %s: %s (key %s)"
+                                     % (implementer,
+                                        card_id or "(create failed, file it "
+                                                   "by hand)", card_key))
                 seen = con.execute(
                     "SELECT COUNT(*) FROM task_comments WHERE task_id = ? "
                     "AND body LIKE ?",
@@ -6353,11 +6448,12 @@ def owner_merge_hold_gate(slug, now=None, apply=True):
                 if not seen:
                     run([HERMES, "kanban", "--board", slug, "comment", tid,
                          "%s the card is closed, PR #%d is open with an "
-                         "accept verdict on the head and no WCFY. The owner "
-                         "does not merge without WCFY (pr-deliverable). "
+                         "accept verdict on the head and no WCFY. %s. The "
+                         "owner does not merge without WCFY (pr-deliverable). "
                          "Release condition: WCFY on the head of PR #%d, or "
                          "the PR merged or closed."
-                         % (WCFY_HOLD_MARKER, number, number)],
+                         % (WCFY_HOLD_MARKER, number, assign_phrase,
+                            number)],
                         timeout=90)
                 break
     finally:
@@ -6758,8 +6854,8 @@ def review_arm_liveness_gate(slug, apply=True):
       3. a fresh WCFY already stands on the EXACT head (wcfy_at not older
          than the head): another channel did the card's work;
       4. the PR is CONFLICTING: a PASS on such a head is impossible (no CI
-         run), so a WCFY "after PASS" cannot appear before the rebase that
-         changes the head.
+         run), so a WCFY on an accepted head cannot appear before the
+         rebase that changes the head.
     A gh failure = conservatively not retired (retiring without a reason
     costs more than an extra run). Returns findings (key, rank, text).
     """

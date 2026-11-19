@@ -115,7 +115,10 @@ and reviews of a head that was about to change.
 - Review: `kanban_request_review` on the owner card, with an explicit
   `reviewer`. The card moves to the native review lane and the dispatcher
   starts the review run itself. A reviewer card on the same head is a second
-  full review of the same sha.
+  full review of the same sha. The owner-facing summary ("## What changes
+  for you") is posted BEFORE the request, as part of the handoff: an accept
+  verdict closes the card in the same transition, so the owner card gets no
+  turn after approval.
 - Reject: the reviewer, running on the card claimed from review, calls
   `kanban_request_changes`; the card returns to its owner. The owner fixes in
   the PR's branch, answers each item in the PR (rework response) and requests
@@ -309,6 +312,16 @@ created directly (`created_by=user`).
 Format: `<role>-<issue|PR>-<verb>`, for example
 `tester-pr187-verify-eviction-race`. Picked up a card without a key: check for
 duplicates with no-duplicate-work before starting.
+
+## A mandatory step goes where the actor surely has a turn
+
+A step placed in a gap that a native mechanism closes in one transition
+never runs. The native review lane closes the card with the reviewer's
+approval, so a step "between approval and close" (for example WCFY) was
+never executed: the implementer is not woken after done, and reopen-review
+works only from status review. Put such a step into the handoff before the
+transition, have the next actor check it, and make a safety-net gate create
+a task card for the step, not only a report.
 
 ## Name the reviewer when requesting review
 
