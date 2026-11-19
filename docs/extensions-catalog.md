@@ -114,7 +114,7 @@ This catalog lists every mechanism the factory adds on top of Hermes Agent v0.23
 
 ### issue-executor-poll
 
-- **What:** every five minutes, every issue of the active milestone gets an executor card within one cycle, in the milestone's band; delivered issues (a merged PR after the last scope change) and anything already covered are skipped. `--check-issue N` answers a webhook prompt whether a card is appropriate.
+- **What:** every five minutes, every issue of the active milestone gets an executor card within one cycle, in the milestone's band; delivered issues (a merged PR after the last scope change) and issues already covered by a live card's anchor reference (`Issue: #N`, `issue #N`, `Refs/Closes/Fixes #N`, not a loose `#N` in prose) are skipped; the idle lint and the admission no-executor finding use the same anchor rule. `--check-issue N` answers a webhook prompt whether a card is appropriate.
 - **Native feature checked:** the GitHub webhook subscription and the issue bridge.
 - **Why not enough:** webhook events can be missed or arrive for issues that are already delivered, and the bridge creates cards without an assignee. Three duplicate cards appeared in twenty minutes for an issue whose PR had already merged.
 - **Where (original setup):** `issue-executor-poll.py` (logic in `board-watchdog.py`), cron every 5 minutes.

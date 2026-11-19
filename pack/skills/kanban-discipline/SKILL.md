@@ -39,6 +39,14 @@ title change; milestone changes and comments are not scope), or a done
 executor card links a merged PR. Delivered work that is not a release chore
 gets a question to the owner ("what is left on #N"), not a card.
 
+A live card covers issue #N only through an anchor reference: an
+`Issue: #N` line, `issue #N`, or `Refs/Closes/Fixes #N`. A loose "#N" in a
+card title or prose (a summary card listing "#M/#N") is not an executor:
+an issue of the active milestone once sat idle while the executor poll,
+the idle lint and the admission no-executor finding all counted such a
+mention as coverage. The `keep-open` label only suppresses automatic
+closing; it never excuses an issue from having an executor card.
+
 ## Creating a card: checklist
 
 - `--skill`: ONLY names from `hermes skills list`. Technology keys from the

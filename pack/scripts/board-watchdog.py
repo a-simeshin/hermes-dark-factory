@@ -3521,6 +3521,21 @@ def issue_milestoned_at(repo, n, title):
     return best
 
 
+def executor_cover_refs(title, body):
+    """Issue numbers a card actually covers as an executor.
+
+    Live coverage of an issue is an anchor reference only: an "Issue: #N"
+    line, "issue #N", or Refs/Closes/Fixes #N in the title or body. A loose
+    "#N" in prose is not coverage: a summary card that merely mentions
+    "#M/#N" in its title once kept an issue of the active milestone without
+    an executor, and the poll, the orphans report and the admission
+    no-executor finding all stayed silent. Decomposition and the poll write
+    the anchor themselves (the body "Issue: #N")."""
+    text = "%s\n%s" % (title or "", body or "")
+    return {int(m.group(1)) for m in re.finditer(
+        r"(?i)\b(?:issues?|refs|closes|fixes)\s*:?\s*#(\d{1,5})", text)}
+
+
 def active_milestone_orphans(slug, repo=None):
     """Open issues of the active milestone without a live card.
 
@@ -3531,7 +3546,8 @@ def active_milestone_orphans(slug, repo=None):
     source (done) does not hold the work. Without this the watchdog stayed
     silent when there were no cards at all, every todo was held by open
     parents and parked was empty, while the active milestone had open
-    issues.
+    issues. A live card covers an orphan only by an anchor reference
+    (executor_cover_refs); a loose "#N" in prose does not.
     gh failure -> [] (the old behaviour: the lint is silent, the poll
     remains as the safety net).
     """
@@ -3555,8 +3571,8 @@ def active_milestone_orphans(slug, repo=None):
                 "SELECT id, title, coalesce(body,'') FROM tasks"
                 " WHERE status NOT IN ('done','archived')"):
             live_ids.add(tid)
-            live_refs |= {int(x) for x in re.findall(
-                r"#(\d+)", (title or "") + " " + (body or ""))}
+            # Anchor references only, a loose "#N" is not coverage.
+            live_refs |= executor_cover_refs(title, body)
     finally:
         con.close()
     pr_of_issue = {}
@@ -3889,6 +3905,10 @@ def admission_gate(slug):
     # "active milestone without an executor" a card closed recently does not
     # count as coverage
     live_refs = set()
+    # "Issue without an executor" counts only anchored coverage
+    # (executor_cover_refs plus issue-link markers): a loose "#N" in the
+    # prose of a summary card does not replace an executor.
+    live_anchor = set()
     for t_title, t_body in done_refs:
         refs_live.update(refs_in({"title": t_title or "",
                                   "body": t_body or ""}))
@@ -3900,6 +3920,9 @@ def admission_gate(slug):
         # a live parked card does not count as "without a card"
         refs_live.update(n for n in own_all if n in states)
         live_refs.update(n for n in own_all if n in states)
+        live_anchor.update(
+            n for n in (executor_cover_refs(title, body) | own_marker)
+            if n in states)
         nums = set(own_all)
         for anc in ancestors(task_id):
             nums |= marker_links(anc)
@@ -4403,7 +4426,7 @@ def admission_gate(slug):
         merged = None
         for n in sorted(states):
             milestone, labels, upd, body = states[n]
-            if milestone != active_ms or n in live_refs:
+            if milestone != active_ms or n in live_anchor:
                 continue
             if n in pr_of_issue:
                 continue
@@ -4517,8 +4540,8 @@ def issue_executor_poll(dry_run=False):
                     "SELECT id, title, coalesce(body,'') FROM tasks"
                     " WHERE status NOT IN ('done','archived')"):
                 live_ids.add(tid)
-                live_refs |= {int(x) for x in re.findall(
-                    r"#(\d+)", (title or "") + " " + (body or ""))}
+                # Anchor references only, a loose "#N" is not coverage.
+                live_refs |= executor_cover_refs(title, body)
         finally:
             con.close()
         pr_link = open_pr_linkage(repo, states) or {}

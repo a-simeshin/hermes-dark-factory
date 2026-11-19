@@ -454,11 +454,12 @@ def issues_without_cards(issues, refs):
     for issue in issues:
         number = issue["number"]
         labels = [l["name"] for l in issue.get("labels", [])]
-        # wait-for-triage: not confirmed yet. keep-open: the work is wider than
-        # what was merged. blocked-upstream: waiting for another project.
-        # needs-decision: waiting for the owner. All four mean "lies there for
-        # a reason", not "forgotten".
-        if {"wait-for-triage", "keep-open", "blocked-upstream",
+        # wait-for-triage: not confirmed yet. blocked-upstream: waiting for
+        # another project. needs-decision: waiting for the owner. All three
+        # mean "lies there for a reason", not "forgotten". keep-open is NOT
+        # here: it only suppresses automatic closing; the remaining work
+        # wider than what was merged still needs an executor card.
+        if {"wait-for-triage", "blocked-upstream",
             "needs-decision"} & set(labels):
             continue
         if refs.get(number):
