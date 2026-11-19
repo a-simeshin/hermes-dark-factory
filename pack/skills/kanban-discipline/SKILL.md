@@ -1,7 +1,7 @@
 ---
 name: kanban-discipline
 description: Creating, blocking, prioritising and handing off board cards.
-version: 2.2.0
+version: 2.3.0
 author: maintainer, Hermes Agent
 license: MIT
 metadata:
@@ -125,6 +125,18 @@ rebase that meets one blocks with a question).
   forever;
 - a `dependency` block does NOT hold a card whose parents are done: it
   auto-promotes and loops.
+
+## Cards from a verdict: blockers on an open PR only
+
+A card may come from a review verdict only for blocking items on an OPEN
+pull request. A minor, follow-up or non-blocking note in an approved or
+merged verdict goes to the owner's triage as an issue: search for a live
+issue about the finding first and comment on it if one exists, otherwise
+create the issue without a milestone and without a card. Every card the
+webhook handler creates carries a native-or-live receipt; when an issue for
+the finding exists, the card has the anchor `Issue: #K` and its PR says
+`Refs #K`. Otherwise an unapproved note starts work past triage, and the
+issue poll later adds a second executor for the same finding.
 
 ## A new rule goes into the layer the worker always loads
 

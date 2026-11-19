@@ -31,6 +31,9 @@ cd "$snap_root"
 # git globs.
 [ -f .gitignore ] && git add -f .gitignore
 git add config.yaml SOUL.md 2>/dev/null || true
+# The webhook subscriptions file carries the github-pr handler prompt with
+# its gates; without this line, edits to that prompt never reached a snapshot.
+git add webhook_subscriptions.json 2>/dev/null || true
 # Top-level documents are part of the teaching too: DEVIATIONS.md explains
 # deliberate departures from the docs, RETIRED.md what was replaced by what.
 # They once sat untracked all along, so their entries were never in a snapshot
