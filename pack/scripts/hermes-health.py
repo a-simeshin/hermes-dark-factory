@@ -111,13 +111,15 @@ def check_provider_config():
                  "set api_key")
 
 
-# Provider-specific (Z.AI): quota death comes in two forms: 429 1310 "Limit
-# Exhausted" and 429 1113 "Insufficient balance or no resource package". A
-# detector that only matched the "Limit Exhausted" text once let 1113 slip by:
-# match by code (in a line with 429) and by both texts. For another provider,
-# change the codes and texts here.
-QUOTA_TEXTS = ("Limit Exhausted", "Insufficient balance or no resource package")
-QUOTA_CODE_RE = re.compile(r"429[^\n]*?\b(1310|1113)\b")
+# Quota death is provider-specific, so it is configuration: the error codes a
+# provider puts on a 429 line when the quota is gone (FACTORY_QUOTA_CODES) and
+# the matching message texts (FACTORY_QUOTA_TEXTS, paired with the codes by
+# position). A detector that matched only one text once let the second form
+# slip by: match by code (in a line with 429) and by every text.
+QUOTA_CODES = tuple(cfg_list("FACTORY_QUOTA_CODES"))
+QUOTA_TEXTS = tuple(cfg_list("FACTORY_QUOTA_TEXTS"))
+QUOTA_CODE_RE = (re.compile(r"429[^\n]*?\b(%s)\b" % "|".join(map(re.escape, QUOTA_CODES)))
+                 if QUOTA_CODES else None)
 QUOTA_RESET_RE = re.compile(r"reset at (\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})")
 OWNER_CHAT = cfg("FACTORY_OWNER_CHAT")
 
@@ -162,12 +164,12 @@ CRON_KEEP = {"hermes-health", "nightly-backup", "usage-ledger", "worktree-gc",
 
 def quota_hit(line):
     """Dead-quota code in a log line ('1310'/'1113') or empty."""
-    m = QUOTA_CODE_RE.search(line)
+    m = QUOTA_CODE_RE.search(line) if QUOTA_CODE_RE else None
     if m:
         return m.group(1)
     for i, text in enumerate(QUOTA_TEXTS):
         if text in line:
-            return ("1310", "1113")[i]
+            return QUOTA_CODES[i] if i < len(QUOTA_CODES) else text
     return ""
 
 
@@ -195,29 +197,41 @@ def cron_jobs():
     return jobs
 
 
+def quota_probe_settings():
+    """(base URL, key, model) of the quota probe, or None when it is not set up.
+
+    The probe is opt-in: FACTORY_QUOTA_PROBE_BASE (the provider's
+    OpenAI-compatible base URL), FACTORY_QUOTA_PROBE_KEY_VAR (the name of the
+    variable in the Hermes .env that holds the API key) and a model
+    (FACTORY_QUOTA_PROBE_MODEL, else the first fallback model of the config).
+    """
+    base = cfg("FACTORY_QUOTA_PROBE_BASE", "")
+    key_var = cfg("FACTORY_QUOTA_PROBE_KEY_VAR", "")
+    model = cfg("FACTORY_QUOTA_PROBE_MODEL", "")
+    if not model:
+        try:
+            model = ((load_yaml(os.path.join(HOME, "config.yaml"))
+                      .get("fallback_providers") or [{}])[0]).get("model")
+        except Exception:
+            model = None
+    if not (base and key_var and model):
+        return None
+    return base, env_value(key_var), model
+
+
 def quota_probe():
     """A live call of 5 tokens: 200 means the quota answers.
 
     A plain ping is not enough: it once passed in the middle of a dead quota
     on the second attempt.
-
-    Provider-specific (Z.AI) defaults: the base URL comes from GLM_BASE_URL in
-    the Hermes .env, else FACTORY_QUOTA_PROBE_BASE; the key is GLM_API_KEY; the
-    model is the first fallback model, else FACTORY_QUOTA_PROBE_MODEL.
     """
-    base = env_value("GLM_BASE_URL") or cfg(
-        "FACTORY_QUOTA_PROBE_BASE", "https://api.z.ai/api/paas/v4")
-    key = env_value("GLM_API_KEY")
-    if not key:
+    settings = quota_probe_settings()
+    if not settings or not settings[1]:
         return False
-    try:
-        model = ((load_yaml(os.path.join(HOME, "config.yaml"))
-                  .get("fallback_providers") or [{}])[0]).get("model")
-    except Exception:
-        model = None
+    base, key, model = settings
     req = urllib.request.Request(
         base.rstrip("/") + "/chat/completions",
-        data=json.dumps({"model": model or cfg("FACTORY_QUOTA_PROBE_MODEL", "glm-5.3-flash"),
+        data=json.dumps({"model": model,
                          "messages": [{"role": "user", "content": "ok"}],
                          "max_tokens": 5}).encode("utf-8"),
         headers={"Content-Type": "application/json",
@@ -413,7 +427,15 @@ def check_quota_death():
     Lines older than the moment of the last quota recovery are not evidence:
     after a recovery a stale line used to reopen the incident for another 45
     minutes. Window floor = max(now - 45 min, quota_recovered_at()).
+
+    The whole guard is opt-in: without the probe settings a stop could never
+    be lifted automatically, so nothing is stopped and one line says why.
     """
+    if not quota_probe_settings():
+        print("hermes-health: quota guard skipped: set FACTORY_QUOTA_PROBE_BASE, "
+              "FACTORY_QUOTA_PROBE_KEY_VAR and FACTORY_QUOTA_PROBE_MODEL "
+              "(or a fallback model) to enable it", file=sys.stderr)
+        return
     inc = read_incident()
     if inc:
         if quota_probe():
@@ -456,7 +478,7 @@ def check_quota_death():
     inc = quota_stop(reset, code)
     names = ", ".join(j["name"] for j in inc["paused"]) or "-"
     run([HERMES, "send", "-t", OWNER_CHAT,
-         "Z.AI QUOTA: 429 %s (%s), reset %s. Only the burners were stopped: "
+         "PROVIDER QUOTA: 429 %s (%s), reset %s. Only the burners were stopped: "
          "the card dispatcher (board dispatch locks, ticks without spawning) and "
          "LLM crons: %s. Chat and "
          "health stay alive. Recovery is automatic: a probe every 10 min, one "

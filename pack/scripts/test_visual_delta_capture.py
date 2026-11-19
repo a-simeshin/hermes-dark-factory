@@ -12,6 +12,9 @@ Covers the logic without a network (except localhost) and without a build:
      artifact and reuses the stand; without the flag the stands are stopped
      after the capture (html sides, build/shoot replaced)
   8  a build failure gives a FAIL line and code 1, not a traceback
+  U  unset keys: no FACTORY_STAND_RUN_CMD gives a FAIL naming the key before
+     any build; no FACTORY_CHROME_BIN passes no --chrome-bin to the shot
+     (these run without GNU timeout too)
 
 Run: python3 test_visual_delta_capture.py (it prepares its own sandbox).
 Needs GNU `timeout` on PATH (run-bounded.sh uses it for the html stands).
@@ -48,6 +51,7 @@ def load_mod(tmp_root: Path):
     os.environ["HERMES_HOME"] = str(tmp_root / "hermes-home")
     os.environ["FACTORY_REPO_PATH"] = str(tmp_root / "repo")
     os.environ["VISUAL_DELTA_STANDS_DIR"] = str(tmp_root / "stands")
+    os.environ["FACTORY_STAND_RUN_CMD"] = "run-stand {artifact} {port}"
     spec = importlib.util.spec_from_file_location("vd_capture", SRC)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
@@ -101,10 +105,14 @@ def main() -> int:
     stand = mod.STANDS_DIR / sha[:12]
     stand.mkdir(parents=True)
     check("no artifact -> build", mod.needs_build(stand, sha, False))
-    (stand / "exec.jar").write_bytes(b"jar")
-    (stand / "BUILD.json").write_text(json.dumps({"sha": "other"}))
+    (stand / "artifact.jar").write_bytes(b"jar")
+    (stand / "BUILD.json").write_text(json.dumps({"sha": "other",
+                                                  "artifact": "artifact.jar"}))
     check("foreign sha -> build", mod.needs_build(stand, sha, False))
     (stand / "BUILD.json").write_text(json.dumps({"sha": sha}))
+    check("no artifact name -> build", mod.needs_build(stand, sha, False))
+    (stand / "BUILD.json").write_text(json.dumps({"sha": sha,
+                                                  "artifact": "artifact.jar"}))
     check("cache_hit", not mod.needs_build(stand, sha, False))
     check("fresh forces", mod.needs_build(stand, sha, True))
 
@@ -150,9 +158,10 @@ def main() -> int:
     def fake_build(repo_, sha_, stand_dir, log):
         calls["build"] += 1
         stand_dir.mkdir(parents=True, exist_ok=True)
-        (stand_dir / "exec.jar").write_bytes(b"jar")
-        (stand_dir / "BUILD.json").write_text(json.dumps({"sha": sha_}))
-        return stand_dir / "exec.jar"
+        (stand_dir / "artifact.jar").write_bytes(b"jar")
+        (stand_dir / "BUILD.json").write_text(json.dumps(
+            {"sha": sha_, "artifact": "artifact.jar"}))
+        return stand_dir / "artifact.jar"
 
     def fake_shoot(urls, args):
         calls["shoot"] += 1
@@ -165,7 +174,7 @@ def main() -> int:
     a.write_text("<p>before</p>")
     b.write_text("<p>after</p>")
 
-    mod.build_jar, mod.shoot = fake_build, fake_shoot
+    mod.build_artifact, mod.shoot = fake_build, fake_shoot
 
     def run_main(argv_extra=()):
         old = sys.argv
@@ -202,7 +211,7 @@ def main() -> int:
     def broken_build(*_a, **_k):
         raise mod.StepError("build of sha failed (log: x):\nboom")
 
-    mod.build_jar = broken_build
+    mod.build_artifact = broken_build
     rc3, out3 = run_main(["--label", "t3", "--repo", str(repo),
                           "--before", "HEAD", "--after", "HEAD", "--fresh"])
     check("rc=1", rc3 == 1, "rc=%d" % rc3)
@@ -210,7 +219,7 @@ def main() -> int:
     check("FAIL line present", bool(fail_lines),
           fail_lines[0][:60] if fail_lines else out3[:60])
     check("no traceback", "Traceback" not in out3)
-    mod.build_jar = fake_build
+    mod.build_artifact = fake_build
 
     # clean up the http stands of the test
     mod.kill_stands([mod.stand_key({"kind": "html", "path": a.resolve()}),
@@ -225,7 +234,61 @@ def main() -> int:
     return 0
 
 
+def unset_checks() -> None:
+    """Unset keys stop with a message or fall back to the CDP port."""
+    tmp = Path(tempfile.mkdtemp(prefix="vd-cap-unset-"))
+    try:
+        for k in ("FACTORY_STAND_RUN_CMD", "FACTORY_CHROME_BIN"):
+            os.environ.pop(k, None)
+        os.environ["HERMES_HOME"] = str(tmp / "hermes-home")
+        os.environ["FACTORY_REPO_PATH"] = str(tmp / "repo")
+        os.environ["VISUAL_DELTA_STANDS_DIR"] = str(tmp / "stands")
+        spec = importlib.util.spec_from_file_location("vd_capture_unset", SRC)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        repo = git_repo(tmp / "repo")
+        sha = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo,
+                             capture_output=True, text=True).stdout.strip()
+        built = []
+        mod.build_artifact = lambda *a: built.append(a)
+
+        class Args:
+            route, fresh = "/", False
+        try:
+            mod.ensure_stand({"kind": "git", "sha": sha, "ref": "HEAD"},
+                             Args, repo, "t")
+            check("unset run command stops", False)
+        except mod.StepError as e:
+            check("unset run command stops naming the key",
+                  "FACTORY_STAND_RUN_CMD" in str(e), str(e)[:80])
+        check("no build before the stop", built == [])
+        seen = {}
+
+        def fake_run(cmd, **kw):
+            seen["cmd"] = cmd
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+        real_run = mod.subprocess.run
+        mod.subprocess.run = fake_run
+        try:
+            class SA:
+                label, width, height, shot = "t", 10, 10, []
+                steps_file = annotate = ""
+                no_push = True
+            mod.shoot({"before": "http://x/", "after": "http://y/"}, SA)
+        finally:
+            mod.subprocess.run = real_run
+        check("unset browser binary: no --chrome-bin",
+              "--chrome-bin" not in seen.get("cmd", []), str(seen.get("cmd"))[:120])
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 if __name__ == "__main__":
+    print("U. unset keys")
+    unset_checks()
+    if fails:
+        print("RED: %d failures: %s" % (len(fails), ", ".join(fails)))
+        sys.exit(1)
     # Stands start through run-bounded.sh, which needs GNU timeout (Linux).
     if shutil.which("timeout") is None:
         print("SKIP test_visual_delta_capture (needs GNU timeout for"

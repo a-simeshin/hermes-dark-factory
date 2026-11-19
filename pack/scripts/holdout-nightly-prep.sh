@@ -11,7 +11,8 @@
 #   2) a worktree holdout-pr<N> for every open PR (fetch refs/pull/N/head), a
 #      .wt-keep marker for 3 days against worktree-gc;
 #   3) build of the artifact for a PR with product changes (files with the
-#      extensions of FACTORY_HOLDOUT_PRODUCT_EXT); the build runs inside
+#      extensions of FACTORY_HOLDOUT_PRODUCT_EXT, any changed file when it is
+#      unset); the build runs inside
 #      run-bounded.sh (TTL 50 min); a fresh ready artifact is not rebuilt
 #      (idempotent);
 #   4) one JSON on stdout: the date, the shas of the base heads (null for a
@@ -32,7 +33,8 @@
 #                                  script for anything complex)
 #   FACTORY_HOLDOUT_ARTIFACT_GLOB  built artifact, relative to the worktree
 #   FACTORY_HOLDOUT_PRODUCT_EXT    (optional) extensions that need a build,
-#                                  default java,xml,ts,tsx
+#                                  comma-separated; unset: every changed file
+#                                  counts, so any PR with changes is built
 #   FACTORY_HOLDOUT_DIFF_BASE      (optional) branch the changed files are
 #                                  counted against, default: the last entry of
 #                                  FACTORY_BASE_BRANCHES
@@ -47,7 +49,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 : "${FACTORY_BASE_BRANCHES:?FACTORY_BASE_BRANCHES is not set: add it to $HERMES_HOME/factory.env}"
 : "${FACTORY_HOLDOUT_BUILD_CMD:?FACTORY_HOLDOUT_BUILD_CMD is not set: add it to $HERMES_HOME/factory.env}"
 : "${FACTORY_HOLDOUT_ARTIFACT_GLOB:?FACTORY_HOLDOUT_ARTIFACT_GLOB is not set: add it to $HERMES_HOME/factory.env}"
-PRODUCT_EXT="${FACTORY_HOLDOUT_PRODUCT_EXT:-java,xml,ts,tsx}"
+PRODUCT_EXT="${FACTORY_HOLDOUT_PRODUCT_EXT:-}"
 
 REPO="$FACTORY_REPO_PATH"
 WTROOT="$REPO/.worktrees"
@@ -60,7 +62,11 @@ cd "$REPO"
 IFS=',' read -r -a BRANCHES <<< "${FACTORY_BASE_BRANCHES// /}"
 DIFF_BASE="${FACTORY_HOLDOUT_DIFF_BASE:-${BRANCHES[${#BRANCHES[@]}-1]}}"
 read -r -a BUILD_ARGV <<< "$FACTORY_HOLDOUT_BUILD_CMD"
-EXT_RE=$(printf '%s' "$PRODUCT_EXT" | sed 's/[ ]//g; s/,/|/g')
+if [ -n "$PRODUCT_EXT" ]; then
+  PRODUCT_RE="\.($(printf '%s' "$PRODUCT_EXT" | sed 's/[ ]//g; s/,/|/g'))\$"
+else
+  PRODUCT_RE='.'  # no extension list: every changed file is a product change
+fi
 
 # Leftovers of the previous run are stopped BEFORE the start so that dead
 # stands do not share ports with the new ones. Only entries of the owner
@@ -129,7 +135,7 @@ for n in $PRS; do
     SHA=$(git -C "$WT" rev-parse --short HEAD)
     "$SCRIPTS/wt-keep.sh" "$WT" 3 >/dev/null
     CHANGED=$(git -C "$WT" diff --name-only "origin/$DIFF_BASE...HEAD" 2>/dev/null \
-      | grep -Ec "\.($EXT_RE)\$" || true)
+      | grep -Ec "$PRODUCT_RE" || true)
     JAR=""
     if [ "${CHANGED:-0}" -gt 0 ]; then
       HAVE=$(ls "$WT"/$FACTORY_HOLDOUT_ARTIFACT_GLOB 2>/dev/null \

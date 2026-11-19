@@ -18,8 +18,8 @@ a directory (an HTML prototype: served by python http.server, no build).
 What it does:
   1. resolves both refs to SHAs (an html path stays a path);
   2. builds the artifact of a SHA once and caches it in
-     $HERMES_HOME/cache/visual-delta-stands/<sha>/exec.jar (a repeated run
-     skips the build);
+     $HERMES_HOME/cache/visual-delta-stands/<sha>/ as artifact<ext> (the
+     extension of the built file; a repeated run skips the build);
   3. starts the stand (demo application / http.server) through run-bounded.sh;
      it lives in the stands.json registry and is reused while it is alive and
      healthy; readiness is awaited by condition (an HTTP answer), not blindly;
@@ -31,12 +31,13 @@ Settings (factory.env):
   FACTORY_STAND_BUILD_CMD       build command, run in the worktree of a SHA
   FACTORY_STAND_ARTIFACT_GLOB   built artifact, relative to the worktree
   FACTORY_STAND_RUN_CMD         stand start command; {artifact} and {port} are
-                                substituted (optional, default runs a jar)
+                                substituted (required for a git side)
   FACTORY_STAND_DEPS_REL        dependency directory (relative to the repo)
                                 that a fresh worktree needs and that is
                                 symlinked from an existing checkout (optional)
   FACTORY_STAND_ROUTE           default route on the stand (optional, "/")
-  FACTORY_CHROME_BIN            headless browser binary (optional)
+  FACTORY_CHROME_BIN            headless browser binary (optional; unset: the
+                                browser already listening on FACTORY_CDP_PORT)
 
 Flags: --steps-file (JS that brings the page into the needed state), --shot
 NAME=SELECTOR (not only full), --fresh (rebuild the artifact), --keep-stands
@@ -70,7 +71,7 @@ STANDS_DIR = Path(os.environ.get(
     "VISUAL_DELTA_STANDS_DIR",
     os.path.join(hermes_home(), "cache", "visual-delta-stands"))).expanduser()
 REGISTRY = STANDS_DIR / "stands.json"
-CHROME_BIN = cfg("FACTORY_CHROME_BIN", "/usr/bin/chromium-browser")
+CHROME_BIN = cfg("FACTORY_CHROME_BIN", "")
 
 
 class StepError(Exception):
@@ -115,22 +116,25 @@ def donor_node_modules(repo: Path) -> Path | None:
     return None
 
 
-def needs_build(stand_dir: Path, sha: str, fresh: bool) -> bool:
-    if fresh:
-        return True
-    stamp = stand_dir / "BUILD.json"
-    jar = stand_dir / "exec.jar"
-    if not (stamp.exists() and jar.exists()):
-        return True
+def cached_artifact(stand_dir: Path) -> Path | None:
+    """The cached artifact named in BUILD.json, if it is there."""
     try:
-        meta = json.loads(stamp.read_text())
-    except ValueError:
+        name = json.loads((stand_dir / "BUILD.json").read_text()).get("artifact")
+    except (OSError, ValueError):
+        return None
+    path = stand_dir / name if name else None
+    return path if path and path.exists() else None
+
+
+def needs_build(stand_dir: Path, sha: str, fresh: bool) -> bool:
+    if fresh or cached_artifact(stand_dir) is None:
         return True
+    meta = json.loads((stand_dir / "BUILD.json").read_text())
     return meta.get("sha") != sha
 
 
-def build_jar(repo: Path, sha: str, stand_dir: Path, log: Path) -> Path:
-    """Worktree at the SHA + build command -> stand_dir/exec.jar. Once per SHA."""
+def build_artifact(repo: Path, sha: str, stand_dir: Path, log: Path) -> Path:
+    """Worktree at the SHA + build command -> stand_dir/artifact<ext>. Once per SHA."""
     stand_dir.mkdir(parents=True, exist_ok=True)
     wt = stand_dir / "wt"
     if wt.exists():
@@ -160,9 +164,9 @@ def build_jar(repo: Path, sha: str, stand_dir: Path, log: Path) -> Path:
     cmd = shlex.split(cfg("FACTORY_STAND_BUILD_CMD"))
     with open(log, "w") as fh:
         done = subprocess.run(cmd, cwd=wt, stdout=fh, stderr=fh, timeout=1800)
-    jars = sorted(Path(p) for p in
-                  glob.glob(str(wt / cfg("FACTORY_STAND_ARTIFACT_GLOB"))))
-    if done.returncode != 0 or not jars:
+    built = sorted(Path(p) for p in
+                   glob.glob(str(wt / cfg("FACTORY_STAND_ARTIFACT_GLOB"))))
+    if done.returncode != 0 or not built:
         tail = ""
         try:
             tail = "\n".join(log.read_text().splitlines()[-15:])
@@ -170,11 +174,12 @@ def build_jar(repo: Path, sha: str, stand_dir: Path, log: Path) -> Path:
             pass
         raise StepError("build of %s failed (log: %s):\n%s"
                         % (sha[:10], log, tail))
-    jar = stand_dir / "exec.jar"
-    shutil.copy2(jars[-1], jar)
+    artifact = stand_dir / ("artifact" + built[-1].suffix)
+    shutil.copy2(built[-1], artifact)
     (stand_dir / "BUILD.json").write_text(json.dumps(
-        {"sha": sha, "built_at": time.strftime("%F %T")}, ensure_ascii=False))
-    return jar
+        {"sha": sha, "artifact": artifact.name,
+         "built_at": time.strftime("%F %T")}, ensure_ascii=False))
+    return artifact
 
 
 # ---------- stands ----------
@@ -266,21 +271,24 @@ def ensure_stand(side_ref: dict, args, repo: Path, label: str) -> str:
     else:
         stand_dir = STANDS_DIR / key
         log = stand_dir / "build.log"
+        # The stand start command: a template, {artifact} and {port} are
+        # substituted. Checked before the build, which is the expensive part.
+        run_tpl = cfg("FACTORY_STAND_RUN_CMD", "")
+        if not run_tpl:
+            raise StepError("config: FACTORY_STAND_RUN_CMD is not set: add the "
+                            "stand start command to factory.env ({artifact} and "
+                            "{port} are substituted)")
         if needs_build(stand_dir, side_ref["sha"], args.fresh):
             t0 = time.monotonic()
             print("[build] %s: building%s ..."
                   % (key, " (fresh)" if args.fresh else ""))
-            build_jar(repo, side_ref["sha"], stand_dir, log)
+            build_artifact(repo, side_ref["sha"], stand_dir, log)
             print("[build] %s: ready in %.0fs"
                   % (key, time.monotonic() - t0))
         else:
             print("[build] %s: artifact from cache" % key)
         port = pick_free_port()
-        # The stand start command: a template, {artifact} and {port} are
-        # substituted. Memory is capped so a forgotten stand stays cheap.
-        run_tpl = cfg("FACTORY_STAND_RUN_CMD",
-                      "java -Xmx512m -jar {artifact} --server.port={port}")
-        cmd = [part.format(artifact=str(stand_dir / "exec.jar"), port=port)
+        cmd = [part.format(artifact=str(cached_artifact(stand_dir)), port=port)
                for part in shlex.split(run_tpl)]
         log = stand_dir / "stand.log"
 
@@ -330,8 +338,9 @@ def shoot(urls: dict, args) -> int:
     cmd = [sys.executable, str(SCRIPTS / "visual-delta-shot.py"),
            "--label", args.label,
            "--url-before", urls["before"], "--url-after", urls["after"],
-           "--chrome-bin", CHROME_BIN,
            "--width", str(args.width), "--height", str(args.height)]
+    if CHROME_BIN:
+        cmd += ["--chrome-bin", CHROME_BIN]
     for shot in args.shot:
         cmd += ["--shot", shot]
     if args.steps_file:
@@ -405,7 +414,7 @@ def main() -> int:
         rc = 1
 
     # Stands are stopped right after the capture (and on FAIL) unless reuse was
-    # requested: every application stand holds a memory-capped JVM and must not
+    # requested: every application stand holds a running server and must not
     # be kept for hours.
     if not args.keep_stands:
         kill_stands([stand_key(sides[s]) for s in ("before", "after")])

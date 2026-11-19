@@ -9,9 +9,9 @@ catches up with them before printing.
 
 Milestones are detected automatically (gh api milestones?state=open), with no
 names in code; the cache cache/metrics-evening-milestones.json survives a gh
-failure. Models without a price in PRICING are not priced at all: money
-amounts and provider balances are left out on purpose, and the only spend
-unit is plan credits.
+failure. Prices come from FACTORY_PRICES; a model without a price shows its
+cost as unknown, never as zero or a guess. Money amounts and provider
+balances are left out on purpose, and the only spend unit is plan credits.
 
 Besides the spend and merge-path numbers, the report carries the PR path from
 card to merge, rework per PR, escaped defects (FACTORY block), the shares of
@@ -34,8 +34,9 @@ import statistics
 import subprocess
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from factory_config import cfg, cfg_list, hermes_home  # noqa: E402
@@ -93,13 +94,47 @@ def closes_burnout_progress(body) -> bool:
         return True
     return not SYSTEM_COMMENT_RE.match(body or "")
 
-# Price list of ONE provider plan (the original installation's); the operator
-# replaces it with their own plan's coefficients. Models not listed here are
-# not priced at all.
-PRICING = {  # credit formula coefficients: (input, cache_read, output) / 1e4
-    "glm-5.3": (6.9, 1.7, 24.0),
-    "glm-5.3-flash": (2.3, 0.56, 8.0),
-}
+def parse_prices(raw: str) -> dict:
+    """FACTORY_PRICES "model=in/cache/out;model2=..." -> {model: (in, cache, out)}.
+
+    Credits of a call = (input * in + cache_read * cache + output * out) / 1e4,
+    in the unit of your plan. There is no built-in price list: a model that is
+    not listed has an unknown cost.
+    """
+    prices = {}
+    for item in (raw or "").split(";"):
+        model, _, nums = item.strip().partition("=")
+        if not model or not nums:
+            continue
+        parts = nums.split("/")
+        if len(parts) != 3:
+            sys.exit("FACTORY_PRICES: %r must be model=in/cache/out" % item.strip())
+        prices[model.strip()] = tuple(float(x) for x in parts)
+    return prices
+
+
+PRICING = parse_prices(cfg("FACTORY_PRICES", ""))
+
+
+def row_cost(r: dict) -> float | None:
+    """Credits of one ledger row; None when the model has no price."""
+    k = PRICING.get(r.get("model") or "?")
+    if not k:
+        return None
+    return (r.get("input_tokens", 0) * k[0]
+            + r.get("cache_read_tokens", 0) * k[1]
+            + r.get("output_tokens", 0) * k[2]) / 1e4
+
+
+def fmt_credits(value: float, unknown: int) -> str:
+    """A credit amount that never hides unpriced runs behind a number."""
+    if not unknown:
+        return "%.1f" % value
+    if not value:
+        return "unknown (%d unpriced runs)" % unknown
+    return "%.1f + unknown (%d unpriced runs)" % (value, unknown)
+
+
 VERDICT_RE = re.compile(r"(?im)^#{1,4}\s*(?:re[- ]?)?review\s+verdict\b")
 SHA_RE = re.compile(r"\b([0-9a-f]{7,40})\b")
 GH_TIMEOUT = 120
@@ -441,22 +476,21 @@ def burnouts(runs: list[dict], comments: list[dict],
 
 
 def credits(rows: list[dict], card_ids: set[str]) -> dict:
-    """Plan credits per PR card; the only spend unit is credits: models
-    without a price in PRICING are not priced."""
-    zai = 0.0
+    """Plan credits per PR card; rows of models without a price are counted
+    in "unknown", never as zero."""
+    total, unknown = 0.0, 0
     per_model: dict[str, float] = {}
     for r in rows:
         if r.get("kind") != "card" or r.get("ref") not in card_ids:
             continue
         model = r.get("model") or "?"
-        if model in PRICING:
-            k_in, k_cache, k_out = PRICING[model]
-            c = (r.get("input_tokens", 0) * k_in
-                 + r.get("cache_read_tokens", 0) * k_cache
-                 + r.get("output_tokens", 0) * k_out) / 1e4
-            zai += c
-            per_model[model] = per_model.get(model, 0.0) + c
-    return {"zai": zai, "per_model": per_model}
+        c = row_cost(r)
+        if c is None:
+            unknown += 1
+            continue
+        total += c
+        per_model[model] = per_model.get(model, 0.0) + c
+    return {"credits": total, "per_model": per_model, "unknown": unknown}
 
 
 OWNER_WAIT_MARKERS = ("owner", "release condition", "awaiting owner decision")
@@ -648,35 +682,32 @@ def credits_weighted(rows: list[dict],
         if not w_map:
             continue
         model = r.get("model") or "?"
-        if model in PRICING:
-            k_in, k_cache, k_out = PRICING[model]
-            zai = (r.get("input_tokens", 0) * k_in
-                   + r.get("cache_read_tokens", 0) * k_cache
-                   + r.get("output_tokens", 0) * k_out) / 1e4
-        else:
-            continue  # no price, no pricing
+        c = row_cost(r)
         for num, w in w_map.items():
-            acc = per_pr.setdefault(num, {"zai": 0.0, "per_model": {}})
-            acc["zai"] += zai * w
-            if zai:
-                acc["per_model"][model] = acc["per_model"].get(model, 0.0) + zai * w
+            acc = per_pr.setdefault(num, {"credits": 0.0, "per_model": {},
+                                          "unknown": 0})
+            if c is None:
+                acc["unknown"] += 1  # no price: unknown, not zero
+                continue
+            acc["credits"] += c * w
+            if c:
+                acc["per_model"][model] = acc["per_model"].get(model, 0.0) + c * w
     return per_pr
 
 
 def ledger_totals(rows: list[dict]) -> dict:
     """Total over all ledger rows of the window: overall spend and its card part."""
-    zai_all = zai_cards = 0.0
+    total = cards = 0.0
+    unknown = 0
     for r in rows:
-        model = r.get("model") or "?"
-        if model in PRICING:
-            k_in, k_cache, k_out = PRICING[model]
-            c = (r.get("input_tokens", 0) * k_in
-                 + r.get("cache_read_tokens", 0) * k_cache
-                 + r.get("output_tokens", 0) * k_out) / 1e4
-            zai_all += c
-            if r.get("kind") == "card":
-                zai_cards += c
-    return {"zai_all": zai_all, "zai_cards": zai_cards}
+        c = row_cost(r)
+        if c is None:
+            unknown += 1
+            continue
+        total += c
+        if r.get("kind") == "card":
+            cards += c
+    return {"all": total, "cards": cards, "unknown": unknown}
 
 
 # ---------- report ----------
@@ -815,7 +846,8 @@ def report(now: float | None = None, data: dict | None = None) -> str:
         weights = assign_cards(board, merged_refs, mss)
         per_pr = credits_weighted(rows_w, weights)
         for p in merged_refs:
-            cr = per_pr.get(p["number"]) or {"zai": 0.0, "per_model": {}}
+            cr = per_pr.get(p["number"]) or {"credits": 0.0, "per_model": {},
+                                             "unknown": 0}
             cards_txt = ", ".join(
                 "%s%s" % (tid, " (½ with #%d)" % next(
                     n for n in w if n != p["number"]))
@@ -826,7 +858,7 @@ def report(now: float | None = None, data: dict | None = None) -> str:
                                    for m, v in sorted(cr["per_model"].items()))
             lines.append("6. PR#%d (%s): plan credits %s (%s)"
                          % (p["number"], cards_txt,
-                            ("%.1f" % cr["zai"]) if cr["zai"] else "0",
+                            fmt_credits(cr["credits"], cr["unknown"]),
                             models_txt or "no tokens"))
         # 6b. card->merge path: from card creation to merge
         paths = []
@@ -870,15 +902,15 @@ def report(now: float | None = None, data: dict | None = None) -> str:
         lines.append("6d. escaped defects: %s" % (
             "; ".join(escaped[:8]) if escaped else "none"))
         tot = ledger_totals(rows_w)
-        zai_by_pr = sum(v["zai"] for v in per_pr.values())
-        check = ("OK" if zai_by_pr <= tot["zai_all"] + 1e-6
+        by_pr = sum(v["credits"] for v in per_pr.values())
+        check = ("OK" if by_pr <= tot["all"] + 1e-6
                  else "VIOLATED: sum over PRs exceeds the ledger")
         lines.append(
-            "6. credits for the window in total: plan %.1f; "
+            "6. credits for the window in total: plan %s; "
             "merged PRs %.1f, cards outside PR windows %.1f; "
             "reconciliation of the sum with the ledger: %s"
-            % (tot["zai_all"], zai_by_pr,
-               max(0.0, tot["zai_cards"] - zai_by_pr), check))
+            % (fmt_credits(tot["all"], tot["unknown"]), by_pr,
+               max(0.0, tot["cards"] - by_pr), check))
         if not merged_refs:
             lines.append("6. no merged PRs in the window")
     # 7. needs_input (a snapshot, not a window)
@@ -920,9 +952,20 @@ REWORK_TITLE_RE = re.compile(
 
 SHELL_SLEEP_RE = re.compile(r"\bsleep\s+(\d+(?:\.\d+)?)")
 PY_SLEEP_RE = re.compile(r"time\.sleep\(\s*(\d+(?:\.\d+)?)\s*\)")
-# Invocations of the project's build wrapper (Maven in the original
-# installation); adjust the pattern for another build tool.
-MVN_RE = re.compile(cfg("FACTORY_BUILD_CMD_RE", r"\b(?:\./)?mvnw\b|\bmvn\s"))
+# Invocations of the project's build tool: FACTORY_BUILD_CMD_RE. Inside a
+# build, FACTORY_BUILD_FULL_RE marks a full verification run and
+# FACTORY_BUILD_SCOPE_RE a run limited to some modules. Without
+# FACTORY_BUILD_CMD_RE the build metrics are skipped and the report says so.
+
+
+def _opt_re(key):
+    raw = cfg(key, "")
+    return re.compile(raw) if raw else None
+
+
+BUILD_CMD_RE = _opt_re("FACTORY_BUILD_CMD_RE")
+BUILD_FULL_RE = _opt_re("FACTORY_BUILD_FULL_RE")
+BUILD_SCOPE_RE = _opt_re("FACTORY_BUILD_SCOPE_RE")
 EDIT_CMD_RE = re.compile(r"git commit|git apply|git cherry-pick|sed -i|tee -a|>>\s*\S|cp\s+\S|mv\s+\S")
 EDIT_TOOL_RE = re.compile(r"^(patch|write_file)$")
 
@@ -960,16 +1003,17 @@ def sleep_hits(cmd):
     return [v for v in vals if v > SLEEP_LIMIT]
 
 
-def mvn_class(cmd):
+def build_class(cmd):
     """Class of a build command: full-verify / pl-verify / targeted / bare / None.
 
-    Written for Maven-style flags. -pl counts in any position:
-    "./mvnw verify -pl core" is a targeted run, not a full one.
+    The scope marker counts in any position: a full run with a module scope
+    is a targeted run, not a full one. None: not a build, or no
+    FACTORY_BUILD_CMD_RE.
     """
-    if not MVN_RE.search(cmd or ""):
+    if not BUILD_CMD_RE or not BUILD_CMD_RE.search(cmd or ""):
         return None
-    scoped = "-pl" in cmd or "--projects" in cmd
-    if "verify" in cmd:
+    scoped = bool(BUILD_SCOPE_RE and BUILD_SCOPE_RE.search(cmd))
+    if BUILD_FULL_RE and BUILD_FULL_RE.search(cmd):
         return "pl-verify" if scoped else "full-verify"
     return "targeted" if scoped else "bare"
 
@@ -1070,7 +1114,7 @@ def profile_stats(db, since, now):
                 for sec in sleep_hits(cmd):
                     viol.append(dict(sec=sec, t0=t0,
                                      cmd=(cmd or "").replace("\n", " ")[:90]))
-                cls = mvn_class(cmd)
+                cls = build_class(cmd)
                 if cls:
                     if bg_of(name, args):
                         bg_spawns += 1
@@ -1168,13 +1212,16 @@ def render(data, hours):
           for b in data[prof]["builds"]]
     bg = sum(data[p]["bg_spawns"] for p in PROFILES)
     reps = sum(data[p]["repeats"] for p in PROFILES)
-    out.append("local builds: targeted -pl %d, full verify %d, bare"
-               " builds without -pl %d, background builds %d, verify repeats"
-               " without edits %d" % (cls_n.get("targeted", 0) + cls_n.get("pl-verify", 0),
-                                      cls_n.get("full-verify", 0), cls_n.get("bare", 0),
-                                      bg, reps))
-    out.append("concurrent builds across profiles: %.0f min in the window"
-               % overlap_minutes(iv))
+    if BUILD_CMD_RE is None:
+        out.append("local builds: skipped, FACTORY_BUILD_CMD_RE is not set")
+    else:
+        out.append("local builds: targeted %d, full verify %d, bare"
+                   " builds without a scope %d, background builds %d, verify repeats"
+                   " without edits %d" % (cls_n.get("targeted", 0) + cls_n.get("pl-verify", 0),
+                                          cls_n.get("full-verify", 0), cls_n.get("bare", 0),
+                                          bg, reps))
+        out.append("concurrent builds across profiles: %.0f min in the window"
+                   % overlap_minutes(iv))
     same = [(t0, t1, prof) for prof in PROFILES
             for t0, t1 in ([(b["t0"], b["t1"]) for b in data[prof]["builds"]]
                            + list(data[prof]["waits"]))]
@@ -1250,8 +1297,9 @@ def serena_share(days):
     """Share of code search done through serena rather than grep in the terminal."""
     since = time.time() - days * DAY
     search_cmd = re.compile(r"\b(grep|rg|sed -n|cat |head |tail |find )")
-    # Example for one build tool (Maven); set FACTORY_BUILD_CMD_RE for another.
-    build_cmd = re.compile(cfg("FACTORY_BUILD_CMD_RE", r"\b(?:\./)?mvnw\b|\bmvn\s"))
+    # Build commands are not code search; without FACTORY_BUILD_CMD_RE they
+    # are not told apart.
+    build_cmd = BUILD_CMD_RE
     lsp = grep = 0
     for path in glob.glob(os.path.join(HOME, "profiles", "*", "state.db")):
         try:
@@ -1277,7 +1325,7 @@ def serena_share(days):
                     if fn != "terminal":
                         continue
                     args = str((one.get("function") or {}).get("arguments") or "").lower()
-                    if build_cmd.search(args) or "git " in args or "gh " in args:
+                    if (build_cmd and build_cmd.search(args)) or "git " in args or "gh " in args:
                         continue
                     if search_cmd.search(args):
                         grep += 1
@@ -1441,12 +1489,21 @@ def retro_section(now, hours=24.0):
 
 
 # ==================== SPEND ============================================
-# Day and week boundaries: UTC+3.
-MSK = 3 * 3600
+# Day and week boundaries: FACTORY_REPORT_TZ (an IANA zone), UTC when unset.
+REPORT_TZ_NAME = cfg("FACTORY_REPORT_TZ", "") or "UTC"
+REPORT_TZ = ZoneInfo(REPORT_TZ_NAME)
 
 
-def msk_day(ts):
-    return time.strftime("%Y-%m-%d", time.gmtime(ts + MSK))
+def report_day(ts):
+    return datetime.fromtimestamp(ts, REPORT_TZ).strftime("%Y-%m-%d")
+
+
+def week_start(ts):
+    """Epoch of Monday 00:00 of the week of ts in the report zone."""
+    d = datetime.fromtimestamp(ts, REPORT_TZ)
+    d = (d - timedelta(days=d.weekday())).replace(hour=0, minute=0, second=0,
+                                                  microsecond=0)
+    return d.timestamp()
 
 
 def board_titles():
@@ -1465,38 +1522,28 @@ def board_titles():
     return titles
 
 
-def ledger_row_credits(r) -> float:
-    """Provider credits of a ledger row by the PRICING table; 0 = a model with no price.
+def ledger_row_credits(r) -> float | None:
+    """Credits of a ledger row by FACTORY_PRICES; None = a model with no price.
 
     Dollars and provider balances are left out of the report: the unit of
     spend is credits by the price table only.
     """
-    k = PRICING.get(r.get("model") or "?")
-    if not k:
-        return 0.0
-    k_in, k_cache, k_out = k
-    return (r.get("input_tokens", 0) * k_in
-            + r.get("cache_read_tokens", 0) * k_cache
-            + r.get("output_tokens", 0) * k_out) / 1e4
+    return row_cost(r)
 
 
 def usage_section(now, titles=None):
     titles = titles if titles is not None else board_titles()
-    week_start_ts = now + MSK - (time.gmtime(now + MSK).tm_wday * 86400
-                                 + time.gmtime(now + MSK).tm_hour * 3600
-                                 + time.gmtime(now + MSK).tm_min * 60
-                                 + time.gmtime(now + MSK).tm_sec)
-    today = msk_day(now)
+    week_start_ts = week_start(now)
+    today = report_day(now)
     ledger = Path(HOME) / "usage-ledger" / "ledger.jsonl"
 
     from collections import defaultdict
-    day_agg = [0, 0, 0, 0.0]                    # in, out, cache, credits
-    week_agg = [0, 0, 0, 0.0]
-    cards_day = defaultdict(lambda: [0.0, 0, 0])  # ref -> credits, in, out
-    cards_week = defaultdict(float)
-    kinds_day = defaultdict(float)
-    models_day = defaultdict(float)
-    unpriced = 0                                # ledger rows with no price
+    day_agg = [0, 0, 0, 0.0, 0]                 # in, out, cache, credits, unpriced
+    week_agg = [0, 0, 0, 0.0, 0]
+    cards_day = defaultdict(lambda: [0.0, 0, 0, 0])  # ref -> credits, in, out, unpriced
+    cards_week = defaultdict(lambda: [0.0, 0])        # ref -> credits, unpriced
+    kinds_day = defaultdict(lambda: [0.0, 0])
+    models_day = defaultdict(lambda: [0.0, 0])
     if ledger.exists():
         for line in ledger.read_text(encoding="utf-8").splitlines():
             line = line.strip()
@@ -1508,52 +1555,59 @@ def usage_section(now, titles=None):
                 continue
             ts = r["ts"]
             cr = ledger_row_credits(r)
-            if ts + MSK >= week_start_ts:
+            # an unpriced row adds to the unknown count, never to the sum
+            add, unk = (0.0, 1) if cr is None else (cr, 0)
+            if ts >= week_start_ts:
                 week_agg[0] += r["input_tokens"]
                 week_agg[1] += r["output_tokens"]
                 week_agg[2] += r.get("cache_read_tokens", 0)
-                week_agg[3] += cr
+                week_agg[3] += add
+                week_agg[4] += unk
                 if r["kind"] == "card":
-                    cards_week[r["ref"]] += cr
-            if msk_day(ts) == today:
+                    cards_week[r["ref"]][0] += add
+                    cards_week[r["ref"]][1] += unk
+            if report_day(ts) == today:
                 day_agg[0] += r["input_tokens"]
                 day_agg[1] += r["output_tokens"]
                 day_agg[2] += r.get("cache_read_tokens", 0)
-                day_agg[3] += cr
-                if not cr:
-                    unpriced += 1
-                kinds_day[r["kind"]] += cr
-                models_day[r["model"]] += cr
+                day_agg[3] += add
+                day_agg[4] += unk
+                for agg in (kinds_day[r["kind"]], models_day[r["model"]]):
+                    agg[0] += add
+                    agg[1] += unk
                 if r["kind"] == "card":
                     c = cards_day[r["ref"]]
-                    c[0] += cr
+                    c[0] += add
                     c[1] += r["input_tokens"]
                     c[2] += r["output_tokens"]
+                    c[3] += unk
 
-    lines = ["=== Spend for %s (UTC+3), provider credits ===" % today]
-    lines.append("in=%.1fM out=%.2fM cache=%.0fM credits=%.1f" % (
-        day_agg[0] / 1e6, day_agg[1] / 1e6, day_agg[2] / 1e6, day_agg[3]))
+    lines = ["=== Spend for %s (%s), provider credits ===" % (today, REPORT_TZ_NAME)]
+    if not PRICING:
+        lines.append("no prices: FACTORY_PRICES is not set, every cost is unknown")
+    lines.append("in=%.1fM out=%.2fM cache=%.0fM credits=%s" % (
+        day_agg[0] / 1e6, day_agg[1] / 1e6, day_agg[2] / 1e6,
+        fmt_credits(day_agg[3], day_agg[4])))
     lines.append("by kind: " + ", ".join(
-        "%s=%.1f" % (k, v) for k, v in sorted(kinds_day.items(), key=lambda x: -x[1])))
+        "%s=%s" % (k, fmt_credits(*v)) for k, v in sorted(kinds_day.items(), key=lambda x: -x[1][0])))
     lines.append("by model (price table): " + ", ".join(
-        "%s=%.1f" % (m, v) for m, v in sorted(models_day.items(), key=lambda x: -x[1])[:5]))
-    if unpriced:
-        lines.append("no price: %d ledger runs are not priced" % unpriced)
+        "%s=%s" % (m, fmt_credits(*v)) for m, v in sorted(models_day.items(), key=lambda x: -x[1][0])[:5]))
     lines.append("")
-    lines.append("=== Week from %s ===" % msk_day(week_start_ts - MSK))
-    lines.append("in=%.1fM out=%.2fM cache=%.0fM credits=%.1f" % (
-        week_agg[0] / 1e6, week_agg[1] / 1e6, week_agg[2] / 1e6, week_agg[3]))
+    lines.append("=== Week from %s ===" % report_day(week_start_ts))
+    lines.append("in=%.1fM out=%.2fM cache=%.0fM credits=%s" % (
+        week_agg[0] / 1e6, week_agg[1] / 1e6, week_agg[2] / 1e6,
+        fmt_credits(week_agg[3], week_agg[4])))
     lines.append("")
     lines.append("=== Top cards today ===")
-    for ref, (c, i, o) in sorted(cards_day.items(), key=lambda x: -x[1][0])[:7]:
+    for ref, (c, i, o, u) in sorted(cards_day.items(), key=lambda x: -x[1][0])[:7]:
         st, tt = titles.get(ref, ("?", "?"))
-        lines.append("%s [%s] %.1f cr (in=%.1fM out=%.2fM) %s"
-                     % (ref, st, c, i / 1e6, o / 1e6, tt))
+        lines.append("%s [%s] %s cr (in=%.1fM out=%.2fM) %s"
+                     % (ref, st, fmt_credits(c, u), i / 1e6, o / 1e6, tt))
     lines.append("")
     lines.append("=== Top cards this week ===")
-    for ref, c in sorted(cards_week.items(), key=lambda x: -x[1])[:7]:
+    for ref, (c, u) in sorted(cards_week.items(), key=lambda x: -x[1][0])[:7]:
         st, tt = titles.get(ref, ("?", "?"))
-        lines.append("%s [%s] %.1f cr %s" % (ref, st, c, tt))
+        lines.append("%s [%s] %s cr %s" % (ref, st, fmt_credits(c, u), tt))
     return "\n".join(lines)
 
 

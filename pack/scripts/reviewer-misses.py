@@ -93,7 +93,7 @@ CLASS_HINTS = (
     ("contract", ("contract", "issue #", "acceptance", "criteria", "AC",
                   "requirement")),
     ("mutation", ("mutation", "mutant", "red/green", "kills no", "survive")),
-    ("twin", ("twin", "ported", "1.x", "2.x")),
+    ("twin", ("twin", "ported")),
     ("ui-input", ("live", "viewport", "375", "click", "screenshot",
                   "probe", "ui", "input", "keyboard")),
     ("pr-texts", ("wcfy", "what changes", "pr body", "notice",

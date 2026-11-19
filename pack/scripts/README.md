@@ -2,7 +2,7 @@
 
 The mechanical layer of the factory: cron entry points, guards and small tools. They are plain Python 3 and shell with no dependencies beyond the standard library, `git`, `gh` and the `hermes` CLI.
 
-Everything that names one project is read from `$HERMES_HOME/factory.env` through `factory_config.py`; an environment variable with the same name overrides the file. A script that needs a value you have not set stops with a message naming the key.
+Everything that names one project is read from `$HERMES_HOME/factory.env` through `factory_config.py`; an environment variable with the same name overrides the file. A script that needs a value you have not set stops with a message naming the key. Provider, price, time-zone and build-tool settings have no built-in values from any one installation: while such a key is unset, the feature that needs it is off or reports "unknown" and says so (`factory.env.example` lists what each key does when unset).
 
 ## Install
 
@@ -22,21 +22,21 @@ Everything that names one project is read from `$HERMES_HOME/factory.env` throug
 | `sitecustomize.py` | module | Audit hook loaded by `run-tests.py --audit`: a test that reads a real Hermes home, a live board, a real `gh` or the network turns red. |
 | `run-tests.py` | CLI | Runs every `test_*.py`, each in its own process group (a timeout kills the whole group), prints `TEST TOTAL scripts/: N/M green` and writes the green stamp after a full green audited run. |
 | `teach-snapshot.sh` | CLI | Git snapshot of the agents' knowledge layers, gated on the full test suite: a red suite marks the commit `RED:`. Proves what a teaching round changed. |
-| `hermes-health.py` | cron | Provider and quota health, dispatch stop on quota exhaustion, failed cron runs, orphaned stands, doctor alerts for providers in use, and drift of the scripts directory past the last green test run. Silent when healthy. |
+| `hermes-health.py` | cron | Provider and quota health, dispatch stop on quota exhaustion, failed cron runs, orphaned stands, doctor alerts for providers in use, and drift of the scripts directory past the last green test run. Silent when healthy. The quota guard is opt-in (`FACTORY_QUOTA_PROBE_*`, `FACTORY_QUOTA_CODES`); unset, it is skipped with one line on stderr. |
 | `worker-api-watchdog.py` | cron | Live kanban runs: API silence with a live client, compression thrash, a run that only polls GitHub (a repeat parks the card with `kanban schedule`), self-review, duplicate review runs, orphaned claims (running without a live process and with a stale heartbeat). Also executes `SCHEDULED_UNTIL=<UTC>` parking and wakes cards blocked on a PR merge once the PR is merged. |
 | `issue-executor-poll.py` | cron, CLI | Every issue of the active milestone gets an executor card within one cycle, in the milestone's band; skips delivered issues and anything already covered. `--check-issue N` answers a webhook prompt whether a card is appropriate. Logic lives in `board-watchdog.py`. |
 | `board-watchdog.py` | cron | Hourly watchdog of the boards: delivers diagnostics, finds stuck graphs and silence, and runs the gates (admission and milestone bands, rework size and priority, verdict dedup, backlog, prototype first, conflict debt, idempotency keys, closed-issue tails, a closed PR card waiting for the owner's merge, board lint). One PR is worked by one card: the watchdog no longer arms reviewer cards of its own. Single gates run through CLI flags; see `--help` in the source header. |
 | `rework-gate-watchdog.sh` | cron | Runs only the rework gates of `board-watchdog.py` every 5 minutes, before the dispatcher grabs a fresh card. |
 | `pr-hygiene.py` | cron | What can be merged today and what stops it: sibling conflicts, absorbed PRs, merge readiness, rebase cards after a base moves (absorbed by a live card that owns the PR, retired once the PR is mergeable), stale PRs, stack order, rework priority, untracked follow-up promises, claims about external state without an artifact link, visual delta for UI issues only. |
 | `plan-review-gate.py` | cron | Requires a plan review for a large or critical decomposition before its child cards may start. Runs in drain mode: plan review now goes through the native review lane, the gate only services open cycles. |
-| `metrics-evening.py` | cron | Daily report: spend by card and role, review latency, rework, reviewer misses, run outcomes, waiting audit, context size, digest of quiet cron events. Holds the price table used by `usage-ledger.py`: replace it with your plan's prices. |
+| `metrics-evening.py` | cron | Daily report: spend by card and role, review latency, rework, reviewer misses, run outcomes, waiting audit, context size, digest of quiet cron events. Prices come from `FACTORY_PRICES` (shared with `usage-ledger.py`); a model without a price shows its cost as unknown. Day boundaries follow `FACTORY_REPORT_TZ` (UTC when unset); the local-build lines need `FACTORY_BUILD_CMD_RE`. |
 | `usage-ledger.py` | cron | Assigns sessions to cards and comments each finished card with its token spend. |
 | `reviewer-misses.py` | cron | Records every case where the reviewer passed a commit and the owner then requested changes on it. |
 | `hermes-backup.sh`, `backup-verify.py` | cron | Nightly `hermes backup` with a verdict that tolerates files vanishing under the archiver, archive test and rotation. |
 | `worktree-gc.py`, `wt-keep.sh` | cron, CLI | Removes worktrees of finished cards once the branch is pushed and has no open PR; `wt-keep.sh` marks a tree to keep. |
 | `pr-risk.py`, `pr-risk.yaml`, `pr-risk-labels.sh` | cron | Deterministic `risk:<class>` label on every open PR from path rules. The path globs in `pr-risk.yaml` marked EXAMPLE must be replaced with your layout. |
 | `kanban-dispatch-hold.py` | CLI | Stops the dispatcher from handing out cards on a live gateway by holding the per-board dispatch lock; running workers finish. |
-| `kanban-dispatch-peak-pause.py`, `peak-pause-tick.sh` | cron | Holds dispatch during the provider's peak-pricing window. |
+| `kanban-dispatch-peak-pause.py`, `peak-pause-tick.sh` | cron | Holds dispatch during the provider's peak-pricing window (`FACTORY_PEAK_TZ`, `FACTORY_PEAK_START`, `FACTORY_PEAK_END`); off until the window is set. |
 | `gw-window.sh` | systemd unit | Deferred gateway restart that waits for a moment with no live agent turns. |
 | `run-bounded.sh` | CLI | Starts a background process with a time-to-live and an owner tag, so stands cannot outlive the run that started them. |
 | `holdout-stands-kill.py`, `holdout-stands-kill.sh` | CLI, cron | Stops stands by owner tag from the registry of `run-bounded.sh`. Linux only (reads `/proc`). |

@@ -33,6 +33,13 @@ os.environ["FACTORY_REPO_PATH"] = "/srv/hermes/widget"
 os.environ["FACTORY_BOARD"] = "main"
 os.environ["FACTORY_OWNER_LOGIN"] = "owner-login"
 os.environ["FACTORY_OWNER_CHAT"] = "telegram:000000000"
+# The build tool is configuration; the cases below use Maven-style commands.
+BUILD_KEYS = {
+    "FACTORY_BUILD_CMD_RE": r"\b(?:\./)?mvnw\b|\bmvn\s",
+    "FACTORY_BUILD_FULL_RE": r"\bverify\b",
+    "FACTORY_BUILD_SCOPE_RE": r"(?:^|\s)(?:-pl|--projects)\b",
+}
+os.environ.update(BUILD_KEYS)
 
 SCRIPT = os.environ.get("WAIT_AUDIT_SCRIPT") or os.path.join(
     HERE, "metrics-evening.py")
@@ -43,6 +50,18 @@ if spec is None or spec.loader is None:
     sys.exit(0)
 mod = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(mod)
+
+
+def load_without_build_keys():
+    """A second copy of the module loaded with the build keys unset."""
+    saved = {k: os.environ.pop(k) for k in BUILD_KEYS}
+    try:
+        sp = importlib.util.spec_from_file_location("wait_audit_unset", SCRIPT)
+        m = importlib.util.module_from_spec(sp)
+        sp.loader.exec_module(m)
+        return m
+    finally:
+        os.environ.update(saved)
 
 FAILED = []
 
@@ -141,15 +160,15 @@ def main():
     check("sleep 5 is not a violation", mod.sleep_hits("for i in 1..5; do sleep 5; done") == [])
     check("broken json does not crash", mod.cmd_of("terminal", "not json") == "")
 
-    print("mvn_class, position of -pl:")
-    check("./mvnw verify without -pl is full", mod.mvn_class("./mvnw verify") == "full-verify")
-    check("mvn -q verify is full", mod.mvn_class("mvn -q verify") == "full-verify")
-    check("-pl BEFORE verify is targeted", mod.mvn_class("./mvnw -pl core -am verify") == "pl-verify")
-    check("-pl AFTER verify is targeted too", mod.mvn_class("./mvnw verify -pl core") == "pl-verify")
-    check("--projects is targeted too", mod.mvn_class("mvn --projects core verify") == "pl-verify")
-    check("-pl with test is targeted", mod.mvn_class("./mvnw -pl core -Dtest=X test") == "targeted")
-    check("mvn test without -pl is bare", mod.mvn_class("./mvnw test") == "bare")
-    check("not mvn", mod.mvn_class("gh pr checks 9") is None)
+    print("build_class, position of -pl:")
+    check("./mvnw verify without -pl is full", mod.build_class("./mvnw verify") == "full-verify")
+    check("mvn -q verify is full", mod.build_class("mvn -q verify") == "full-verify")
+    check("-pl BEFORE verify is targeted", mod.build_class("./mvnw -pl core -am verify") == "pl-verify")
+    check("-pl AFTER verify is targeted too", mod.build_class("./mvnw verify -pl core") == "pl-verify")
+    check("--projects is targeted too", mod.build_class("mvn --projects core verify") == "pl-verify")
+    check("-pl with test is targeted", mod.build_class("./mvnw -pl core -Dtest=X test") == "targeted")
+    check("mvn test without -pl is bare", mod.build_class("./mvnw test") == "bare")
+    check("not mvn", mod.build_class("gh pr checks 9") is None)
 
     print("bg_of, background detection:")
     check("background=true is background", mod.bg_of("terminal",
@@ -223,6 +242,13 @@ def main():
         clean[p] = dict(base, viol=[])
     lines2 = "\n".join(mod.render(clean, 24))
     check("without violations: target held", "target held" in lines2)
+    unset = load_without_build_keys()
+    check("unset build key: no command is a build",
+          unset.build_class("./mvnw verify") is None)
+    lines3 = "\n".join(unset.render(clean, 24))
+    check("unset build key: the build metric says it is skipped",
+          "local builds: skipped, FACTORY_BUILD_CMD_RE is not set" in lines3
+          and "concurrent builds" not in lines3)
     check("no long dashes in the output", chr(0x2014) not in lines and chr(0x2014) not in lines2)
 
     if FAILED:

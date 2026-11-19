@@ -33,6 +33,15 @@ _HOME = tempfile.mkdtemp(prefix="hh-home-")
 atexit.register(shutil.rmtree, _HOME, ignore_errors=True)
 os.environ["HERMES_HOME"] = _HOME
 os.environ.setdefault("FACTORY_OWNER_CHAT", "telegram:000000000")
+# The quota guard is opt-in: the tests enable it with explicit settings.
+QUOTA_KEYS = {
+    "FACTORY_QUOTA_PROBE_BASE": "http://127.0.0.1:9/v1",
+    "FACTORY_QUOTA_PROBE_KEY_VAR": "TEST_PROVIDER_KEY",
+    "FACTORY_QUOTA_PROBE_MODEL": "test-model",
+    "FACTORY_QUOTA_CODES": "1310,1113",
+    "FACTORY_QUOTA_TEXTS": "Limit Exhausted,Insufficient balance or no resource package",
+}
+os.environ.update(QUOTA_KEYS)
 
 REAL = os.environ.get("HERMES_HEALTH_SCRIPT",
                       os.path.join(os.path.dirname(os.path.abspath(__file__)),
@@ -155,6 +164,33 @@ class TestQuotaRecoveredWindow(QuotaHarness):
         self.assertFalse(os.path.exists(
             os.path.join(self.root, "cache", "quota-death.json")),
             "the incident is removed after recover")
+
+
+class TestQuotaGuardUnset(QuotaHarness):
+    def test_without_probe_settings_the_guard_is_skipped(self):
+        # without the probe a stop could never be lifted: nothing is stopped,
+        # one line on stderr names the keys, the other checks are unaffected
+        import contextlib
+        import io
+        self.write_log("errors.log", [5 * 60])
+        saved = {k: os.environ.pop(k) for k in ("FACTORY_QUOTA_PROBE_BASE",
+                                               "FACTORY_QUOTA_PROBE_KEY_VAR",
+                                               "FACTORY_QUOTA_PROBE_MODEL")}
+        err = io.StringIO()
+        try:
+            self.assertIsNone(self.mod.quota_probe_settings())
+            with contextlib.redirect_stderr(err):
+                self.check()
+        finally:
+            os.environ.update(saved)
+        self.assertEqual(self.stops, [], "an unset probe must not stop anything")
+        self.assertIn("quota guard skipped", err.getvalue())
+        self.assertIn("FACTORY_QUOTA_PROBE_BASE", err.getvalue())
+
+    def test_quota_codes_come_from_settings(self):
+        self.assertEqual(self.mod.quota_hit("x 429 y 1113 z"), "1113")
+        self.assertEqual(self.mod.quota_hit("Limit Exhausted"), "1310")
+        self.assertEqual(self.mod.quota_hit("429 with code 9999"), "")
 
 
 class TestMutants(unittest.TestCase):

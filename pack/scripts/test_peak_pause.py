@@ -19,8 +19,10 @@ Scenarios:
   E2 end of window lifts the attached peak holder (annotate + release)
   F  Saturday 10:00 -> no holder is started
   G  window edges: 08:59 no, 09:00 yes, 12:59 yes, 13:00 no
+  U  window keys unset -> the pause is off: never in peak, tick holds nothing
 
-The scenarios assume the default window (Mon-Fri 09:00-13:00 Europe/Moscow).
+The scenarios set the window explicitly (Mon-Fri 09:00-13:00, UTC+3); the
+pack has no default window.
 
 Run: python3 test_peak_pause.py
 """
@@ -45,17 +47,17 @@ SANDBOX = Path(tempfile.mkdtemp(prefix="peak-pause-"))
 os.environ["HERMES_HOME"] = str(SANDBOX)
 # hermes-health.py requires an owner chat at import (used by the guard checks).
 os.environ["FACTORY_OWNER_CHAT"] = "telegram:000000000"
-for _k in ("FACTORY_PEAK_TZ", "FACTORY_PEAK_START", "FACTORY_PEAK_END",
-           "FACTORY_PEAK_DAYS"):
-    os.environ.pop(_k, None)
+PEAK_KEYS = {"FACTORY_PEAK_TZ": "Etc/GMT-3", "FACTORY_PEAK_START": "09:00",
+             "FACTORY_PEAK_END": "13:00", "FACTORY_PEAK_DAYS": "0,1,2,3,4"}
+os.environ.update(PEAK_KEYS)
 
 MODULE_PATH = Path(os.environ.get("PEAK_MODULE", HERE / "kanban-dispatch-peak-pause.py"))
 HOLD_PATH = HERE / "kanban-dispatch-hold.py"
 FAILS: list[str] = []
 
 
-def load_module():
-    spec = importlib.util.spec_from_file_location("peak_pause_under_test", MODULE_PATH)
+def load_module(name="peak_pause_under_test"):
+    spec = importlib.util.spec_from_file_location(name, MODULE_PATH)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
@@ -194,15 +196,39 @@ def main() -> int:
     check("12:59 peak", MOD.in_peak(dt("2026-11-10T12:59+03:00")))
     check("13:00 not peak", not MOD.in_peak(dt("2026-11-10T13:00+03:00")))
 
-    print("F: Saturday 10:00 Moscow, no holder -> tick starts nothing")
-    MOD.now_msk = lambda: dt("2026-11-14T10:00+03:00")  # Saturday
+    print("U: window keys unset -> pause off")
+    saved = {k: os.environ.pop(k) for k in PEAK_KEYS}
+    try:
+        off = load_module("peak_pause_unset")
+    finally:
+        os.environ.update(saved)
+    check("off: not enabled", off.ENABLED is False, str(off.MISSING))
+    check("off: Tuesday 10:00 is not peak",
+          not off.in_peak(dt("2026-11-10T10:00+03:00")))
+    off.now_local = lambda: dt("2026-11-10T10:00+03:00")
+    off._hold = _detached_hold
+    import contextlib
+    import io
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        off.cmd_tick()
+    time.sleep(1.0)
+    check("off: tick names the missing keys",
+          "peak pause off: FACTORY_PEAK_TZ, FACTORY_PEAK_START, FACTORY_PEAK_END not set"
+          in buf.getvalue(), buf.getvalue().strip()[:120])
+    check("off: holder not started",
+          MOD.holder_pid() is None or not MOD.pid_alive(MOD.holder_pid()))
+    kill_holder()
+
+    print("F: Saturday 10:00, no holder -> tick starts nothing")
+    MOD.now_local = lambda: dt("2026-11-14T10:00+03:00")  # Saturday
     MOD.cmd_tick()
     time.sleep(1.0)
     check("holder not started", MOD.holder_pid() is None or not MOD.pid_alive(MOD.holder_pid()))
     kill_holder()
 
     print("A: in-peak (Tue 10:00), no holder -> peak holder")
-    MOD.now_msk = lambda: dt("2026-11-10T10:00+03:00")  # Tuesday
+    MOD.now_local = lambda: dt("2026-11-10T10:00+03:00")  # Tuesday
     MOD.cmd_tick()
     pid_a = wait_holder()
     check("holder started", pid_a is not None)
@@ -212,7 +238,7 @@ def main() -> int:
     check("health sees owner-stop", health_hold_owner_stop() is not None)
 
     print("C: out-of-peak (Tue 14:00), peak holder -> lifted")
-    MOD.now_msk = lambda: dt("2026-11-10T14:00+03:00")
+    MOD.now_local = lambda: dt("2026-11-10T14:00+03:00")
     MOD.cmd_tick()
     for _ in range(120):
         if not MOD.pid_alive(pid_a):
@@ -227,7 +253,7 @@ def main() -> int:
     pid_b = wait_holder()
     check("foreign holder up", pid_b is not None)
     meta_before = MOD.METAFILE.read_text()
-    MOD.now_msk = lambda: dt("2026-11-10T10:00+03:00")
+    MOD.now_local = lambda: dt("2026-11-10T10:00+03:00")
     MOD.cmd_tick()
     time.sleep(1.0)
     check("same pid", MOD.holder_pid() == pid_b, f"{MOD.holder_pid()} vs {pid_b}")
@@ -235,7 +261,7 @@ def main() -> int:
     check("health sees owner=owner-login", health_hold_owner_stop() is not None)
 
     print("D: out-of-peak, foreign owner stop -> alive")
-    MOD.now_msk = lambda: dt("2026-11-10T14:00+03:00")
+    MOD.now_local = lambda: dt("2026-11-10T14:00+03:00")
     MOD.cmd_tick()
     time.sleep(1.5)
     check("foreign holder alive", MOD.pid_alive(MOD.holder_pid()))
@@ -247,7 +273,7 @@ def main() -> int:
     pid_e = wait_holder()
     check("nameless holder up", pid_e is not None)
     check("before: health does NOT see owner-stop", health_hold_owner_stop() is None)
-    MOD.now_msk = lambda: dt("2026-11-10T10:00+03:00")
+    MOD.now_local = lambda: dt("2026-11-10T10:00+03:00")
     MOD.cmd_tick()
     time.sleep(1.0)
     check("same pid (locks never released)", MOD.holder_pid() == pid_e, f"{MOD.holder_pid()} vs {pid_e}")
@@ -257,7 +283,7 @@ def main() -> int:
     kill_holder()
 
     print("E2: end of window lifts the attached peak holder")
-    MOD.now_msk = lambda: dt("2026-11-10T14:00+03:00")
+    MOD.now_local = lambda: dt("2026-11-10T14:00+03:00")
     start_holder()  # nameless again, as before the annotation
     pid_e2 = wait_holder()
     MOD.cmd_tick()  # out-of-peak with a nameless holder: skipped

@@ -1,18 +1,20 @@
 #!/usr/bin/env python3
-"""Peak-hours pause of the kanban dispatcher (default: Mon-Fri 09:00-13:00 Moscow).
+"""Peak-hours pause of the kanban dispatcher, off until a window is configured.
 
-During the peak window the LLM provider bills quota at a higher rate (the
-defaults describe the Z.AI GLM Coding plan; the window is provider-specific).
+During the peak window some LLM providers bill quota at a higher rate; the
+window is provider-specific, so it has no default.
 Handing out cards in that window is frozen with the same mechanism as the
 owner stop: a holder of flock on <db>.dispatch.lock of all boards
 (kanban-dispatch-hold.py). The gateway tick gets skipped_locked and spawns no
 workers; workers already running finish their work.
 
-The window is configuration, the defaults are the original values:
-  FACTORY_PEAK_TZ     IANA time zone of the window   (default Europe/Moscow)
-  FACTORY_PEAK_START  window start, HH:MM            (default 09:00)
-  FACTORY_PEAK_END    window end, HH:MM, exclusive   (default 13:00)
-  FACTORY_PEAK_DAYS   weekdays, 0=Mon, comma-separated (default 0,1,2,3,4)
+The window is configuration:
+  FACTORY_PEAK_TZ     IANA time zone of the window   (required)
+  FACTORY_PEAK_START  window start, HH:MM            (required)
+  FACTORY_PEAK_END    window end, HH:MM, exclusive   (required)
+  FACTORY_PEAK_DAYS   weekdays, 0=Mon, comma-separated (default: every day)
+Without the three required keys the pause is off: `tick` holds nothing,
+releases only a leftover holder of its own and logs which keys are missing.
 
 Main mode `tick` (a cron every 15 min, no-agent): decides on its own whether
 to hold or release, from the current time in the configured zone.
@@ -62,14 +64,17 @@ def _hm(text: str) -> tuple[int, int]:
     return int(h), int(m or 0)
 
 
-# Provider-specific peak window; the defaults are the original values.
-_TZ_NAME = cfg("FACTORY_PEAK_TZ", "Europe/Moscow")
-TZ = ZoneInfo(_TZ_NAME)
-_START = cfg("FACTORY_PEAK_START", "09:00")
-_END = cfg("FACTORY_PEAK_END", "13:00")
-PEAK_START = _hm(_START)
-PEAK_END = _hm(_END)
-PEAK_DAYS = frozenset(int(d) for d in cfg_list("FACTORY_PEAK_DAYS", ("0", "1", "2", "3", "4")))  # 0=Mon
+# Provider-specific peak window: no defaults, unset means the pause is off.
+_TZ_NAME = cfg("FACTORY_PEAK_TZ", "")
+_START = cfg("FACTORY_PEAK_START", "")
+_END = cfg("FACTORY_PEAK_END", "")
+MISSING = [k for k, v in (("FACTORY_PEAK_TZ", _TZ_NAME), ("FACTORY_PEAK_START", _START),
+                          ("FACTORY_PEAK_END", _END)) if not v]
+ENABLED = not MISSING
+TZ = ZoneInfo(_TZ_NAME) if _TZ_NAME else ZoneInfo("UTC")
+PEAK_START = _hm(_START) if ENABLED else (0, 0)
+PEAK_END = _hm(_END) if ENABLED else (0, 0)
+PEAK_DAYS = frozenset(int(d) for d in cfg_list("FACTORY_PEAK_DAYS", tuple("0123456")))  # 0=Mon
 PEAK_OWNER = "peak-pause"
 PEAK_REASON = ("provider peak window %s-%s %s, days %s (quota billed at a higher rate)"
                % (_START, _END, _TZ_NAME, ",".join(str(d) for d in sorted(PEAK_DAYS))))
@@ -86,13 +91,14 @@ def log(msg: str) -> None:
         pass
 
 
-def now_msk() -> datetime:
-    # name kept from the original (Moscow default); the zone is FACTORY_PEAK_TZ
+def now_local() -> datetime:
     return datetime.now(TZ)
 
 
 def in_peak(dt: datetime) -> bool:
     """Peak weekdays, start (inclusive) .. end (exclusive), in the configured zone."""
+    if not ENABLED:
+        return False
     if dt.weekday() not in PEAK_DAYS:
         return False
     hm = (dt.hour, dt.minute)
@@ -191,7 +197,9 @@ def ensure_released(why: str) -> str:
 
 
 def cmd_tick() -> int:
-    dt = now_msk()
+    dt = now_local()
+    if not ENABLED:
+        log("peak pause off: %s not set" % ", ".join(MISSING))
     if in_peak(dt):
         ensure_hold(f"tick in-peak {dt:%H:%M}")
     else:
@@ -200,10 +208,12 @@ def cmd_tick() -> int:
 
 
 def cmd_status() -> int:
-    dt = now_msk()
+    dt = now_local()
     pid = holder_pid()
     meta = read_meta()
-    print(f"now={dt:%Y-%m-%d %H:%M %a} tz={_TZ_NAME} in_peak={in_peak(dt)}")
+    if not ENABLED:
+        print("peak pause off: %s not set" % ", ".join(MISSING))
+    print(f"now={dt:%Y-%m-%d %H:%M %a} tz={_TZ_NAME or '-'} in_peak={in_peak(dt)}")
     print(f"holder pid={pid} alive={pid_alive(pid)}")
     print(f"meta={json.dumps(meta, ensure_ascii=False) if meta else None}")
     return 0

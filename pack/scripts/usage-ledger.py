@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""Per-card and per-research token accounting. Prices of OpenRouter, the zen
-quota and the DeepSeek balance are gone (token totals come from the built-in
-`hermes insights`, the z.ai tariff lives in metrics-evening.py:PRICING); only
-what the built-in tooling lacks is left here: attributing sessions to cards
-t_XXXX, the ledger.jsonl ledger and the final kanban comment on completed
-cards. Unit of spend: z.ai credits by the metrics-evening tariff.
+"""Per-card and per-research token accounting. Token totals come from the
+built-in `hermes insights`, prices from FACTORY_PRICES (parsed by
+metrics-evening.py); only what the built-in tooling lacks is left here:
+attributing sessions to cards t_XXXX, the ledger.jsonl ledger and the final
+kanban comment on completed cards. Unit of spend: plan credits by
+FACTORY_PRICES; a model without a price has an unknown cost.
 Idempotent: state in $HERMES_HOME/usage-ledger/state.json, ledger in
-ledger.jsonl (per session; rows without a tariff go in with zero credits, they
-are not dropped)."""
+ledger.jsonl (per session; rows without a price keep their tokens and are
+reported as unpriced, they are not dropped)."""
 import sqlite3, json, re, os, glob, time, subprocess, sys, importlib.util as _ilu
 
 SCRIPTS = os.path.dirname(os.path.abspath(__file__))
@@ -20,10 +20,10 @@ STATE_F = f"{LDIR}/state.json"
 LEDGER_F = f"{LDIR}/ledger.jsonl"
 BOARD = cfg("FACTORY_BOARD", "main")
 
-# The z.ai tariff lives in metrics-evening.py (PRICING + ledger_row_credits):
-# one tariff source for the evening report and the ledger. The file name has a
+# Prices live in metrics-evening.py (FACTORY_PRICES + ledger_row_credits):
+# one price source for the evening report and the ledger. The file name has a
 # hyphen, so it is loaded through importlib (same approach as in
-# board-watchdog.py). Without that sibling script every row counts as zero credits.
+# board-watchdog.py). Without that sibling script every row is unpriced.
 _FM_PATH = os.path.join(SCRIPTS, "metrics-evening.py")
 _fm_spec = _ilu.spec_from_file_location("factory_metrics_ul", _FM_PATH)
 try:
@@ -34,7 +34,7 @@ try:
     row_credits = _fm.ledger_row_credits
 except Exception:
     def row_credits(r):
-        return 0.0
+        return None
 
 def classify(source, title):
     t = title or ""
@@ -92,7 +92,7 @@ def main():
                 if m: done_ids.add(m.group(0))
     except Exception: pass
     # full per-card aggregate from the ledger (not only the new rows);
-    # credits by the metrics-evening tariff, rows without a tariff count as zero
+    # credits by FACTORY_PRICES; rows without a price are counted as unpriced
     totals = {}
     if os.path.exists(LEDGER_F):
         for line in open(LEDGER_F):
@@ -101,15 +101,20 @@ def main():
             if r.get("kind") != "card": continue
             a = totals.setdefault(r["ref"], {"in": 0, "out": 0, "credits": 0.0, "unpriced": 0, "models": set()})
             a["in"] += r["input_tokens"]; a["out"] += r["output_tokens"]
-            a["credits"] += row_credits(r)
-            if row_credits(r) == 0.0: a["unpriced"] += 1
+            c = row_credits(r)
+            if c is None: a["unpriced"] += 1
+            else: a["credits"] += c
             a["models"].add(r["model"])
     for tid in sorted(done_ids):
         if tid in commented or tid not in totals: continue
         a = totals[tid]
-        extra = f"; unpriced {a['unpriced']} rows" if a["unpriced"] else ""
+        if a["unpriced"] and not a["credits"]:
+            spend = f"credits unknown ({a['unpriced']} unpriced rows)"
+        else:
+            extra = f" + unknown ({a['unpriced']} unpriced rows)" if a["unpriced"] else ""
+            spend = f"credits ~{a['credits']:,.0f}{extra}"
         msg = (f"Usage: in={a['in']:,} out={a['out']:,} tokens; models={','.join(sorted(a['models']))}; "
-               f"z.ai credits ~{a['credits']:,.0f}{extra}")
+               f"{spend}")
         try:
             subprocess.run(["hermes", "kanban", "--board", BOARD, "comment", tid, msg, "--author", "usage-ledger"],
                            capture_output=True, timeout=60)
@@ -117,8 +122,11 @@ def main():
         except Exception: pass
     state["seen"] = sorted(seen); state["commented"] = sorted(commented)
     json.dump(state, open(STATE_F, "w"))
-    tot_cr = sum(row_credits(r) for r in rows_out)
-    print(f"new rows: {len(rows_out)}; new z.ai credits ~{tot_cr:,.0f}; cards updated: {len(card_new)}; commented: {len(commented)}")
+    costs = [row_credits(r) for r in rows_out]
+    tot_cr = sum(c for c in costs if c is not None)
+    unpriced = sum(1 for c in costs if c is None)
+    extra = f" + unknown ({unpriced} unpriced rows)" if unpriced else ""
+    print(f"new rows: {len(rows_out)}; new credits ~{tot_cr:,.0f}{extra}; cards updated: {len(card_new)}; commented: {len(commented)}")
 
 if __name__ == "__main__":
     main()

@@ -84,7 +84,14 @@ Some subscription providers charge more during peak hours (the original one bill
 - inside the window it holds the boards' dispatch locks (the same mechanism as the owner's manual stop); outside it releases only a hold that it owns;
 - an owner stop always wins: the pause never overwrites or releases it; a quota stop held by the health check gets the peak label so it is not released in the middle of the window.
 
-Trade-off: cards wait. Only use it if your provider's pricing has peaks and your queue tolerates a few hours of delay. Set the window and time zone in the script.
+Trade-off: cards wait. Only use it if your provider's pricing has peaks and your queue tolerates a few hours of delay. Set the window in `factory.env`: `FACTORY_PEAK_TZ` (an IANA zone), `FACTORY_PEAK_START`, `FACTORY_PEAK_END` and optionally `FACTORY_PEAK_DAYS` (every day when unset). The pack ships no window: until the three keys are set, the tick holds nothing and logs which keys are missing.
+
+## Quota guard and spend report
+
+Both are provider-specific, so both are configuration with no built-in values:
+
+- **Quota guard** (`hermes-health.py`). Set `FACTORY_QUOTA_PROBE_BASE`, `FACTORY_QUOTA_PROBE_KEY_VAR` (the name of the key variable in the Hermes `.env`) and `FACTORY_QUOTA_PROBE_MODEL`, plus the codes and texts your provider writes on a 429 when the quota is gone (`FACTORY_QUOTA_CODES`, `FACTORY_QUOTA_TEXTS`). Without the probe settings the guard is skipped with one line on stderr: a stop that no probe can lift would hold dispatch forever.
+- **Spend report** (`metrics-evening.py`, `usage-ledger.py`). `FACTORY_PRICES` holds your plan's coefficients as `model=input/cache_read/output;...`. A model without a price is reported as unknown, never as zero: a zero would hide spend.
 
 ## Measuring the result
 

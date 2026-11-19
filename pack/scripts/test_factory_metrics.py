@@ -49,6 +49,10 @@ os.environ["FACTORY_OWNER_LOGIN"] = "owner-login"
 os.environ["FACTORY_OWNER_CHAT"] = "telegram:000000000"
 os.environ["FACTORY_REVIEWER_LOGINS"] = "review-bot"
 os.environ["FACTORY_MILESTONES"] = "1.2.0,2.2.0"
+# Prices are configuration: the cases below price the two fixture models.
+PRICES = "glm-5.3=6.9/1.7/24;glm-5.3-flash=2.3/0.56/8"
+os.environ["FACTORY_PRICES"] = PRICES
+os.environ.pop("FACTORY_REPORT_TZ", None)
 
 # The path can be overridden with FACTORY_METRICS_SCRIPT: mutation runs use a
 # COPY of the script with a mutation applied, never the shipped file.
@@ -458,7 +462,8 @@ def test_credits():
     assert abs(cr["per_model"]["glm-5.3"] - 2060.0) < 1e-6, cr
     # flash: (1e6*2.3 + 1e5*8.0)/1e4 = 310.0
     assert abs(cr["per_model"]["glm-5.3-flash"] - 310.0) < 1e-6, cr
-    assert abs(cr["zai"] - 2370.0) < 1e-6, cr
+    assert abs(cr["credits"] - 2370.0) < 1e-6, cr
+    assert cr["unknown"] == 1, cr          # the deepseek row has no price
     # no dollars; a model without a price is not priced
     assert "usd_other" not in cr, cr
     print("OK test_credits")
@@ -526,16 +531,18 @@ def test_credits_weighted_and_totals():
     weights = {"t_aaa": {300: 0.5, 301: 0.5}}
     per_pr = fm.credits_weighted(rows, weights)
     # t_aaa: glm-5.3 2060 + flash 310 = 2370, half each = 1185
-    assert abs(per_pr[300]["zai"] - 1185.0) < 1e-6, per_pr
-    assert abs(per_pr[301]["zai"] - 1185.0) < 1e-6, per_pr
+    assert abs(per_pr[300]["credits"] - 1185.0) < 1e-6, per_pr
+    assert abs(per_pr[301]["credits"] - 1185.0) < 1e-6, per_pr
+    assert per_pr[300]["unknown"] == 1, per_pr
     assert "usd_other" not in per_pr[300], per_pr             # no dollars
     tot = fm.ledger_totals(rows)
-    # zai_all: t_aaa 2370 + t_other 690 + session 690 = 3750
-    assert abs(tot["zai_all"] - 3750.0) < 1e-6, tot
-    assert abs(tot["zai_cards"] - 3060.0) < 1e-6, tot          # without session
+    # all: t_aaa 2370 + t_other 690 + session 690 = 3750
+    assert abs(tot["all"] - 3750.0) < 1e-6, tot
+    assert abs(tot["cards"] - 3060.0) < 1e-6, tot          # without session
+    assert tot["unknown"] == 1, tot
     assert "usd_all" not in tot, tot                           # no dollars
     # report invariant: the sum over PRs is not above the total ledger spend
-    assert sum(v["zai"] for v in per_pr.values()) <= tot["zai_all"] + 1e-6
+    assert sum(v["credits"] for v in per_pr.values()) <= tot["all"] + 1e-6
     print("OK test_credits_weighted_and_totals")
 
 
@@ -572,7 +579,8 @@ def test_report_end_to_end():
     assert "5. burnouts" in text and "with a progress comment 2" in text
     assert "PR#300 (t_aaa, t_rev300): plan credits 2370.0" in text
     # window total + reconciliation with the ledger (no dollars)
-    assert "6. credits for the window in total: plan 3750.0;" in text
+    assert ("6. credits for the window in total: plan 3750.0 + unknown "
+            "(1 unpriced runs);") in text, text
     assert "other models" not in text and "DeepSeek" not in text
     assert "merged PRs 2370.0" in text
     assert "reconciliation of the sum with the ledger: OK" in text
@@ -706,11 +714,42 @@ def test_usage_section_credits_only():
     finally:
         fm.HOME = old_home
     assert "$" not in out and "DeepSeek" not in out, out
-    # day: t_aaa 2060.0 + session 690.0 = 2750.0 credits; deepseek is not priced
-    assert "credits=2750.0" in out, out
-    assert "no price: 1" in out, out
+    # day: t_aaa 2060.0 + session 690.0 = 2750.0 credits; deepseek is unknown
+    assert "credits=2750.0 + unknown (1 unpriced runs)" in out, out
+    assert "deepseek-v4-flash=unknown (1 unpriced runs)" in out, out
     assert "by model (price table)" in out and "glm-5.3=2750.0" in out, out
+    assert "(UTC)" in out, out
     print("OK test_usage_section_credits_only")
+
+
+def test_unset_prices_mean_unknown_cost():
+    """Without FACTORY_PRICES there is no built-in price list: every cost is
+    unknown, never zero and never a guess."""
+    import json as _json
+    import tempfile
+    from pathlib import Path as _Path
+    del os.environ["FACTORY_PRICES"]
+    try:
+        sp = importlib.util.spec_from_file_location("factory_metrics_np", FACTORY_SCRIPT)
+        bare = importlib.util.module_from_spec(sp)
+        sp.loader.exec_module(bare)
+    finally:
+        os.environ["FACTORY_PRICES"] = PRICES
+    assert bare.PRICING == {}, bare.PRICING
+    assert bare.ledger_row_credits(ledger_fixture()[0]) is None
+    cr = bare.credits(ledger_fixture(), {"t_aaa"})
+    assert cr["credits"] == 0.0 and cr["unknown"] == 3, cr
+    assert bare.fmt_credits(cr["credits"], cr["unknown"]) == "unknown (3 unpriced runs)"
+    tmp = _Path(tempfile.mkdtemp(prefix="me-noprice-"))
+    (tmp / "usage-ledger").mkdir(parents=True)
+    (tmp / "usage-ledger" / "ledger.jsonl").write_text(
+        _json.dumps(ledger_fixture()[0]), encoding="utf-8")
+    bare.HOME = tmp
+    out = bare.usage_section(NOW, titles={})
+    assert "FACTORY_PRICES is not set" in out, out
+    assert "credits=unknown (1 unpriced runs)" in out, out
+    assert "credits=0" not in out, out
+    print("OK test_unset_prices_mean_unknown_cost")
 
 
 def main():
@@ -731,6 +770,7 @@ def main():
     test_outcomes_sum_to_total()
     test_scheduled_not_finished()
     test_usage_section_credits_only()
+    test_unset_prices_mean_unknown_cost()
     test_report_end_to_end()
     print("ALL FACTORY-METRICS TESTS PASSED")
 
