@@ -92,6 +92,9 @@ Both are provider-specific, so both are configuration with no built-in values:
 
 - **Quota guard** (`hermes-health.py`). Set `FACTORY_QUOTA_PROBE_BASE`, `FACTORY_QUOTA_PROBE_KEY_VAR` (the name of the key variable in the Hermes `.env`) and `FACTORY_QUOTA_PROBE_MODEL`, plus the codes and texts your provider writes on a 429 when the quota is gone (`FACTORY_QUOTA_CODES`, `FACTORY_QUOTA_TEXTS`). Without the probe settings the guard is skipped with one line on stderr: a stop that no probe can lift would hold dispatch forever.
 - **Spend report** (`metrics-evening.py`, `usage-ledger.py`). `FACTORY_PRICES` holds your plan's coefficients as `model=input/cache_read/output;...`. A model without a price is reported as unknown, never as zero: a zero would hide spend.
+- **Peak rates in the estimate.** If your provider charges less outside its peak hours, set `FACTORY_OFFPEAK_MULTIPLIER` (for example `0.5`) together with the peak window above. A session only records its start and end, so the multiplier is applied linearly over that interval, and the report labels its credits as an estimate. Unset, the multiplier is 1.0 and every hour costs the same; with an incomplete window it is 1.0 as well.
+- **Checking the estimate.** Set `FACTORY_PLAN_WEEKLY_LIMIT` to your plan's weekly credits, and the week section shows the estimate as a share of it (unset: the line is skipped). Next to it the report counts the real quota errors in the agent logs, matched by `FACTORY_QUOTA_CODES` and `FACTORY_QUOTA_TEXTS`. An estimate far above the limit with no quota errors means the price table or the multiplier is wrong, not that you overspent.
+- **Attribution.** `usage-ledger.py` ties each session to its card through the board's `owner_admitted` event, so card runs do not land in "other"; the last 14 days of the ledger are rebuilt on every run, so a fix in classification reaches rows already written.
 
 ## Measuring the result
 

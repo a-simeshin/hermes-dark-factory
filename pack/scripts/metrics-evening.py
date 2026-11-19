@@ -12,6 +12,10 @@ names in code; the cache cache/metrics-evening-milestones.json survives a gh
 failure. Prices come from FACTORY_PRICES; a model without a price shows its
 cost as unknown, never as zero or a guess. Money amounts and provider
 balances are left out on purpose, and the only spend unit is plan credits.
+Credits are an estimate: an off-peak multiplier (FACTORY_OFFPEAK_MULTIPLIER
+outside the FACTORY_PEAK_* window) is applied linearly over each session's
+interval, and the weekly sum is set against the plan's weekly limit
+(FACTORY_PLAN_WEEKLY_LIMIT) and the real quota errors in the agent logs.
 
 Besides the spend and merge-path numbers, the report carries the PR path from
 card to merge, rework per PR, escaped defects (FACTORY block), the shares of
@@ -115,15 +119,68 @@ def parse_prices(raw: str) -> dict:
 
 PRICING = parse_prices(cfg("FACTORY_PRICES", ""))
 
+# Peak and off-peak rates. The peak window is the one the dispatch pause uses
+# (FACTORY_PEAK_TZ/START/END/DAYS); FACTORY_OFFPEAK_MULTIPLIER is the share of
+# the price a provider charges outside it (0.5 = half price). Unset
+# multiplier, or an incomplete window: every hour is charged at 1.0.
+try:
+    OFFPEAK_MULT = float(cfg("FACTORY_OFFPEAK_MULTIPLIER", "1"))
+except ValueError:
+    sys.exit("FACTORY_OFFPEAK_MULTIPLIER must be a number")
+_PEAK_TZ = cfg("FACTORY_PEAK_TZ", "")
+_PEAK_START = cfg("FACTORY_PEAK_START", "")
+_PEAK_END = cfg("FACTORY_PEAK_END", "")
+PEAK_DAYS = frozenset(int(d) for d in cfg_list("FACTORY_PEAK_DAYS", tuple("0123456")))
+PEAK_ON = bool(_PEAK_TZ and _PEAK_START and _PEAK_END) and OFFPEAK_MULT != 1.0
+PEAK_TZ = ZoneInfo(_PEAK_TZ) if PEAK_ON else None
+
+
+def _hm(text: str) -> tuple[int, int]:
+    h, _, m = text.partition(":")
+    return int(h), int(m or 0)
+
+
+def peak_seconds(st: float, en: float) -> float:
+    """Seconds of [st, en) that fall into the peak window."""
+    if not PEAK_ON or en <= st:
+        return 0.0
+    (sh, sm), (eh, em) = _hm(_PEAK_START), _hm(_PEAK_END)
+    day = datetime.fromtimestamp(st, PEAK_TZ).date()
+    last = datetime.fromtimestamp(en, PEAK_TZ).date()
+    total = 0.0
+    while day <= last:
+        if day.weekday() in PEAK_DAYS:
+            ps = datetime(day.year, day.month, day.day, sh, sm, tzinfo=PEAK_TZ).timestamp()
+            pe = datetime(day.year, day.month, day.day, eh, em, tzinfo=PEAK_TZ).timestamp()
+            total += max(0.0, min(en, pe) - max(st, ps))
+        day += timedelta(days=1)
+    return total
+
+
+def peak_rate(r: dict) -> float:
+    """Rate of a ledger row: 1.0 in the peak, OFFPEAK_MULT outside it, linear
+    over a session that spans both. A session only has its start and end (no
+    per-request timestamps), so the rate is an estimate and the report says
+    so. Rows without st/en are rated at their single point ts."""
+    if not PEAK_ON:
+        return 1.0
+    st = r.get("st") or r.get("ts") or 0
+    en = r.get("en") or st
+    if en <= st:
+        en = st + 1
+    frac = peak_seconds(st, en) / (en - st)
+    return OFFPEAK_MULT + (1.0 - OFFPEAK_MULT) * frac
+
 
 def row_cost(r: dict) -> float | None:
-    """Credits of one ledger row; None when the model has no price."""
+    """Credits of one ledger row (price table times peak_rate); None when
+    the model has no price."""
     k = PRICING.get(r.get("model") or "?")
     if not k:
         return None
     return (r.get("input_tokens", 0) * k[0]
             + r.get("cache_read_tokens", 0) * k[1]
-            + r.get("output_tokens", 0) * k[2]) / 1e4
+            + r.get("output_tokens", 0) * k[2]) / 1e4 * peak_rate(r)
 
 
 def fmt_credits(value: float, unknown: int) -> str:
@@ -1523,12 +1580,59 @@ def board_titles():
 
 
 def ledger_row_credits(r) -> float | None:
-    """Credits of a ledger row by FACTORY_PRICES; None = a model with no price.
+    """Credits of a ledger row by FACTORY_PRICES and the peak rate; None = a
+    model with no price.
 
     Dollars and provider balances are left out of the report: the unit of
-    spend is credits by the price table only.
+    spend is credits by the price table only. It is an estimate: the rate is
+    taken over the session interval (see peak_rate), not per request.
     """
     return row_cost(r)
+
+
+# Quota errors in the agent logs: the same codes and texts as the quota guard
+# of hermes-health (FACTORY_QUOTA_CODES/FACTORY_QUOTA_TEXTS). They are the real
+# events the credit estimate is checked against.
+QUOTA_CODES = tuple(cfg_list("FACTORY_QUOTA_CODES"))
+QUOTA_TEXTS = tuple(cfg_list("FACTORY_QUOTA_TEXTS"))
+_QUOTA_CODE_RE = (re.compile(r"429[^\n]*?\b(%s)\b" % "|".join(map(re.escape, QUOTA_CODES)))
+                  if QUOTA_CODES else None)
+LOG_TAIL_BYTES = 5_000_000
+# Credits of the plan per week; unset: the comparison line is skipped.
+try:
+    PLAN_WEEKLY_LIMIT = float(cfg("FACTORY_PLAN_WEEKLY_LIMIT", "0"))
+except ValueError:
+    sys.exit("FACTORY_PLAN_WEEKLY_LIMIT must be a number")
+
+
+def quota_events(since: float, until: float) -> int | None:
+    """Quota error lines in the agent logs within [since, until]; None when
+    no codes or texts are configured. Log timestamps are server local time."""
+    if not (QUOTA_CODES or QUOTA_TEXTS):
+        return None
+    files = sorted(Path(HOME, "logs").glob("agent.log*"))
+    for prof in sorted(Path(HOME, "profiles").glob("*/logs")):
+        files += sorted(prof.glob("agent.log*"))[:2]
+    n = 0
+    for f in files:
+        try:
+            with open(f, "rb") as fh:
+                if f.stat().st_size > LOG_TAIL_BYTES:  # the tail of a big log
+                    fh.seek(-LOG_TAIL_BYTES, 2)
+                text = fh.read().decode("utf-8", "replace")
+        except OSError:
+            continue
+        for ln in text.splitlines():
+            if not ((_QUOTA_CODE_RE and _QUOTA_CODE_RE.search(ln))
+                    or any(t in ln for t in QUOTA_TEXTS)):
+                continue
+            try:
+                ts = time.mktime(time.strptime(ln[:19], "%Y-%m-%d %H:%M:%S"))
+            except ValueError:
+                continue
+            if since <= ts <= until:
+                n += 1
+    return n
 
 
 def usage_section(now, titles=None):
@@ -1544,6 +1648,8 @@ def usage_section(now, titles=None):
     cards_week = defaultdict(lambda: [0.0, 0])        # ref -> credits, unpriced
     kinds_day = defaultdict(lambda: [0.0, 0])
     models_day = defaultdict(lambda: [0.0, 0])
+    profiles_day = defaultdict(lambda: [0.0, 0])      # spend by role
+    outside_day = defaultdict(lambda: [0.0, 0])       # non-card spend by source
     if ledger.exists():
         for line in ledger.read_text(encoding="utf-8").splitlines():
             line = line.strip()
@@ -1572,7 +1678,11 @@ def usage_section(now, titles=None):
                 day_agg[2] += r.get("cache_read_tokens", 0)
                 day_agg[3] += add
                 day_agg[4] += unk
-                for agg in (kinds_day[r["kind"]], models_day[r["model"]]):
+                aggs = [kinds_day[r["kind"]], models_day[r["model"]],
+                        profiles_day[r.get("profile") or "?"]]
+                if r["kind"] != "card":
+                    aggs.append(outside_day[r.get("source") or "unknown"])
+                for agg in aggs:
                     agg[0] += add
                     agg[1] += unk
                 if r["kind"] == "card":
@@ -1582,7 +1692,8 @@ def usage_section(now, titles=None):
                     c[2] += r["output_tokens"]
                     c[3] += unk
 
-    lines = ["=== Spend for %s (%s), provider credits ===" % (today, REPORT_TZ_NAME)]
+    lines = ["=== Spend for %s (%s), provider credits (estimate) ==="
+             % (today, REPORT_TZ_NAME)]
     if not PRICING:
         lines.append("no prices: FACTORY_PRICES is not set, every cost is unknown")
     lines.append("in=%.1fM out=%.2fM cache=%.0fM credits=%s" % (
@@ -1592,11 +1703,27 @@ def usage_section(now, titles=None):
         "%s=%s" % (k, fmt_credits(*v)) for k, v in sorted(kinds_day.items(), key=lambda x: -x[1][0])))
     lines.append("by model (price table): " + ", ".join(
         "%s=%s" % (m, fmt_credits(*v)) for m, v in sorted(models_day.items(), key=lambda x: -x[1][0])[:5]))
+    lines.append("by profile (role): " + ", ".join(
+        "%s=%s" % (p, fmt_credits(*v)) for p, v in sorted(profiles_day.items(), key=lambda x: -x[1][0])[:6]))
+    lines.append("outside cards (by source): " + (", ".join(
+        "%s=%s" % (k, fmt_credits(*v)) for k, v in sorted(outside_day.items(), key=lambda x: -x[1][0]))
+        or "none"))
     lines.append("")
     lines.append("=== Week from %s ===" % report_day(week_start_ts))
     lines.append("in=%.1fM out=%.2fM cache=%.0fM credits=%s" % (
         week_agg[0] / 1e6, week_agg[1] / 1e6, week_agg[2] / 1e6,
         fmt_credits(week_agg[3], week_agg[4])))
+    # The estimate is checked against the plan limit and the real quota errors.
+    if PLAN_WEEKLY_LIMIT:
+        lines.append("estimate vs plan weekly limit %s: %.0f%%"
+                     % (f"{PLAN_WEEKLY_LIMIT:,.0f}", 100.0 * week_agg[3] / PLAN_WEEKLY_LIMIT))
+    day_start = datetime.fromtimestamp(now, REPORT_TZ).replace(
+        hour=0, minute=0, second=0, microsecond=0).timestamp()
+    q_day, q_week = quota_events(day_start, now), quota_events(week_start_ts, now)
+    lines.append("quota errors in the logs: not counted, FACTORY_QUOTA_CODES and "
+                 "FACTORY_QUOTA_TEXTS are unset" if q_day is None else
+                 "quota errors in the logs (real events): today %d, this week %d"
+                 % (q_day, q_week))
     lines.append("")
     lines.append("=== Top cards today ===")
     for ref, (c, i, o, u) in sorted(cards_day.items(), key=lambda x: -x[1][0])[:7]:

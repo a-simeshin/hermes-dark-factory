@@ -29,10 +29,16 @@ Mutants that must turn this red:
   run window + 900 s" -> test_burnouts (a comment 73 minutes after the end
   stops counting as progress).
 
+The peak rate, the spend breakdowns and the quota-event count are checked
+by test_peak_rate and test_spend_estimate_lines, which also run against
+in-test mutants of the script (test_peak_mutants): each must turn them red.
+
 Run: python3 test_factory_metrics.py
 Against a mutated copy: FACTORY_METRICS_SCRIPT=/path/to/copy.py python3 ...
 """
+import contextlib
 import importlib.util
+import io
 import os
 import sys
 import tempfile
@@ -693,14 +699,17 @@ def test_usage_section_credits_only():
     (tmp / "usage-ledger").mkdir(parents=True)
     rows = [
         {"ts": NOW - 3600, "kind": "card", "ref": "t_aaa", "model": "glm-5.3",
+         "profile": "coder", "source": "kanban",
          "input_tokens": 1_000_000, "cache_read_tokens": 1_000_000,
          "output_tokens": 500_000,
          "cost_usd_openrouter": 2.624},          # dollars stay in the ledger,
         {"ts": NOW - 3600, "kind": "card", "ref": "t_ds",              # the report
-         "model": "deepseek-v4-flash", "input_tokens": 1_000,          # does not
-         "output_tokens": 100, "cache_read_tokens": 0,                 # read them
+         "profile": "coder", "source": "kanban",                       # does not
+         "model": "deepseek-v4-flash", "input_tokens": 1_000,          # read them
+         "output_tokens": 100, "cache_read_tokens": 0,
          "cost_usd_openrouter": 0.5, "deepseek_balance_usd": -0.01},
         {"ts": NOW - 3600, "kind": "session", "ref": "x", "model": "glm-5.3",
+         "profile": "default", "source": "oneshot",
          "input_tokens": 1_000_000, "cache_read_tokens": 0,
          "output_tokens": 0, "cost_usd_openrouter": 0.1},
     ]
@@ -719,6 +728,15 @@ def test_usage_section_credits_only():
     assert "deepseek-v4-flash=unknown (1 unpriced runs)" in out, out
     assert "by model (price table)" in out and "glm-5.3=2750.0" in out, out
     assert "(UTC)" in out, out
+    assert "provider credits (estimate)" in out, out
+    assert ("by profile (role): coder=2060.0 + unknown (1 unpriced runs), "
+            "default=690.0") in out, out
+    assert "outside cards (by source): oneshot=690.0" in out, out
+    assert "t_aaa [done] 2060.0 cr" in out, out          # top cards are filled
+    # no peak window, no plan limit, no quota codes: rate 1.0, no limit line,
+    # and the quota line says the events are not counted
+    assert "plan weekly limit" not in out, out
+    assert "quota errors in the logs: not counted" in out, out
     print("OK test_usage_section_credits_only")
 
 
@@ -752,6 +770,137 @@ def test_unset_prices_mean_unknown_cost():
     print("OK test_unset_prices_mean_unknown_cost")
 
 
+# Peak window used by the peak tests: 10:00-14:00 Tokyo time on weekdays,
+# half price outside it. Example values of the test, not of the pack.
+PEAK_ENV = {"FACTORY_PEAK_TZ": "Asia/Tokyo", "FACTORY_PEAK_START": "10:00",
+            "FACTORY_PEAK_END": "14:00", "FACTORY_PEAK_DAYS": "0,1,2,3,4",
+            "FACTORY_OFFPEAK_MULTIPLIER": "0.5",
+            "FACTORY_PLAN_WEEKLY_LIMIT": "12345",
+            "FACTORY_QUOTA_CODES": "4242",
+            "FACTORY_QUOTA_TEXTS": "Quota is gone"}
+MON_TOKYO = 1792940400               # Mon 2026-10-26 00:00 Asia/Tokyo
+
+
+def load_metrics(env, src=None, tag="peak"):
+    """A fresh module instance under ``env``; ``src`` = mutated script text."""
+    saved = {k: os.environ.get(k) for k in env}
+    path = FACTORY_SCRIPT
+    if src is not None:
+        path = os.path.join(tempfile.mkdtemp(prefix="me-mut-"), "metrics-evening.py")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(src)
+    os.environ.update(env)
+    try:
+        sp = importlib.util.spec_from_file_location("factory_metrics_" + tag, path)
+        mod = importlib.util.module_from_spec(sp)
+        sp.loader.exec_module(mod)
+    finally:
+        for k, v in saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+    return mod
+
+
+def test_peak_rate(m=None):
+    """Off-peak multiplier applied linearly over the session interval."""
+    m = m or load_metrics(PEAK_ENV)
+    p0, p1 = MON_TOKYO + 10 * H, MON_TOKYO + 14 * H
+    assert abs(m.peak_seconds(p0, p1) - 4 * H) < 1e-6
+    assert abs(m.peak_seconds(MON_TOKYO + 8 * H, MON_TOKYO + 12 * H) - 2 * H) < 1e-6
+    sat = MON_TOKYO + 5 * 86400
+    assert m.peak_seconds(sat, sat + 86400) == 0.0              # weekend
+    assert abs(m.peak_rate({"ts": MON_TOKYO + 11 * H}) - 1.0) < 1e-9
+    assert abs(m.peak_rate({"ts": MON_TOKYO + 16 * H}) - 0.5) < 1e-9
+    assert abs(m.peak_rate({"st": MON_TOKYO + 8 * H,
+                            "en": MON_TOKYO + 12 * H}) - 0.75) < 1e-9
+    base = {"model": "glm-5.3", "input_tokens": 1_000_000,
+            "cache_read_tokens": 0, "output_tokens": 0}
+    assert abs(m.ledger_row_credits(dict(base, ts=MON_TOKYO + 11 * H)) - 690.0) < 1e-6
+    assert abs(m.ledger_row_credits(dict(base, ts=MON_TOKYO + 16 * H)) - 345.0) < 1e-6
+    print("OK test_peak_rate")
+
+
+def test_peak_unset_multiplier():
+    """A window without FACTORY_OFFPEAK_MULTIPLIER: no discount anywhere."""
+    env = dict(PEAK_ENV, FACTORY_OFFPEAK_MULTIPLIER="")
+    m = load_metrics(env, tag="nomult")
+    assert m.OFFPEAK_MULT == 1.0 and not m.PEAK_ON
+    assert m.peak_rate({"ts": MON_TOKYO + 16 * H}) == 1.0
+    print("OK test_peak_unset_multiplier")
+
+
+def test_spend_estimate_lines(m=None):
+    """Peak-rated sums, the plan-limit line and real quota events in the logs."""
+    import json as _json
+    m = m or load_metrics(PEAK_ENV)
+    tmp = tempfile.mkdtemp(prefix="me-peak-")
+    from pathlib import Path as _Path
+    home = _Path(tmp)
+    (home / "usage-ledger").mkdir()
+    peak_ts = MON_TOKYO + 11 * H                 # Mon 02:00 UTC, rate 1.0
+    rows = [
+        {"ts": peak_ts, "st": peak_ts - 600, "en": peak_ts, "kind": "card",
+         "ref": "t_aaa", "profile": "coder", "source": "kanban",
+         "model": "glm-5.3", "input_tokens": 1_000_000,
+         "cache_read_tokens": 0, "output_tokens": 0},
+        {"ts": T0, "kind": "webhook", "ref": "github-comments",   # off-peak 0.5
+         "profile": "reviewer", "source": "webhook", "model": "glm-5.3",
+         "input_tokens": 1_000_000, "cache_read_tokens": 0, "output_tokens": 0},
+    ]
+    (home / "usage-ledger" / "ledger.jsonl").write_text(
+        "\n".join(_json.dumps(r) for r in rows), encoding="utf-8")
+    stamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(NOW - 60))
+    old = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(NOW - 30 * 86400))
+    (home / "logs").mkdir()
+    (home / "logs" / "agent.log").write_text(
+        "%s WARNING HTTP 429: Quota is gone, reset later\n"
+        "%s WARNING HTTP 429: Quota is gone\n"          # outside the week
+        "%s INFO all good\n" % (stamp, old, stamp), encoding="utf-8")
+    (home / "profiles" / "coder" / "logs").mkdir(parents=True)
+    (home / "profiles" / "coder" / "logs" / "agent.log").write_text(
+        "%s ERROR HTTP 429 code 4242 from provider\n" % stamp, encoding="utf-8")
+    m.HOME = home
+    out = m.usage_section(NOW, titles={"t_aaa": ("done", "card")})
+    assert "credits=1035.0" in out, out                 # 690 peak + 345 off-peak
+    assert "by profile (role): coder=690.0, reviewer=345.0" in out, out
+    assert "outside cards (by source): webhook=345.0" in out, out
+    assert "estimate vs plan weekly limit 12,345: 8%" in out, out
+    assert "quota errors in the logs (real events): today 2, this week 2" in out, out
+    print("OK test_spend_estimate_lines")
+
+
+PEAK_MUTANTS = {
+    "no-offpeak-discount": ("return OFFPEAK_MULT + (1.0 - OFFPEAK_MULT) * frac",
+                            "return 1.0"),
+    "weekdays-ignored": ("if day.weekday() in PEAK_DAYS:", "if True:"),
+    "rate-not-applied": ("/ 1e4 * peak_rate(r)", "/ 1e4"),
+    "quota-texts-ignored": ("or any(t in ln for t in QUOTA_TEXTS)", "or False"),
+    "cards-outside-cards": ('if r["kind"] != "card":\n                    aggs.append',
+                            'if True:\n                    aggs.append'),
+}
+
+
+def test_peak_mutants():
+    """Each mutant of the script must turn the peak tests red."""
+    src = open(FACTORY_SCRIPT, encoding="utf-8").read()
+    for name, (old, new) in PEAK_MUTANTS.items():
+        mut = src.replace(old, new, 1)
+        assert mut != src, "mutant %s did not apply" % name
+        m = load_metrics(PEAK_ENV, src=mut, tag=name.replace("-", "_"))
+        red = False
+        for t in (test_peak_rate, test_spend_estimate_lines):
+            try:
+                with contextlib.redirect_stdout(io.StringIO()):
+                    t(m)
+            except AssertionError:
+                red = True
+        assert red, "mutant %s stayed green" % name
+        print("     mutant %s turned red" % name)
+    print("OK test_peak_mutants")
+
+
 def main():
     test_push_to_verdict()
     test_verdict_to_owner()
@@ -770,6 +919,10 @@ def main():
     test_outcomes_sum_to_total()
     test_scheduled_not_finished()
     test_usage_section_credits_only()
+    test_peak_rate()
+    test_peak_unset_multiplier()
+    test_spend_estimate_lines()
+    test_peak_mutants()
     test_unset_prices_mean_unknown_cost()
     test_report_end_to_end()
     print("ALL FACTORY-METRICS TESTS PASSED")

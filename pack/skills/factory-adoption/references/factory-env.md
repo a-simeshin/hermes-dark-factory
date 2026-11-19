@@ -45,6 +45,8 @@ a live response. Unset means off, and the script says so.
 | `FACTORY_QUOTA_CODES`, `FACTORY_QUOTA_TEXTS` | error codes and texts on a 429 that mean the quota is gone, paired by position | no log line counts as quota death; the guard never stops anything |
 | `FACTORY_PRICES` | `model=input/cache_read/output;...` in plan credits, for `metrics-evening.py` and `usage-ledger.py` | cost shown as unknown, never zero |
 | `FACTORY_REPORT_TZ` | day and week boundaries of the spend report | UTC, named in the report header |
+| `FACTORY_OFFPEAK_MULTIPLIER` | share of the price charged outside the `FACTORY_PEAK_*` window (`0.5` = half), applied over each session's interval in the credit estimate | `1.0`: no discount; also `1.0` while the window is incomplete |
+| `FACTORY_PLAN_WEEKLY_LIMIT` | plan credits per week the weekly estimate is compared with | the comparison line is skipped |
 
 ## Board watchdog, PR hygiene, evening metrics
 
