@@ -1,6 +1,6 @@
 # Installing the pack
 
-This document describes how to add the pack to an existing Hermes Agent v0.23.1 installation. The pack does not modify Hermes itself: it adds skills, role personas and plugins, and gives you a config overlay to merge. Read [separation-and-adoption.md](separation-and-adoption.md) first if you already run a customised installation.
+This document describes how to add the pack to an existing Hermes Agent v0.23.1 installation. The pack does not modify Hermes itself: it adds skills, role personas and plugins, and gives you a config overlay to merge. Read [separation-and-adoption.md](separation-and-adoption.md) first if you already run a customised installation. For the full journey from an inventory of your project to verified cron jobs, read [adapting-to-your-project.md](adapting-to-your-project.md); the agents follow the same steps in the `factory-adoption` skill.
 
 ## Prerequisites
 

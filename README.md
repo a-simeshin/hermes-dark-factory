@@ -28,6 +28,7 @@ The pack contains only what sits on top of Hermes. Hermes itself is installed an
 7. [docs/teaching-hermes.md](docs/teaching-hermes.md): correcting the agents through their own channel.
 8. [docs/separation-and-adoption.md](docs/separation-and-adoption.md): generic versus project-specific, and moving an existing setup onto the pack.
 9. [docs/lessons-learned.md](docs/lessons-learned.md) and [docs/install.md](docs/install.md).
+10. [docs/adapting-to-your-project.md](docs/adapting-to-your-project.md): adapting, verifying, debugging and changing the pack for your own project (the agents' procedure is the `factory-adoption` skill).
 
 ## Status
 
