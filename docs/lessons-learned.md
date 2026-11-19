@@ -119,3 +119,8 @@ This document collects the lessons from running the factory that were expensive 
 
 **Rule.** Identify which card owns a PR (or any artifact) by a structural link that the native contract already requires, such as the PR URL in the completion contract or the handoff metadata, and make that metadata mandatory at handoff. Name-based heuristics (branch patterns, keys, numbers in titles) stay only as fallbacks.
 **Why.** A live owner card had no branch on record and no PR number in its title, and its PR branch did not carry an issue number. Every name-based rule stayed silent, so the rework arm created a duplicate card in the middle of the owner's review. Name heuristics fail on the first branch that does not follow the pattern.
+
+## Release facts come from the remote
+
+**Rule.** A release fact (a tag, a version, what already shipped) is read from the remote, never from a local clone. Before release work or a changelog audit, compare the local tags with `git ls-remote --tags origin` (`tag-sync-check.sh`). In a review, "verified" counts only when the fact was checked against the source of truth.
+**Why.** A plain `git fetch` never overwrites a tag that already exists locally. The agents' clone kept a release tag that pointed at an older commit than the published one, a change already shipped was listed again in the next changelog, and the reviewer passed the release-prep PR: its "nothing already shipped" check followed the right procedure from the wrong starting point.

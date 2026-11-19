@@ -1,7 +1,7 @@
 ---
 name: adversarial-review
 description: 'Review that tries to refute the work: what blocks and what does not.'
-version: 2.1.0
+version: 2.2.0
 author: maintainer, Hermes Agent
 license: MIT
 metadata:
@@ -98,7 +98,12 @@ on it sends the executor around a loop it cannot exit.
 - A `## Calibration` block at the end of the body is mandatory: the review
   layer does not count a verdict without it. One line per applicable class of
   misses; "N/A" only with a reason. A class line is the record of a check you
-  actually did, not a formula.
+  actually did, not a formula, and "verified" must rest on a fact checked
+  against the source of truth, not a local proxy: the right procedure run
+  from the wrong starting point verifies nothing. Release facts (a tag, a
+  version, what already shipped) come from the remote, not from a local tag
+  (pr-deliverable, "Release work"): a stale local tag once let a release-prep
+  PR pass with "nothing already shipped" checked against the wrong commit.
 - A stacked PR is not approved while any lower PR in the stack is unreviewed
   or unmerged: the verdict waits. Merging the upper PR would carry the lower
   PR's unreviewed commits into the base. `mergeable_state=blocked` with
@@ -315,6 +320,8 @@ A deferred finding: an issue plus a card (`--triage`) plus the line
 
 - issue body starts with `## Before / After`, images compared with the diff;
 - third-party claims opened at the primary source, link in the verdict;
+- release facts (tag, version, what already shipped) confirmed against the
+  remote (`git ls-remote`, `tag-sync-check.sh`), not the local clone;
 - feature/ux issue: the owner's "prototype accepted" comment exists;
 - every claim has proof; the report says "CI: N of M green";
 - every blocker treated as closed (this round and earlier) has a mutation of

@@ -224,6 +224,14 @@ This catalog lists every mechanism the factory adds on top of Hermes Agent v0.23
 - **Where (original setup):** `rebase-registry-pr.sh`, `resolve-registry.py`.
 - **Coupling:** reference only. Better fix: split the file so it cannot conflict.
 
+### tag-sync-check
+
+- **What:** compares every local tag of a repository with `git ls-remote --tags origin` (annotated tags by their target commit) and fails on a stale, missing or deleted tag; `--force` force-fetches all tags.
+- **Native feature checked:** `git fetch` fetches new tags but never overwrites an existing one without `--force`; Hermes has no release check.
+- **Why not enough:** the agents' clone kept a stale release tag, and a reviewer passed a release-prep PR on "nothing already shipped" checked against the wrong commit.
+- **Where (original setup):** `tag-sync-check.sh`, the "Release work" section of `pr-deliverable`, the calibration rule of `adversarial-review`.
+- **Coupling:** portable.
+
 ### reviewer-misses
 
 - **What:** records each reviewer PASS that the owner overturned on the same or next sha; the review skill reads the journal.

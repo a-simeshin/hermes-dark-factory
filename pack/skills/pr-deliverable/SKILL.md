@@ -1,7 +1,7 @@
 ---
 name: pr-deliverable
 description: What a PR must contain for the work to count as delivered.
-version: 2.2.0
+version: 2.3.0
 author: maintainer, Hermes Agent
 license: MIT
 metadata:
@@ -223,6 +223,17 @@ new head is pushed. Then check suites for the SHA (0 means no event), then
 does not help; only a local merge of the base or a rebase does. A rerun only
 restarts an existing run; a 403 on rerun means degraded permissions: tell the
 owner.
+
+## Release work: facts come from the remote
+
+Release prep, a changelog audit or any check of "what already shipped"
+starts with `~/.hermes/scripts/tag-sync-check.sh <repo>`. A plain fetch never
+overwrites a tag that already exists locally, so a clone can hold a release
+tag older than the published one, and every fact read from it is wrong. The
+script compares every local tag with `git ls-remote --tags origin` and exits
+1 on STALE, MISSING or GONE; `--force` force-fetches the tags (worktrees of
+the same repository share them). A release point is confirmed by
+`git ls-remote`, not by `git rev-parse` on the clone.
 
 ## Checklist before delivery
 
