@@ -1204,6 +1204,12 @@ ISSUE_BRANCH_RE = re.compile(r"^%s(\d+)-(.+)$" % re.escape(ISSUE_BRANCH_PREFIX))
 
 CODER_ISSUE_KEY_RE = re.compile(r"^coder-(\d+)-(.+)$")
 
+# Full PR URL from the native acceptance contract (the acceptance store writes
+# it into tasks.completion_contract; the handoff of our layer puts the same
+# URL into task_runs.metadata under the keys pr / published_pr).
+PR_URL_RE = re.compile(
+    r"https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/pull/([1-9][0-9]*)")
+
 TRIAGE_KEY_RE = re.compile(r"^architect-pr(\d+)-triage-48h$")
 
 def line_heads():
@@ -1247,10 +1253,67 @@ def rebase_priority(verdict_ok, is_root):
         return 97
     return 96
 
+def _structural_pr_map(con):
+    """{task_id: {PR numbers}} from the native Hermes structure, no names.
+
+    Two sources:
+    1. tasks.completion_contract: the native acceptance store, closing a card
+       with metadata.published_pr, rewrites the contract into the full PR URL;
+    2. task_runs.metadata of kanban_request_review / kanban_complete runs:
+       the handoff carries {"pr": <URL>, "pr_number": N, "head_sha": ...};
+       only the keys pr / published_pr / pr_number count, prose in other
+       keys is not a carrier.
+
+    Origin: a live owner card had no branch_name and no PR number in its
+    title, and the PR branch carried no issue number. Every name-based rank
+    stayed silent and the rework arm created a duplicate in the middle of the
+    owner's review. The structural carrier sees the owner by its own handoff.
+    """
+    out = {}
+    # Old boards and test databases may lack the column or the table: the
+    # carrier is simply not counted, the name-based ranks remain.
+    try:
+        for tid, contract in con.execute(
+                "select id, coalesce(completion_contract,'') from tasks"):
+            m = PR_URL_RE.fullmatch(contract.strip())
+            if m:
+                out.setdefault(tid, set()).add(int(m.group(1)))
+    except sqlite3.OperationalError:
+        pass
+    try:
+        for tid, meta in con.execute(
+                "select task_id, metadata from task_runs"
+                " where metadata is not null and metadata != ''"):
+            try:
+                parsed = json.loads(meta)
+            except Exception:
+                continue
+            if not isinstance(parsed, dict):
+                continue
+            nums = set()
+            for field in ("pr", "published_pr"):
+                value = parsed.get(field)
+                if isinstance(value, int) and value > 0:
+                    nums.add(value)
+                    continue
+                m = PR_URL_RE.fullmatch(str(value or "").strip())
+                if m:
+                    nums.add(int(m.group(1)))
+            n = parsed.get("pr_number")
+            if isinstance(n, int) and n > 0:
+                nums.add(n)
+            if nums:
+                out.setdefault(tid, set()).update(nums)
+    except sqlite3.OperationalError:
+        pass
+    return out
+
 def live_cards_by_pr(head_of):
     """{PR: [(id, title, rank, key, assignee)]} of live cards by the owner's
-    rule "one card = one PR" from factory-metrics: carriers are branch (0) >
-    key (1) > title (2) > decomposition owner (3), the body does not count.
+    rule "one card = one PR" from factory-metrics: carriers are the structural
+    link (-1: completion_contract URL and task_runs.metadata of the handoff
+    run) > branch (0) > key (1) > title (2) > decomposition owner (3), the
+    body does not count.
     Live = not done/archived. Assignee is needed by the rebase addressee
     filter: a coder card of kind rework/rebase absorbs, or the owner of the
     branch by the key coder-<issue>-<slug>.
@@ -1262,6 +1325,9 @@ def live_cards_by_pr(head_of):
     title ("issue #120 C4") is linked to a PR by the branch
     <prefix><issue>-<tail> and the key coder-<issue>-<slug>; when ambiguous
     (several open PRs of the same issue fit one slug) no carrier is counted.
+    Rank -1: the structural link of the card to the PR from native Hermes
+    data, no guessing by names; ranks 0-3 stay as fallbacks for cards whose
+    handoff has not written metadata yet.
     """
     if not os.path.exists(BOARD_DB):
         return {}
@@ -1270,6 +1336,7 @@ def live_cards_by_pr(head_of):
         "select id, coalesce(title,''), coalesce(idempotency_key,''),"
         " coalesce(branch_name,''), coalesce(assignee,'') from tasks"
         " where status not in ('done','archived')"))
+    struct_pr = _structural_pr_map(con)
     con.close()
     branch_to = {branch: n for n, branch in head_of.items() if branch}
     numbers = set(head_of)
@@ -1281,11 +1348,15 @@ def live_cards_by_pr(head_of):
             issue_pr.setdefault((int(m.group(1)), m.group(2)), []).append(n)
     out = {}
     for tid, title, key, branch, assignee in rows:
-        # carriers in order of strength: branch (0), key (1), title (2),
+        # carriers in order of strength: structural link (-1), branch (0),
+        # key (1), title (2),
         # decomposition owner (3); the body does not count. The subject of a card at equal rank is the
         # FIRST number in the title ("Rebase #224 onto #223" is the card of
         # #224, not of #223).
         cand = []
+        for num in sorted(struct_pr.get(tid, ())):
+            if num in numbers:
+                cand.append((num, -1))
         if branch and branch in branch_to:
             cand.append((branch_to[branch], 0))
         m = factory_metrics.KEY_PR_RE.match(key)

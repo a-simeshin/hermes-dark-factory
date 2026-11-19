@@ -114,3 +114,8 @@ This document collects the lessons from running the factory that were expensive 
 
 **Rule.** Place every mandatory step at a point where the actor who owns it is guaranteed a turn, and have the next actor check it there. A step in a gap that a native mechanism closes in one transition never runs.
 **Why.** The owner-facing summary of a PR was required "after approval, before close", but the native review lane closes the card with the reviewer's approval in one transition: the implementer never got that turn, and PRs reached the owner without the summary. The step now belongs to the handoff before the review request, the reviewer checks it, and the watchdog's safety net files a task card instead of only reporting.
+
+## Ownership is a structural link, not a naming convention
+
+**Rule.** Identify which card owns a PR (or any artifact) by a structural link that the native contract already requires, such as the PR URL in the completion contract or the handoff metadata, and make that metadata mandatory at handoff. Name-based heuristics (branch patterns, keys, numbers in titles) stay only as fallbacks.
+**Why.** A live owner card had no branch on record and no PR number in its title, and its PR branch did not carry an issue number. Every name-based rule stayed silent, so the rework arm created a duplicate card in the middle of the owner's review. Name heuristics fail on the first branch that does not follow the pattern.

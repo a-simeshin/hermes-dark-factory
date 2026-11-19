@@ -2932,7 +2932,7 @@ def milestone_pr_orphans(states, live, admit, pilot_numbers=(),
     owner review. Such PRs stood green waiting for the owner while the board
     did not show them at all. The head must be at least REVIEW_ARM_MIN_AGE_S
     old: a freshly opened PR may not have its card yet.
-    A PR with a live owner card (owner_by_pr, live_cards_by_pr ranks 0-3)
+    A PR with a live owner card (owner_by_pr, live_cards_by_pr ranks -1 to 3)
     is not an orphan: a decomposition card without the PR number in its
     title is assigned work.
     """
@@ -3003,8 +3003,8 @@ def _rework_owner_map(db, head_of, live):
     decomposition owner card (rank 3, key coder-<issue>-<slug>) and created
     a second card on a live PR while the owner was already pushing the fix.
     Owners are found by pr-hygiene.live_cards_by_pr (the same function the
-    rebase generator uses): branch 0 > key 1 > title 2 > decomposition
-    owner 3. Service waits and context quotes do not count as owners. A
+    rebase generator uses): structural link -1 > branch 0 > key 1 >
+    title 2 > decomposition owner 3. Service waits and context quotes do not count as owners. A
     failing or missing sibling = no data = the arm behaves as before.
     """
     mod = _sibling_pr_hygiene()
@@ -4835,7 +4835,7 @@ def review_layer_check(slug):
         # the slots were taken by work of the next milestone.
         if not cr_rework_gaps({number: st}, live):
             continue
-        # A live card that owns the PR (ranks 0-3) retires the arm: the
+        # A live card that owns the PR (ranks -1 to 3) retires the arm: the
         # owner does the rework, no second card is created ("one PR = one
         # card"). Handoff by a comment, once per head (marker).
         handoff = _rework_owner_handoff(owner_by_pr, number, head, info)

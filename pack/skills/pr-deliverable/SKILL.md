@@ -102,6 +102,25 @@ carried the work, must:
 
 Without the response the reviewer gets a bare new head and reviews blind.
 
+## Handoff metadata: the structural link of a card to its PR
+
+`kanban_request_review` and `kanban_complete` of a delivering card must carry
+metadata with the keys `pr` (the full PR URL), `pr_number` and `head_sha`
+(the delivered head); other keys (ci, base, diff_files) stay as before:
+
+    metadata: {"pr": "https://github.com/<owner>/<repo>/pull/<N>",
+               "pr_number": <N>, "head_sha": "<full sha of the head>"}
+
+The native acceptance store, closing a card with `published_pr`, rewrites
+the card's completion contract into the full PR URL. The watchdog finds the
+live owner of a PR by this pair (task_runs.metadata of the handoff run and
+the completion contract), not by guessing from branch names and titles.
+Without the metadata the owner is invisible whenever the branch and the
+title do not follow the naming pattern, and the rework arm creates a
+duplicate card in the middle of the owner's review. The duty applies to
+every card that delivered work into a PR, including decomposition children
+and rework cards.
+
 ## Only the merge is left to the owner
 
 Update-branch or rebase (422 means a local merge), waiting for required
@@ -224,6 +243,8 @@ owner.
   command; no board card ids in place of issues; every follow-up promise
   carries a number;
 - `metadata.published_pr` is the full PR URL;
+- `kanban_request_review` and `kanban_complete` carry
+  `{"pr": <full PR URL>, "pr_number": N, "head_sha": <sha>}`;
 - no drive-by edits;
 - self-check right after `gh pr create` (base, file count:
   `gh pr diff N --name-only | wc -l`).
