@@ -2,7 +2,7 @@ name: kanban-artifact-guard
 version: 1.0.0
 description: Catches cards closed while their work is still uncommitted in the repository
 author: maintainer
-hooks:
+provides_hooks:
   - kanban_task_completed
   - kanban_task_blocked
   - kanban_task_claimed

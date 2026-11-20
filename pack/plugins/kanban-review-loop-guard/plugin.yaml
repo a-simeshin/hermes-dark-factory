@@ -2,5 +2,5 @@ name: kanban-review-loop-guard
 version: 1.0.0
 description: Stops an endless return-rework-review loop by sending the card to a human
 author: maintainer
-hooks:
+provides_hooks:
   - kanban_task_claimed

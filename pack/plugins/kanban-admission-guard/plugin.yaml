@@ -2,5 +2,5 @@ name: kanban-admission-guard
 version: 1.0.0
 description: Claim-time guard of the admission gate, an unapproved subtree is not promoted into work
 author: maintainer
-hooks:
+provides_hooks:
   - kanban_task_claimed
