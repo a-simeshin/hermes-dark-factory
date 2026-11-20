@@ -183,6 +183,15 @@ There are no separate reviewer, rework, rebase or summary cards for a PR.
   from the summary of the finishing run) and files a task card for the
   implementer of the closed card (key `wcfy-hold-<slug>-<tid>-<PR>`, addressee
   from the latest review_requested, native-or-live receipt);
+- a PR is handed to review ONLY through the native `kanban_request_review`
+  with an explicit `reviewer`. `kanban_complete` with published_pr and no
+  verdict on that head or live review card is forbidden: the review lane does
+  not start on a done card. Never write "the watchdog will raise the review"
+  in a summary: the watchdog does not arm reviewer cards by head, and a
+  promise about a mechanism whose code was not checked in this session is a
+  guess. Safety net: the watchdog's complete-review gate files a reviewer
+  card on a head without a verdict (key `reviewer-pr<N>-<head7>`, marker
+  `REVIEW_HOLD_MARKER`), but that is incident handling, not a handoff path;
 - a mandatory step goes where the actor surely has a turn. A step placed in a
   gap that a native mechanism closes in one transition never runs: the
   native review lane closes the card with the approval, so nothing "between

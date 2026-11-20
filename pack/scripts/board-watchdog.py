@@ -1019,6 +1019,17 @@ def check(slug, state=None):
             "    owner-merge close gate: the check failed (%s: %s). Retry "
             "in an hour." % (type(exc).__name__, exc))))
 
+    # 6c-3-quater. Complete-review gate: a closed card that names an open
+    #              PR with no verdict on its exact head and no live review
+    #              card gets a reviewer card (kanban_complete without a
+    #              review is forbidden; the handoff is kanban_request_review).
+    try:
+        found.extend(complete_review_gate(slug))
+    except Exception as exc:
+        found.append(("%s:closed-review:err" % slug, 1, (
+            "    Complete-review gate: the check failed (%s: %s). Retry "
+            "in an hour." % (type(exc).__name__, exc))))
+
     # 6c-3-bis. Rework priority of an open PR: a ready/todo coder card that
     #           closes an already open PR (rework by verdict, a reviewer's
     #           fix) is raised to p90 inside the active band: before new
@@ -6479,6 +6490,159 @@ def owner_merge_hold_gate(slug, now=None, apply=True):
                             number)],
                         timeout=90)
                 break
+    finally:
+        con.close()
+    return findings
+
+
+# Marker of the comment the complete-review gate leaves on a closed card.
+# Comment dedup matches its first 40 characters: keep the prefix stable.
+REVIEW_HOLD_MARKER = ("Watchdog: complete-review gate (PR closed"
+                      " without review).")
+
+
+def complete_review_gate(slug, now=None, apply=True):
+    """Safety net for a PR card closed with kanban_complete instead of a
+    review request.
+
+    The handoff of a PR to review goes only through the native
+    kanban_request_review. When a card is closed with kanban_complete and
+    metadata.published_pr instead, the native review lane never starts (it
+    does not start on a done card, reopen-review lifts only status review,
+    respawn does not lift a closed card), and the watchdog no longer arms
+    reviewer cards by head. The PR then sits open with green CI and no
+    review at all. Why: a coder closed such a card with "the watchdog will
+    raise the review card" in its summary, a promise from before the review
+    auto-arm was removed, and the PR waited most of a day without review.
+
+    Mechanism: closed cards of the 14-day window whose result, title or
+    finishing run summary names a PR. There is deliberately no "result IS
+    NOT NULL" filter: the PR can be named only in the summary. For each
+    OPEN PR with no reviewer verdict on its exact head (head_kind is None:
+    an accept means a review exists, a reject is owned by the rework arm)
+    and no live card keyed reviewer-pr<N>-<head7> (native-or-live receipt),
+    the gate files a finding, one reviewer card (priority 100, assignee
+    reviewer) and one marker comment on the closed card. A head younger
+    than 30 minutes (CI tail) or older than 14 days (separate hygiene) is
+    skipped.
+    """
+    repo = board_repo(slug)
+    if not repo:
+        return []
+    now = now if now is not None else time.time()
+    db = os.path.join(BOARDS, slug, "kanban.db")
+    if not os.path.exists(db):
+        return []
+    con = sqlite3.connect("file:%s?mode=ro" % db, uri=True, timeout=10)
+    findings = []
+    try:
+        rows = con.execute(
+            "SELECT id, title, result, status, completed_at FROM tasks "
+            "WHERE status IN ('done', 'archived') "
+            "AND completed_at IS NOT NULL AND completed_at > ? "
+            "ORDER BY completed_at DESC",
+            (now - OWNER_MERGE_HOLD_WINDOW_S,)).fetchall()
+        memo = {}
+        review_memo = {}
+        armed = set()
+        for tid, title, result, status, completed_at in rows:
+            run_summary = (con.execute(
+                "SELECT summary FROM task_runs WHERE task_id = ? AND "
+                "summary IS NOT NULL ORDER BY id DESC LIMIT 1",
+                (tid,)).fetchone() or ("",))[0] or ""
+            for number in _closed_card_pr_numbers(result, title,
+                                                  run_summary):
+                merged = _pr_merged(repo, number, memo)
+                if merged is None or merged:
+                    continue
+                if number not in review_memo:
+                    try:
+                        review_memo[number] = _pr_review_state(repo, number)
+                    except Exception:
+                        review_memo[number] = None
+                st = review_memo[number]
+                if st is None or st.get("pr_state") != "OPEN":
+                    continue
+                # A verdict on the exact head: accept = the review exists,
+                # reject = the rework arm owns it.
+                if st.get("head_kind") is not None:
+                    continue
+                age = st.get("age")
+                if age is None or age < REVIEW_ARM_MIN_AGE_S \
+                        or age > REVIEW_ARM_MAX_AGE_S:
+                    continue
+                head = st.get("head") or ""
+                if not head:
+                    continue
+                card_key = "reviewer-pr%d-%s" % (number, head[:7])
+                if card_key in armed:
+                    continue
+                covered, guard = board_native_guard.native_or_live(
+                    card_key, live_keys=_live_keys(slug),
+                    native_checked=[
+                        board_native_guard.NATIVE_RESPAWN,
+                        board_native_guard.NATIVE_REVIEW_LANE],
+                    why="card %s was closed with kanban_complete naming PR "
+                        "#%d, head %s has no verdict: the native review "
+                        "lane (kanban_request_review) does not start on a "
+                        "done card, reopen-review lifts only status review, "
+                        "respawn does not lift a closed card; the head is "
+                        "reviewed by a separate reviewer card (key %s)"
+                        % (tid, number, head[:7], card_key))
+                if covered:
+                    armed.add(card_key)
+                    continue
+                findings.append((
+                    "%s:closed-review:%s:%d" % (slug, tid, number), 1, (
+                    "    Complete-review gate: card %s (%s) was closed with "
+                    "PR #%d (completed %s), the PR is open, head %s has no "
+                    "verdict and no live review card. A PR is handed to "
+                    "review through kanban_request_review; kanban_complete "
+                    "without a review on the head is forbidden. Release "
+                    "condition: a verdict on head %s, or PR #%d merged or "
+                    "closed."
+                    % (tid, (title or "")[:60], number,
+                       time.strftime("%Y-%m-%d %H:%MZ",
+                                     time.gmtime(completed_at)),
+                       head[:7], head[:7], number))))
+                if not apply:
+                    armed.add(card_key)
+                    continue
+                card_id = _kanban_create(
+                    slug,
+                    "[reviewer] PR #%d (head %s): review of a head without "
+                    "a verdict (complete-review gate)" % (number, head[:7]),
+                    "Card %s was closed with kanban_complete naming PR #%d, "
+                    "and head %s has no verdict: the review fell out of the "
+                    "handoff. Do an adversarial review of PR #%d on the "
+                    "exact head %s (pr-deliverable, adversarial-review): "
+                    "acceptance criteria against the PR body, the diff, CI, "
+                    "mutants where they fit. Post the verdict only in the "
+                    "PR thread under the heading '## Review verdict' with "
+                    "the full head sha. Check that a WCFY stands on head "
+                    "%s; do not write your own. Head: gh pr view %d --json "
+                    "headRefOid."
+                    % (tid, number, head[:7], number, head, head[:7],
+                       number),
+                    "reviewer", 100, card_key,
+                    skills=("serena-lsp", "adversarial-review"),
+                    guard=guard)
+                seen = con.execute(
+                    "SELECT COUNT(*) FROM task_comments WHERE task_id = ? "
+                    "AND body LIKE ?",
+                    (tid, REVIEW_HOLD_MARKER[:40] + "%")).fetchone()[0]
+                if not seen:
+                    run([HERMES, "kanban", "--board", slug, "comment", tid,
+                         "%s the card was closed with PR #%d, head %s has "
+                         "no verdict. Review filed as card %s (key %s). A "
+                         "PR is handed to review through "
+                         "kanban_request_review (kanban-discipline). "
+                         "Release condition: a verdict on head %s, or PR "
+                         "#%d merged or closed."
+                         % (REVIEW_HOLD_MARKER, number, head[:7],
+                            card_id or "(create failed, file it by hand)",
+                            card_key, head[:7], number)], timeout=90)
+                armed.add(card_key)
     finally:
         con.close()
     return findings

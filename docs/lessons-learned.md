@@ -134,3 +134,8 @@ This document collects the lessons from running the factory that were expensive 
 
 **Rule.** A watcher that acts on a change and then records it as seen must not record it while the data it acts on is still being computed; it keeps the change pending and handles it on the next run. A recurrent check of the end state backs it up, so a consumed event cannot leave an artifact without an owner. Green checks prove nothing about a head that is older than its base: before a handover, take a live mergeability snapshot.
 **Why.** A rebase card delivered a PR with green CI on its head after neighbouring merges had turned it conflicting. The merge watcher ran a few minutes after those merges, while GitHub still answered UNKNOWN for mergeable, recorded an empty conflict list and consumed the base head change. The base did not move again, so the watcher stayed silent and the conflicting PR had no owner.
+
+## A promise about a mechanism is checked against its current code
+
+**Rule.** Hand a PR to review only through the native review request; closing the card with the PR attached and no verdict on the head is not a handoff. A summary never promises what another mechanism will do ("the watchdog will raise the review") unless that mechanism's current code was checked in the same session.
+**Why.** A coder closed a PR card with `kanban_complete` and wrote that the watchdog would file the reviewer card, citing an earlier case. That case predated the change that removed the watchdog's review auto-arm, the native review lane does not start on a done card, and the PR sat open with green CI and no review for most of a day. The watchdog now has a safety net that files the review, but the handoff rule is what prevents the gap.
