@@ -239,7 +239,13 @@ tester; the plan is wrong: architect.
 
 A deferred finding: an issue plus a card (`--triage`) plus the line
 `DEFERRED: t_xxxxxxxx` or `DEFERRED: none` as the last line of the summary
-(the gate parses it).
+(the gate parses it). When the finding concerns an OPEN PR (its code, texts
+or contracts), no separate coder card is filed and no separate PR is
+prescribed: the rework goes to the owner of THAT PR (request_changes, a
+commit into its branch), at most an issue for triage. A card for a finding
+on an open PR is legitimate only when the PR has no live owner and the
+rework does not fit its branch (an owner decision). See pr-deliverable, "A
+review finding on an open PR is rework of that PR".
 
 ## CI and repeat verdicts
 
@@ -351,7 +357,8 @@ A deferred finding: an issue plus a card (`--triage`) plus the line
 - PASS after CHANGES REQUESTED on a younger commit; verdict on the branch
   head; no QA PASS over an open REQUEST_CHANGES;
 - `## Calibration` block present, one line per applicable class;
-- non-blocking findings: issue plus card plus the DEFERRED line.
+- non-blocking findings: issue plus card plus the DEFERRED line; on an
+  open PR, the owner of that PR instead of a new card.
 
 ## References (read on demand)
 

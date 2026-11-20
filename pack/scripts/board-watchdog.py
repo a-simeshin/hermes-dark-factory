@@ -2156,8 +2156,8 @@ def _pr_review_state(repo, number):
     verdicts, the requirement does not apply to them.
     """
     out = run(["gh", "pr", "view", str(number), "--repo", repo, "--json",
-               "state,headRefOid,baseRefName,author,commits,mergeable,"
-               "reviews,comments"],
+               "state,headRefOid,headRefName,baseRefName,author,commits,"
+               "mergeable,reviews,comments,isDraft"],
               timeout=90)
     try:
         data = json.loads(out)
@@ -2221,6 +2221,12 @@ def _pr_review_state(repo, number):
     verdict_head = _latest_verdict(data, head, owner_any_head=False)
     return {"head": head, "age": age, "verdict": verdict_head is not None,
             "info": info,
+            # Head branch name, for the structural owner lookup
+            # (pr-hygiene.live_cards_by_pr, rank 0 by branch_name).
+            "head_ref": data.get("headRefName") or "",
+            # Draft flag: the complete-review gate does not arm a draft PR
+            # (the same policy as the draft retirement of the review layer).
+            "is_draft": bool(data.get("isDraft")),
             # Class of the strict verdict on the exact head (None = no
             # verdict on the head) and the sign "the owner ever gave a
             # formal review to this PR" (any head). The first feeds the CR
@@ -6501,6 +6507,29 @@ REVIEW_HOLD_MARKER = ("Watchdog: complete-review gate (PR closed"
                       " without review).")
 
 
+def _gate_live_pr_owners(db, number, head_ref):
+    """Ids of live cards that own PR `number`, for complete_review_gate.
+
+    The same lookup as the CR rework arm (_rework_owner_map, that is
+    pr-hygiene.live_cards_by_pr): the structural link of the handoff run
+    first, branch, key, title and decomposition ranks as fallbacks for an
+    owner whose handoff has not written metadata yet. Any column except
+    done/archived counts, scheduled and review included. Service waits and
+    context quotes are not owners. A failing sibling = no owner = the gate
+    behaves as before.
+    """
+    try:
+        con = sqlite3.connect("file:%s?mode=ro" % db, uri=True, timeout=10)
+        live = con.execute(
+            "SELECT id, title, coalesce(body,'') FROM tasks "
+            "WHERE status NOT IN ('done','archived')").fetchall()
+        con.close()
+    except sqlite3.Error:
+        return []
+    owners = _rework_owner_map(db, {number: head_ref or ""}, live)
+    return [c[0] for c in owners.get(number) or []]
+
+
 def complete_review_gate(slug, now=None, apply=True):
     """Safety net for a PR card closed with kanban_complete instead of a
     review request.
@@ -6525,6 +6554,19 @@ def complete_review_gate(slug, now=None, apply=True):
     reviewer) and one marker comment on the closed card. A head younger
     than 30 minutes (CI tail) or older than 14 days (separate hygiene) is
     skipped.
+
+    Three limits keep the gate from filing a second review of a head that
+    already has one coming. (1) Only a closed card that handed the PR over
+    is a trigger: a closed reviewer card (assignee reviewer or key
+    reviewer-pr*) means "verdict published", even when that verdict sits on
+    an older head. (2) A live structural owner of the PR in any column
+    except done/archived (scheduled and review included) silences the gate:
+    the review runs in that owner's native review lane. The gate asks the
+    owner lookup, not only its own key reviewer-pr<N>-<head7>. (3) A draft
+    PR is not armed: its handoff is not finished. Why: a closed reviewer
+    card with a verdict on an old head armed a second max-effort review
+    while the coder card that owned the PR was scheduled and about to hand
+    the new head to review itself.
     """
     repo = board_repo(slug)
     if not repo:
@@ -6537,7 +6579,8 @@ def complete_review_gate(slug, now=None, apply=True):
     findings = []
     try:
         rows = con.execute(
-            "SELECT id, title, result, status, completed_at FROM tasks "
+            "SELECT id, title, result, status, completed_at, assignee, "
+            "idempotency_key FROM tasks "
             "WHERE status IN ('done', 'archived') "
             "AND completed_at IS NOT NULL AND completed_at > ? "
             "ORDER BY completed_at DESC",
@@ -6545,7 +6588,14 @@ def complete_review_gate(slug, now=None, apply=True):
         memo = {}
         review_memo = {}
         armed = set()
-        for tid, title, result, status, completed_at in rows:
+        owner_memo = {}
+        for tid, title, result, status, completed_at, t_assignee, t_key \
+                in rows:
+            # A closed reviewer card did not hand the PR over: its closing
+            # means "verdict published", it is never a trigger.
+            if (t_assignee or "") == "reviewer" \
+                    or (t_key or "").lower().startswith("reviewer-pr"):
+                continue
             run_summary = (con.execute(
                 "SELECT summary FROM task_runs WHERE task_id = ? AND "
                 "summary IS NOT NULL ORDER BY id DESC LIMIT 1",
@@ -6576,6 +6626,16 @@ def complete_review_gate(slug, now=None, apply=True):
                     continue
                 card_key = "reviewer-pr%d-%s" % (number, head[:7])
                 if card_key in armed:
+                    continue
+                # A draft PR has not finished its handoff: no review yet.
+                if st.get("is_draft"):
+                    continue
+                # A live structural owner runs the review in its own
+                # native review lane: arming here is a second review.
+                if number not in owner_memo:
+                    owner_memo[number] = _gate_live_pr_owners(
+                        db, number, st.get("head_ref") or "")
+                if owner_memo[number]:
                     continue
                 covered, guard = board_native_guard.native_or_live(
                     card_key, live_keys=_live_keys(slug),

@@ -131,6 +131,33 @@ only for the merge or for decisions with no technical path (milestone,
 prototype acceptance, repository permissions). A card closed with "remaining:
 owner merge" keeps that signal until the PR is merged.
 
+## A review finding on an open PR is rework of that PR
+
+A review finding on an OPEN PR (blocking or deferred) is rework of THAT PR,
+carried by its owner: the live structural owner card (handoff metadata or
+completion contract, with branch, key and title as fallbacks) gets
+request_changes or commits into the same branch. Both sides of the handoff
+follow this:
+
+- the reviewer does NOT file a coder card with its own delivery path for a
+  finding on an open PR and does not prescribe a separate PR: at most an
+  issue for triage that names the PR owner, the rework returns to that
+  owner;
+- the coder does NOT open a new PR for a finding on an open PR: the commit
+  goes into the branch of THAT PR, also when the PR is parked (a parked
+  verdict does not freeze the head: its release condition, a rebase, a fresh
+  WCFY and a repeat review, moves the head anyway);
+- a separate card with its own delivery path is legitimate only when the PR
+  has no live owner and the rework does not fit its branch (an owner
+  decision);
+- a stacked PR is legitimate ONLY for a layer (integration tests, e2e, UI
+  on top of the open PR), never to fix a review finding.
+
+Why: a finding on an open PR went into a separate card and a second PR of
+the same line instead of the PR's own branch. The second PR was closed and
+its commit moved into the original branch; no work was lost, but a whole
+handoff and review cycle was spent on a PR that should not have existed.
+
 ## Delivery texts equal the facts
 
 Before `kanban_request_review` and after ANY rework, reread ALL delivery

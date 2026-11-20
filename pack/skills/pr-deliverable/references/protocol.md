@@ -181,6 +181,27 @@ case "update the branch, wait for checks, merge" were all called owner-only
 while the app had been doing update-branch on the same board for weeks, and
 the PR waited for the owner on agent work.
 
+### A review finding on an open PR goes to that PR's owner
+
+A finding on an open PR, blocking or deferred, is rework of that PR. Its
+live structural owner card (found by the handoff metadata and the completion
+contract first, by branch, key and title as fallbacks) receives
+request_changes or commits into the same branch. The reviewer files at most
+an issue for triage that names the owner; it never files a coder card with
+its own delivery path and never prescribes a separate PR. The coder never
+opens a new PR for such a finding, also when the PR is parked: a parked
+verdict does not freeze the head, because its release condition (a rebase, a
+fresh WCFY, a repeat review) moves the head anyway. A separate card with its
+own delivery path is legitimate only when the PR has no live owner and the
+rework does not fit its branch, and that is an owner decision. A stacked PR
+is for a layer on top of the open PR (integration tests, e2e, UI), never for
+a review finding.
+
+In one case a finding on an open PR became a separate card and a second PR
+of the same line. The second PR was closed and its commit moved into the
+original branch: nothing was lost, but a full handoff and review cycle was
+spent on a PR that should not have existed.
+
 ## Every claim in every text is checked by a command on the current head
 
 Before `kanban_request_review` and after ANY rework, reread ALL delivery

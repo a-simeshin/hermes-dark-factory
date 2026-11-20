@@ -14,12 +14,24 @@ Checks:
      and the full head) and one marker comment with the release condition;
   R2 an accept verdict on the head: silent;
   R2b a reject verdict on the head: silent (the rework arm owns it);
-  R3 a live card keyed reviewer-pr<N>-<head7>: no finding, no create;
+  R3 a live card keyed reviewer-pr<N>-<head7>: no finding, no create
+     (the owner lookup is stubbed empty here, so the native guard receipt
+     alone must hold);
   R4 a head younger than 30 minutes (CI tail): silent;
   R5 dry-run: a finding, no create, no comment;
   R6 the marker comment already stands: no new comment, the create holds;
   R7 the gate is registered in the main run;
-  R8 result is NULL and the PR is named only in the run summary: armed.
+  R8 result is NULL and the PR is named only in the run summary: armed;
+  G1 a live owner card in scheduled, linked to the PR only by its title
+     (its handoff has not written metadata yet): silent;
+  G2 a live owner card in review, linked only by the structural metadata
+     of its handoff run: silent;
+  G3 the only closed card is a reviewer card (verdict on an older head):
+     silent, a reviewer card never handed the PR over;
+  G3b the same closed reviewer card plus a live owner: silent;
+  G4 a closed coder card and no live owner still arms (this is R1);
+  G5 a live service wait card naming the PR is not an owner: armed;
+  G6 a draft PR: silent.
 The checks run on the real script (all must pass) and then on mutants of
 the gate lines (each must be killed by at least one check).
 
@@ -101,6 +113,19 @@ MUTANTS = {
         "                card_id = None and _kanban_create(\n"
         "                    slug,\n"
         "                    \"[reviewer] PR #%d (head %s): review"),
+    "owner-ignored": (
+        "                if owner_memo[number]:\n"
+        "                    continue",
+        "                if False and owner_memo[number]:\n"
+        "                    continue"),
+    "reviewer-trigger": (
+        "            if (t_assignee or \"\") == \"reviewer\" \\\n"
+        "                    or (t_key or \"\").lower().startswith("
+        "\"reviewer-pr\"):",
+        "            if False:"),
+    "draft-armed": (
+        "                if st.get(\"is_draft\"):",
+        "                if False:"),
     "not-registered": (
         "        found.extend(complete_review_gate(slug))",
         "        pass"),
@@ -161,10 +186,12 @@ def make_board(mod, tasks, comments=(), runs=()):
     for tid, body in comments:
         con.execute("insert into task_comments (task_id, body, created_at)"
                     " values (?, ?, ?)", (tid, body, now))
-    for tid, summary in runs:
-        con.execute("insert into task_runs (task_id, summary, started_at,"
-                    " ended_at) values (?, ?, ?, ?)",
-                    (tid, summary, now - 7200, now - 3600))
+    for run_row in runs:
+        tid, summary = run_row[0], run_row[1]
+        meta = json.dumps(run_row[2]) if len(run_row) > 2 else None
+        con.execute("insert into task_runs (task_id, summary, metadata,"
+                    " started_at, ended_at) values (?, ?, ?, ?, ?)",
+                    (tid, summary, meta, now - 7200, now - 3600))
     con.commit()
     con.close()
     mod.BOARDS = tmp
@@ -215,14 +242,20 @@ KEY = "reviewer-pr31-abc1234"
 
 
 def gate(mod, review=None, tasks=(CARD,), comments=(), runs=(),
-         apply=True):
+         apply=True, no_owner_lookup=False):
     fake = FakeRun(STATES)
     slug = make_board(mod, tasks, comments=comments, runs=runs)
     mod.run = fake
     mod.board_repo = lambda s: "acme/widget"
     states = {31: review if review is not None else dict(OPEN_NO_VERDICT)}
     mod._pr_review_state = lambda repo, n: states[n]
-    found = mod.complete_review_gate(slug, apply=apply)
+    real_owners = mod._gate_live_pr_owners
+    if no_owner_lookup:
+        mod._gate_live_pr_owners = lambda *a: []
+    try:
+        found = mod.complete_review_gate(slug, apply=apply)
+    finally:
+        mod._gate_live_pr_owners = real_owners
     return [f for f in found if "closed-review" in f[0]], fake
 
 
@@ -271,7 +304,7 @@ def checks(mod):
     live = {"id": "t_live", "title": "[reviewer] PR #31 (head abc1234)",
             "result": "", "assignee": "reviewer", "status": "ready",
             "key": KEY}
-    found, fake = gate(mod, tasks=(CARD, live))
+    found, fake = gate(mod, tasks=(CARD, live), no_owner_lookup=True)
     check("R3 live key: no finding, no create",
           not found and not fake.of("create"), str(fake.calls))
 
@@ -302,6 +335,46 @@ def checks(mod):
           found and [arg(c, "--idempotency-key")
                      for c in fake.of("create")] == [KEY],
           str(found) + str(fake.of("create")))
+
+    def silent(found, fake):
+        return not found and not fake.of("create")
+
+    owner_sched = {"id": "t_own", "title": "[coder] PR #31 (head 0dd0dd0): "
+                   "close finding 2", "result": "", "status": "scheduled",
+                   "key": "coder-f2-m4"}
+    found, fake = gate(mod, tasks=(CARD, owner_sched))
+    check("G1 live owner in scheduled, title only: silent",
+          silent(found, fake), str(fake.calls))
+
+    owner_meta = {"id": "t_own2", "title": "stale banner rework",
+                  "result": "", "status": "review", "key": "coder-f2-m4-r2"}
+    found, fake = gate(mod, tasks=(CARD, owner_meta), runs=[(
+        "t_own2", "waiting for review",
+        {"pr": "https://github.com/acme/widget/pull/31", "pr_number": 31,
+         "head_sha": "0dd0dd0"})])
+    check("G2 structural owner by handoff metadata: silent",
+          silent(found, fake), str(fake.calls))
+
+    closed_reviewer = {"id": "t_rev", "title": "[reviewer] PR #31 (head "
+                       "0dd0dd0): review", "assignee": "reviewer",
+                       "result": "CHANGES REQUESTED on 0dd0dd0.",
+                       "key": "reviewer-pr31-0dd0dd0"}
+    found, fake = gate(mod, tasks=(closed_reviewer,))
+    check("G3 closed reviewer card is not a trigger: silent",
+          silent(found, fake), str(fake.calls))
+
+    found, fake = gate(mod, tasks=(closed_reviewer, owner_sched))
+    check("G3b closed reviewer plus live owner: silent",
+          silent(found, fake), str(fake.calls))
+
+    wait = {"id": "t_svc", "title": "[wait-merge] PR #31 waits for the "
+            "merge", "result": "", "status": "blocked", "key": "svc-31"}
+    found, fake = gate(mod, tasks=(CARD, wait))
+    check("G5 a service wait card is not an owner: armed",
+          found and len(fake.of("create")) == 1, str(fake.calls))
+
+    found, fake = gate(mod, review=dict(OPEN_NO_VERDICT, is_draft=True))
+    check("G6 draft PR: silent", silent(found, fake), str(fake.calls))
     return fails
 
 
@@ -321,7 +394,7 @@ def main():
         for f in fails:
             print("FAIL %s" % f)
         return 1
-    print("ok  real script: R1-R8 pass")
+    print("ok  real script: R1-R8, G1-G6 pass")
 
     for name, (old, new) in MUTANTS.items():
         try:
