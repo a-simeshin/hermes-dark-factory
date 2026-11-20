@@ -1,7 +1,7 @@
 ---
 name: pr-deliverable
 description: What a PR must contain for the work to count as delivered.
-version: 2.3.0
+version: 2.4.0
 author: maintainer, Hermes Agent
 license: MIT
 metadata:
@@ -239,6 +239,12 @@ the same repository share them). A release point is confirmed by
 
 ## Checklist before delivery
 
+- a one-shot `gh pr view <N> --json mergeable,mergeStateStatus` right
+  before `kanban_request_review`, `kanban_complete` with `published_pr` or
+  any handover to a reviewer: MERGEABLE is required; CONFLICTING or DIRTY
+  means do not deliver, rebase in the same card; UNKNOWN or null means wait
+  and take the snapshot again (GitHub computes mergeable lazily, for
+  minutes after a merge into the base);
 - `gh pr view <N> --json baseRefName,files` matches the card (dozens of
   unrelated files mean the wrong base);
 - the visual delta is where the project keeps it (references/visual-delta.md);
@@ -251,7 +257,10 @@ the same repository share them). A release point is confirmed by
 - tests that model a third-party library's output: a `Library contract:
   <artifact>:<version> <Class>#<method>` line in the body and a fixture from
   a real run;
-- CI green; the last verdict is a PASS younger than the last commit;
+- CI green, which alone is NOT enough: checks are bound to the head sha and
+  stay green after the base moves, so a run older than the base head counts
+  only together with the mergeable snapshot above; the last verdict is a
+  PASS younger than the last commit;
 - `Refs/Closes #N` checked by grepping the PR body, the number from a live
   command; no board card ids in place of issues; every follow-up promise
   carries a number;

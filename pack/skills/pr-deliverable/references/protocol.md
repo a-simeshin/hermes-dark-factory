@@ -394,6 +394,13 @@ Authorization) verbatim in browser storage.
 
 ## Checklist
 
+- a one-shot `gh pr view <N> --json mergeable,mergeStateStatus` right
+  before any handover (`kanban_request_review`, `kanban_complete` with
+  `published_pr`, a reviewer): MERGEABLE is required; CONFLICTING or DIRTY
+  means rebase in the same card instead of delivering; UNKNOWN or null
+  means wait and take it again. In one case a rebase card delivered a PR
+  with green CI on its head, but neighbouring merges had already turned it
+  CONFLICTING: the run was older than the base head;
 - the visual delta is where the project keeps it (references/visual-delta.md;
   for a UI-facing issue kept in the issue: the body starts with
   `## Before / After` and the PR has no Before/After section);
@@ -406,7 +413,8 @@ Authorization) verbatim in browser storage.
   fixture produced by running the real library;
 - the final screenshot of a UI E2E test is attached when one runs;
 - `gh pr view <N> --json baseRefName,files` matches the card;
-- CI on the PR is green;
+- CI on the PR is green and the mergeable snapshot above is MERGEABLE
+  (green checks on a head older than the base head are not evidence);
 - the last review verdict is a PASS younger than the last commit;
 - `Refs #N` (or `Closes #N`) in the body is checked by command:
   `gh pr view <N> --json body --jq '.body' | grep -E '^(Refs|Closes) #[0-9]+'`.

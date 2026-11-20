@@ -1548,6 +1548,26 @@ def post_merge_watch(info, ancestors, by_pr=None, dry_run=False):
         watch[base] = {"sha": sha}
         if (prev.get(base) or {}).get("sha") == sha:
             continue                     # no merges, the watcher stays quiet
+        # GitHub computes mergeable lazily: for minutes after a merge into
+        # the base it answers UNKNOWN or null. A sweep in that window saw an
+        # empty conflict list while a PR was about to turn CONFLICTING, and
+        # consuming the head change then silenced the watcher for good. While
+        # a PR of this base has an undecided mergeable, keep the previous
+        # sha: the next run sees the change again with the full list.
+        undecided = sorted(
+            n for n, p in info.items()
+            if p.get("baseRefName") == base
+            and (p.get("detail") or {}).get("mergeable") in (None, "UNKNOWN"))
+        if undecided and (prev.get(base) or {}).get("sha"):
+            watch[base] = {"sha": prev[base]["sha"], "undecided": undecided}
+            findings.append((
+                "mergeflow-merge-watch-defer:%s" % base,
+                "  HEAD CHANGE %s %s -> %s DEFERRED: mergeable is not yet"
+                " decided for PR %s, the conflict list is incomplete, the"
+                " event is kept for the next run"
+                % (base, prev[base]["sha"][:7], sha7,
+                   ", ".join("#%d" % n for n in undecided))))
+            continue
         conflicting = sorted(
             n for n, p in info.items()
             if p.get("baseRefName") == base
@@ -1930,6 +1950,73 @@ def unowned_deliver_gate(info, by_pr, dry_run=False, now=None):
             else "mergeflow-unowned-fail:%d" % number,
             "  NO OWNER #%d head %s review_state=%s: owner card %s%s"
             % (number, head7, verdict_state,
+               "created" if ok else "NOT created",
+               "" if ok else ": %s" % out)))
+    return findings
+
+def conflicting_owner_gate(info, by_pr, dry_run=False, ancestors=None):
+    """A CONFLICTING PR without a live card gets one rebase owner card.
+
+    A real case: a rebase card closed with green CI on its head while
+    merges into the base had already turned the PR CONFLICTING. Checks are
+    bound to the head sha and stay green after the base moves, so the
+    native acceptance let them through, and the merge watcher had consumed
+    the head change while mergeable was still being computed. The card was
+    done, the PR conflicted and nobody owned it.
+
+    The gate is recurrent, not event-driven (a safety net for consumed
+    events and for heads delivered in conflict): on every run an open PR of
+    a base line with mergeable CONFLICTING, no live card of any rank
+    (by_pr), no live rebase card and admitted by the admission gate gets
+    ONE rebase card (rebase_key from the current base head; one PR = one
+    card). UNKNOWN does not trigger: the event has not settled yet.
+    """
+    findings = []
+    by_pr = by_pr or {}
+    ancestors = ancestors or {}
+    heads = line_heads()
+    live = live_rebase_cards()
+    gen_admission = getattr(board_watchdog, "gen_admission", None)
+    for number in sorted(info):
+        p = info[number]
+        base = p.get("baseRefName")
+        if base not in LINES:
+            continue
+        if (p.get("detail") or {}).get("mergeable") != "CONFLICTING":
+            continue
+        if number in live or by_pr.get(number):
+            continue                      # an owner is alive (any rank)
+        sha7 = (heads.get(base) or "")[:7]
+        if not sha7:
+            continue                      # base head unknown: silence
+        verdict_state, _ = review_state(number)
+        prio = rebase_priority(verdict_state == "ok",
+                               ancestors.get(number) is None)
+        key = rebase_key(number, sha7)
+        if dry_run:
+            findings.append((
+                "mergeflow-conflicting-owner-would:%d" % number,
+                "  CONFLICT WITHOUT OWNER (dry-run) #%d [%s@%s]"
+                " review_state=%s: a rebase card would be created (key %s)"
+                % (number, base, sha7, verdict_state, key)))
+            continue
+        if gen_admission is not None:
+            admit, why = gen_admission(BOARD_SLUG, number)
+            if not admit:
+                findings.append((
+                    "mergeflow-conflicting-owner-noadmit:%d" % number,
+                    "  CONFLICT WITHOUT OWNER #%d: not admitted: %s"
+                    % (number, why)))
+                continue
+        ok, out = create_rebase_card(
+            number, base, sha7, ancestors.get(number),
+            p.get("url", ""), p.get("headRefName") or "", prio)
+        findings.append((
+            "mergeflow-conflicting-owner-new:%d" % number if ok
+            else "mergeflow-conflicting-owner-fail:%d" % number,
+            "  CONFLICT WITHOUT OWNER #%d [%s@%s] review_state=%s: rebase"
+            " card %s%s"
+            % (number, base, sha7, verdict_state,
                "created" if ok else "NOT created",
                "" if ok else ": %s" % out)))
     return findings
@@ -2706,6 +2793,12 @@ def check():
     # A MERGEABLE PR without a live card and without an accept verdict on
     # its head gets an owner card (the review is requested only by one).
     found.extend(unowned_deliver_gate(info, by_pr, dry_run=l5_dry))
+    # A CONFLICTING PR without a live card gets a rebase card on every run
+    # (a safety net for consumed merge events and heads delivered in
+    # conflict). Before post_merge_watch: a card created here quenches its
+    # create path for the same key.
+    found.extend(conflicting_owner_gate(info, by_pr, dry_run=l5_dry,
+                                        ancestors=ancestors))
     l5_findings, debt_count = post_merge_watch(info, ancestors, by_pr,
                                                dry_run=l5_dry)
     found.extend(l5_findings)

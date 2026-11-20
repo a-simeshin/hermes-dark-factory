@@ -129,3 +129,8 @@ This document collects the lessons from running the factory that were expensive 
 
 **Rule.** A gate that retires work because its goal is already met must check who met it and what is still owed. It must not retire the actor whose own action achieved the criterion, nor drop a step that actor still owes; it retires only when the criterion is met in full. When an owner disappears anyway, a safety net gives the orphaned artifact a new owner instead of only reporting it.
 **Why.** A rebase card pushed the rebased head, the PR became mergeable, and the card parked itself until CI. The cleanup gate saw "mergeable" and archived the card as done without it. The review request of the new head lived only in that card, so nobody made it, and the PR sat still on an empty board with a report line that no actor read.
+
+## An event is consumed only after its data has settled
+
+**Rule.** A watcher that acts on a change and then records it as seen must not record it while the data it acts on is still being computed; it keeps the change pending and handles it on the next run. A recurrent check of the end state backs it up, so a consumed event cannot leave an artifact without an owner. Green checks prove nothing about a head that is older than its base: before a handover, take a live mergeability snapshot.
+**Why.** A rebase card delivered a PR with green CI on its head after neighbouring merges had turned it conflicting. The merge watcher ran a few minutes after those merges, while GitHub still answered UNKNOWN for mergeable, recorded an empty conflict list and consumed the base head change. The base did not move again, so the watcher stayed silent and the conflicting PR had no owner.
