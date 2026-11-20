@@ -4,6 +4,22 @@ An extension pack for [Hermes Agent](https://hermes-agent.nousresearch.com/) (v0
 
 The pack contains only what sits on top of Hermes. Hermes itself is installed and upgraded upstream and is never patched.
 
+## Quick install
+
+Skills are listed on skills.sh and install into any Hermes with one command each, for example:
+
+```bash
+hermes skills install skills-sh/a-simeshin/hermes-dark-factory/pack/skills/kanban-discipline
+```
+
+The three kanban guard plugins install as one pinned plugin pack:
+
+```bash
+hermes plugins pack install https://raw.githubusercontent.com/a-simeshin/hermes-dark-factory/main/hermes-pack.yaml
+```
+
+Scripts, cron jobs, personas and the config overlay are adapted to your project rather than installed: follow [docs/install.md](docs/install.md). For a whole factory, pointing `skills.external_dirs` at a clone of `pack/skills` keeps the skills read-only for the curator and is the recommended setup.
+
 ## How it works
 
 ![From an idea to a merged pull request: the owner, the Telegram gateway, GitHub, the kanban board and the agent profiles across six stages](docs/assets/factory-flow.svg)

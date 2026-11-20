@@ -23,7 +23,14 @@ This document describes how to add the pack to an existing Hermes Agent v0.23.1 
    ```
    External directories are read-only for the curator, so agents follow the pack skills without rewriting them.
 3. **Personas.** Copy `pack/souls/<role>.SOUL.md` to each profile's `SOUL.md` (`orchestrator.SOUL.md` goes to the root profile), then append a short project section.
-4. **Plugins.** Copy the directories under `pack/plugins/` into `~/.hermes/plugins/` and follow each plugin's README. `kanban-admission-guard` does nothing until the board watchdog's admission gate has written its approval cache.
+4. **Plugins.** Install the three kanban guards with the plugin pack in the repository root. It pins each plugin to an exact commit, shows a review screen and asks for consent per plugin:
+   ```bash
+   hermes plugins pack show https://raw.githubusercontent.com/a-simeshin/hermes-dark-factory/main/hermes-pack.yaml
+   hermes plugins pack install https://raw.githubusercontent.com/a-simeshin/hermes-dark-factory/main/hermes-pack.yaml
+   hermes plugins enable kanban-admission-guard   # and the other two
+   hermes gateway restart
+   ```
+   `pack install` is interactive only. `disk-cleanup` is an override of the bundled plugin of the same name and is not in the pack file: copy `pack/plugins/disk-cleanup/` into `~/.hermes/plugins/` by hand if you want it. Follow each plugin's README; `kanban-admission-guard` does nothing until the board watchdog's admission gate has written its approval cache.
 5. **Config.** Merge `pack/config/profile-overlay.example.yaml` into each profile's config; pick models for your provider. Settings that the dispatcher reads (`max_in_progress` and friends) apply only after a gateway restart: use `hermes gateway restart` without `-y`.
 6. **Project layer.** Write a `<project>-conventions` skill: integration branch, build and test commands, stand URLs, owner decisions. Put the same essentials in the target repository's `AGENTS.md`.
 7. **Cron jobs.** Recreate the jobs you want from `pack/cron/jobs.example.md`. Copy `pack/scripts/` to `~/.hermes/scripts/`, copy `factory.env.example` to `~/.hermes/factory.env` and fill it in. Provider-specific keys (peak window, quota guard, prices, report time zone, build-command regexes) have no defaults: leave one unset and its feature stays off or reports "unknown", as the comment next to the key says. Jobs of other profiles need a small wrapper in `profiles/<profile>/scripts/` (the pack ships `peak-pause-tick.sh` and `holdout-stands-kill.sh` as such wrappers). Run `python3 ~/.hermes/scripts/run-tests.py --audit` and expect its final line to report every test green. Before enabling the board watchdog and PR hygiene jobs, run their dry-run flags and read what they would do on your board.

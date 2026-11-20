@@ -1,0 +1,15 @@
+name: hermes-dark-factory
+description: Kanban guards of the dark factory pack (admission, uncommitted work, review loop)
+author: a-simeshin
+version: 1.0.0
+plugins:
+  - repo: a-simeshin/hermes-dark-factory
+    ref: 67d809d10dcd7af3e900d53fb3c9472d8c4c37c0
+    subdir: pack/plugins/kanban-admission-guard
+  - repo: a-simeshin/hermes-dark-factory
+    ref: 67d809d10dcd7af3e900d53fb3c9472d8c4c37c0
+    subdir: pack/plugins/kanban-artifact-guard
+  - repo: a-simeshin/hermes-dark-factory
+    ref: 67d809d10dcd7af3e900d53fb3c9472d8c4c37c0
+    subdir: pack/plugins/kanban-review-loop-guard
+skills: []
