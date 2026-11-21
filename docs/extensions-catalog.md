@@ -250,9 +250,9 @@ This catalog lists every mechanism the factory adds on top of Hermes Agent v0.23
 
 ### usage-ledger and metrics-evening
 
-- **What:** per-card spend posted as a card comment; an evening report with spend in provider units, card-to-merge path, rework, escaped defects, outcome shares, waiting discipline, context metrics.
-- **Native feature checked:** `hermes insights`.
-- **Why not enough:** it does not know subscription pricing in credits (cost shows as unknown) and does not attribute spend to cards.
+- **What:** per-card spend posted as a card comment; an evening report with spend in provider units, card-to-merge path, rework, escaped defects, outcome shares, waiting discipline, context metrics. The chat gets one message of at most 3500 characters (one line per section); the full report is written to `cache/metrics-evening/latest.md` with a dated copy, and the message names the path.
+- **Native feature checked:** `hermes insights`; for the delivery, the cron delivery settings and the Telegram adapter.
+- **Why not enough:** it does not know subscription pricing in credits (cost shows as unknown) and does not attribute spend to cards. Cron delivery has no length limit and no attachments, and the Telegram adapter splits long output, so the full report arrived as about ten messages.
 - **Where (original setup):** `usage-ledger.py`, `metrics-evening.py`.
 - **Coupling:** reference only for the report; the per-card attribution is worth porting.
 

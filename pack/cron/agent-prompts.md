@@ -21,7 +21,7 @@ The originals grew by appending a paragraph after every incident, and some parag
 
 ## Shared block: issue only, no card
 
-Three of the four prompts end with the same rules for what happens to every finding. Keep them in one place in your conventions skill and reference them from the prompt; they are spelled out here once.
+Three of the four prompts end with the same rules for what happens to every finding and for the report. Keep them in one place in your conventions skill and reference them from the prompt; they are spelled out here once.
 
 The ideation jobs (ux, ceo, cto) file GitHub issues only, never board cards. A card created by a scheduled agent bypasses the owner's triage: the board's own triage column is auto-decomposed regardless of what the owner decided on GitHub, and unapproved ideas turned into cards and PRs that way. The owner approves an issue (assigns a milestone or removes wait-for-triage), and only then does the admission gate or the issue poller create the executor card.
 
@@ -41,7 +41,16 @@ FOR EVERY FINDING:
   critical) by the criteria in the conventions; assignee <owner-login>. No
   milestone: the milestone is the owner's approval.
 - Do not repeat proposals from the continuity output of previous runs.
+
+REPORT TO THE OWNER'S CHAT: exactly ONE message of at most 3500 characters.
+Only what the owner must decide or know: findings that need a decision, the
+new issues with links, anomalies, one line per direction. Write the full audit
+protocol to ~/.hermes/cache/<job>-audit/latest.md and give its path in the
+message. The limit holds for any number of findings: whatever does not fit
+goes to the file.
 ```
+
+`<job>` is `ux`, `ceo` or `cto`. Hermes cron delivery has no length limit, and the Telegram adapter splits long output into many messages, so the limit has to be in the prompt.
 
 ## ux-tick
 
@@ -123,8 +132,8 @@ Audit six directions:
 
 Result: at most 1 to 3 issues, the most valuable ones.
 
-Report to the owner's chat: a short summary for each of the six directions
-and the list of filed issues.
+Report to the owner's chat: one line for each of the six directions and the
+list of filed issues, within the report limit of the shared block.
 
 BUDGET: 45 tool calls.
 
@@ -203,4 +212,4 @@ the development lines) plus hints. Act strictly on it; do not invent targets.
 - **"The environment is ready."** Agents love to rebuild and restart things. Keep the demo and the browser running as services and say so.
 - **An idempotency key on every card.** A job that runs on a schedule will rediscover yesterday's finding; the key and the dedup check keep the board clean.
 - **Classify before filing.** The holdout job must write the kind of failure into the report before it may create a card; this is what stops false defects from scenario mistakes.
-- **A stated cap on the output** (1 to 3 issues). Owner attention is the scarcest resource of the factory.
+- **A stated cap on the output** (1 to 3 issues, one chat message of at most 3500 characters). Owner attention is the scarcest resource of the factory.

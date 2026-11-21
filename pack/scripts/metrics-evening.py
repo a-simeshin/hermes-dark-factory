@@ -1959,9 +1959,165 @@ def evening(hours=24.0, now=None):
     return "\n\n".join(out)
 
 
+# ==================== ONE MESSAGE TO THE OWNER ===========================
+# The full report is 50-100 KB. Hermes cron delivery has no length setting and
+# no attachments: the Telegram adapter splits long output, so the owner got
+# about ten messages every evening. The contract is kept on this side: one
+# message of at most TG_LIMIT characters (headroom below Telegram's 4096),
+# with one line per section; the full report goes to REPORT_DIR/latest.md
+# plus a dated copy, and the message carries the path.
+# ponytail: constants, not factory.env keys; add keys when an installation
+# needs another limit or location.
+TG_LIMIT = 3500
+REPORT_DIR = HOME / "cache" / "metrics-evening"
+REPORT_KEEP = 35          # dated copies kept
+
+
+def save_full_report(full, now=None):
+    """The full report at a stable path plus a dated copy; old copies go."""
+    stamp = time.localtime(now if now is not None else time.time())
+    REPORT_DIR.mkdir(parents=True, exist_ok=True)
+    latest = REPORT_DIR / "latest.md"
+    latest.write_text(full, encoding="utf-8")
+    (REPORT_DIR / time.strftime("%Y-%m-%d.md", stamp)).write_text(
+        full, encoding="utf-8")
+    for old in sorted(REPORT_DIR.glob("????-??-??.md"))[:-REPORT_KEEP]:
+        try:
+            old.unlink()
+        except OSError:
+            pass
+    return latest
+
+
+def _g(text, pat):
+    """re.search over multiline text: the groups or None."""
+    m = re.search(pat, text, re.M)
+    return m.groups() if m else None
+
+
+_CREDITS_RE = r"^in=[\d.]+M out=[\d.]+M cache=\d+M credits=(.+)$"
+
+
+def digest(full, path_text):
+    """One message for the owner: what to decide today, anomalies, one line
+    per section. Everything else stays in the full report (path_text).
+
+    A pure function of the report text; the line formats are the ones this
+    script prints, a format it does not know is simply skipped.
+    """
+    ln = []
+    spend = re.findall(_CREDITS_RE, full, re.M)   # first the day, then the week
+    plan = _g(full, r"^estimate vs plan weekly limit ([\d,]+): (\d+)%")
+    quota = _g(full, r"^quota errors in the logs \(real events\): "
+                     r"today (\d+), this week (\d+)$")
+    if spend:
+        s = "spend: today %s credits, week %s credits" % (
+            spend[0], spend[1] if len(spend) > 1 else "?")
+        if plan:
+            s += " (%s%% of the weekly limit %s)" % (plan[1], plan[0])
+        if quota:
+            s += "; quota errors: today %s, week %s" % quota
+        ln.append(s)
+    # waiting for the owner's decision: the most important line
+    ni = _g(full, r"^7\. waiting for the owner more than 2 h[^:]*: (\d+): (.+)$")
+    if ni:
+        pairs = re.findall(r'(t_\w+) ([\d.]+) h "([^"]{0,40})', ni[1])
+        items = "; ".join('%s %sh "%s"' % (t, a.split(".")[0], ti)
+                          for t, a, ti in pairs[:5])
+        more = "" if int(ni[0]) <= 5 else "; and %d more" % (int(ni[0]) - 5)
+        ln.append("waiting for you: %s: %s%s" % (ni[0], items, more))
+    elif "7. waiting for the owner" in full:
+        ln.append("waiting for you: none")
+
+    def _block(title):
+        m = re.search(r"^%s:\n((?:- .+\n?)+)" % re.escape(title), full, re.M)
+        return [l[2:] for l in (m.group(1) if m else "").splitlines()
+                if l.startswith("- ") and l != "- none"]
+
+    ready = _block("✅ Ready to merge")
+    if ready:
+        ln.append("ready to merge (%d): %s%s" % (
+            len(ready), "; ".join(ready[:3]),
+            "; and %d more" % (len(ready) - 3) if len(ready) > 3 else ""))
+    red = _block("🔴 Red CI")
+    if red:
+        ln.append("red CI (%d): %s" % (len(red), "; ".join(red[:3])))
+    # factory anomalies: the last match is the rolling 7-day window
+    opens = re.findall(
+        r"^3\. open \[[^\]]+\]: \d+ \(draft \d+\), CONFLICTING (\d+)"
+        r"(?: \(([^)]*)\))?, no activity >48 h: (\d+)", full, re.M)
+    if opens:
+        conf, refs, stale = opens[-1]
+        if int(conf) or int(stale):
+            ln.append("anomaly: open PRs conflicting %s (%s), no activity "
+                      ">48 h: %s" % (conf, refs or "-", stale))
+    nov = _g(full, r"^   merged WITHOUT a reviewer verdict[^:]*: (.+)$")
+    if nov:
+        ln.append("anomaly: merged without a verdict: %s" % nov[0][:200])
+    esc = _g(full, r"^6d\. escaped defects: (.+)$")
+    if esc and esc[0] != "none":
+        ln.append("anomaly: escaped defects: %s" % esc[0][:200])
+    burn = re.findall(r"^5\. burnouts \([^)]*\): (\d+) runs, "
+                      r"with a progress comment (\d+)", full, re.M)
+    if burn and int(burn[-1][0]):
+        n, c = burn[-1]
+        ln.append("burnouts this week: %s runs (%d without a comment)"
+                  % (n, int(n) - int(c)))
+    # one line per remaining section
+    qual = _g(full, r"^  successful\s+(\d+) \((\d+)%\)$")
+    escal = _g(full, r"^  escalations to a human\s+(\d+)$")
+    if qual:
+        s = "quality 7d: success %s%%" % qual[1]
+        if escal and int(escal[0]):
+            s += ", escalations to a human %s" % escal[0]
+        ln.append(s)
+    sl = _g(full, r"^blind sleep>\d+s: (\d+),")
+    if sl and int(sl[0]):
+        ln.append("anomaly: blind sleeps: %s" % sl[0])
+    ctx = re.findall(r"^  (\S+)\s+calls\s+(\d+), context/call\s+\d+ tok,\s+"
+                     r"cache misses\s+(\d+)%, compactions (\d+)$", full, re.M)
+    if ctx:
+        worst = max(ctx, key=lambda c: int(c[2]))
+        ln.append("context 24h: calls %d, compactions %d (worst cache miss: "
+                  "%s %s%%)" % (sum(int(c[1]) for c in ctx),
+                                sum(int(c[3]) for c in ctx), worst[0], worst[2]))
+    loops = _g(full, r"^  3\+ runs: (.+)$")
+    if loops:
+        ids = re.findall(r"t_\w+", loops[0])
+        ln.append("retro: %d cards looping (3+ runs): %s"
+                  % (len(ids), " ".join(ids[:5])))
+    n_feed = len(re.findall(r"^\[[\w.-]+\]$", full, re.M))
+    if n_feed:
+        ln.append("quiet cron digest: %d sections" % n_feed)
+    ln.append("full report (%d lines): %s" % (full.count("\n") + 1, path_text))
+    head = time.strftime("Evening report, %Y-%m-%d")
+    if not spend:
+        head += " (spend section missing)"
+    return "\n".join([head] + ln)
+
+
+def cap_message(msg, path_text):
+    """Hard cap of one message at TG_LIMIT: the tail goes first, cut at a
+    line boundary, with a marker and the path to the full report."""
+    if len(msg) <= TG_LIMIT:
+        return msg
+    marker = "\n...(cut to the limit; full report: %s)" % path_text
+    room = TG_LIMIT - len(marker)
+    cut = msg[:room].rfind("\n")
+    if cut < room // 2:
+        cut = room
+    return msg[:cut] + marker
+
+
 def main() -> int:
-    hours = float(sys.argv[1]) if len(sys.argv) > 1 else 24.0
-    print(evening(hours))
+    args = [a for a in sys.argv[1:] if not a.startswith("-")]
+    hours = float(args[0]) if args else 24.0
+    full = evening(hours)
+    if "--full" in sys.argv:            # the whole report on stdout, no file
+        print(full)
+        return 0
+    path = str(save_full_report(full))
+    print(cap_message(digest(full, path), path))
     return 0
 
 

@@ -23,7 +23,7 @@ Schedules below are cron expressions in the server's local time. Shift jobs that
 | pr-risk-labels | default | `*/30 * * * *` | `pr-risk-labels.sh` | Deterministic `risk:<class>` label on every open PR. |
 | worktree-gc | default | `0 * * * *` | `worktree-gc.py` | Removes worktrees of finished cards once their branch is pushed and has no open PR. |
 | usage-ledger | default | `50 23 * * *` | `usage-ledger.py` | Assigns the day's sessions to cards and comments each finished card with its spend. |
-| metrics-evening | default | `0 14 * * *` | `metrics-evening.py` | Daily pipeline report: spend, card-to-merge path, rework, escaped defects, outcome shares. |
+| metrics-evening | default | `0 14 * * *` | `metrics-evening.py` | Daily pipeline report: spend, card-to-merge path, rework, escaped defects, outcome shares. Delivers one message of at most 3500 characters; the full report is in `~/.hermes/cache/metrics-evening/latest.md`. |
 | peak-pause-tick | ops | every 15 min | `peak-pause-tick.sh` (wraps `kanban-dispatch-peak-pause.py tick`) | Holds dispatch during the provider's peak-pricing window, releases it after. Only needed if your provider prices peak hours higher. |
 | holdout-stands-kill | tester | `0 23 * * *` | `holdout-stands-kill.sh` (wraps `holdout-stands-kill.py`) | Stops stands left by the nightly holdout run. |
 
