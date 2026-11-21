@@ -266,6 +266,11 @@ the same repository share them). A release point is confirmed by
 
 ## Checklist before delivery
 
+- delivery order: push, wait for CI inside the card (never request review
+  while CI runs), then one-shot snapshots of CI green on the head and
+  MERGEABLE, then WCFY, then ONE `kanban_request_review` with
+  `reviewer=<reviewer profile>`; without `reviewer=` the card stays with the
+  executor and the review never happens (kanban-discipline);
 - a one-shot `gh pr view <N> --json mergeable,mergeStateStatus` right
   before `kanban_request_review`, `kanban_complete` with `published_pr` or
   any handover to a reviewer: MERGEABLE is required; CONFLICTING or DIRTY

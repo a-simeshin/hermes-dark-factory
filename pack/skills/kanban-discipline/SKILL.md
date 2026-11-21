@@ -192,6 +192,20 @@ There are no separate reviewer, rework, rebase or summary cards for a PR.
   guess. Safety net: the watchdog's complete-review gate files a reviewer
   card on a head without a verdict (key `reviewer-pr<N>-<head7>`, marker
   `REVIEW_HOLD_MARKER`), but that is incident handling, not a handoff path;
+- `kanban_request_review` WITHOUT `reviewer=<reviewer profile>` does not
+  reassign the card: the dispatcher hands the review claim back to the
+  executor, who then closes the delivery with kanban_complete and no
+  verdict. Delivery order is fixed: (1) push the head; (2) wait for CI
+  INSIDE the card before requesting review (schedule with SCHEDULED_UNTIL,
+  then a one-shot `gh pr checks` snapshot); never request review while CI
+  runs; (3) CI green on the head and a MERGEABLE snapshot, both one-shot,
+  right before the handoff; (4) WCFY on that head; (5) ONE
+  `kanban_request_review` with `reviewer=<reviewer profile>`. A card in
+  review is never pulled back to wait for CI: no schedule or complete from
+  the review status; a CI that turns red after the request comes back as
+  CHANGES REQUESTED. Safety net: the watchdog's review-lane repair gate
+  reassigns a handoff without a reviewer to the reviewer (marker
+  `REVIEW_LANE_REPAIR_MARKER`), but that is incident handling;
 - a mandatory step goes where the actor surely has a turn. A step placed in a
   gap that a native mechanism closes in one transition never runs: the
   native review lane closes the card with the approval, so nothing "between
@@ -240,7 +254,8 @@ There are no separate reviewer, rework, rebase or summary cards for a PR.
 - every `--skill` is in `hermes skills list`, every `--assignee` is on disk;
 - the new card has `--priority` from its band and `--idempotency-key`;
 - nothing native or live already covers it;
-- `kanban_request_review` names the `reviewer`; no reviewer card exists;
+- `kanban_request_review` names the `reviewer` and comes once, after CI
+  green, the mergeable snapshot and WCFY on the head; no reviewer card exists;
 - before closing: no live parents, no cycles in task_links.
 
 ## References (read on demand)

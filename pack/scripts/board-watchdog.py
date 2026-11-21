@@ -1030,6 +1030,18 @@ def check(slug, state=None):
             "    Complete-review gate: the check failed (%s: %s). Retry "
             "in an hour." % (type(exc).__name__, exc))))
 
+    # 6c-3-quinquies. Review-lane repair: a live card whose handoff went out
+    #                 without reviewer= (review_requested reviewer=null) is
+    #                 reassigned to the reviewer before the executor closes
+    #                 it "close if green" without a verdict. A frequent pass:
+    #                 --rework-gate-only (cron every 5 minutes).
+    try:
+        found.extend(review_lane_repair_gate(slug))
+    except Exception as exc:
+        found.append(("%s:review-lane-repair:err" % slug, 1, (
+            "    Review-lane repair: the check failed (%s: %s). Retry "
+            "in an hour." % (type(exc).__name__, exc))))
+
     # 6c-3-bis. Rework priority of an open PR: a ready/todo coder card that
     #           closes an already open PR (rework by verdict, a reviewer's
     #           fix) is raised to p90 inside the active band: before new
@@ -6708,6 +6720,135 @@ def complete_review_gate(slug, now=None, apply=True):
     return findings
 
 
+REVIEW_LANE_REPAIR_MARKER = "Watchdog: review-lane repair."
+
+
+def review_lane_repair_gate(slug, apply=True):
+    """A review handoff without a reviewer (review_requested reviewer=null).
+
+    Live case: a coder called kanban_request_review WITHOUT reviewer=, so
+    the review_requested payload carries reviewer=null. The native
+    request_review with reviewer=None on a first review does NOT reassign
+    the card: the assignee stays the executor, the dispatcher hands the
+    review claim straight back to the coder, the worker parks the card with
+    schedule out of the review column and finally closes it "close if
+    green" without a single verdict on the head.
+
+    There is no native interception of kanban_complete by verdict: the
+    complete_task gates are created_cards, empty completion and
+    pr_acceptance (green CI only); lifecycle hooks fire AFTER the commit
+    and never break a transition. So the defect is caught earlier, at the
+    malformed handoff: this gate finishes the native routing request_review
+    skipped (a reassign to the reviewer) and creates no duplicates: the
+    card stays the same and the review lives in its native review lane
+    (one PR = one card).
+
+    Mechanics: a live card in review/scheduled/ready/blocked whose LAST
+    review_requested carries reviewer=null (or none), with no
+    changes_requested after that event and no marker comment, gets a
+    reassign to the reviewer plus one marker comment. running is not
+    touched (a live run is never killed): the next tick catches it after
+    the run ends. A live reviewer card for the same PR (structural owner)
+    owns the review, and the card is left alone.
+    """
+    db = os.path.join(BOARDS, slug, "kanban.db")
+    if not os.path.exists(db):
+        return []
+    con = sqlite3.connect("file:%s?mode=ro" % db, uri=True, timeout=10)
+    findings = []
+    try:
+        rows = con.execute(
+            "SELECT id, title, assignee, status FROM tasks "
+            "WHERE status IN ('review', 'scheduled', 'ready', 'blocked') "
+            "AND assignee IS NOT NULL AND assignee != 'reviewer'"
+        ).fetchall()
+        for tid, title, assignee, status in rows:
+            row = con.execute(
+                "SELECT id, payload FROM task_events "
+                "WHERE task_id = ? AND kind = 'review_requested' "
+                "ORDER BY id DESC LIMIT 1", (tid,)).fetchone()
+            if row is None:
+                continue
+            ev_id, payload = row
+            try:
+                reviewer = (json.loads(payload) or {}).get("reviewer")
+            except Exception:
+                reviewer = None
+            if isinstance(reviewer, str) and reviewer.strip():
+                continue  # the native routing happened
+            cr = con.execute(
+                "SELECT 1 FROM task_events WHERE task_id = ? "
+                "AND kind = 'changes_requested' AND id > ? LIMIT 1",
+                (tid, ev_id)).fetchone()
+            if cr:
+                continue  # a verdict already returned the card natively
+            if _card_commented(db, tid, REVIEW_LANE_REPAIR_MARKER):
+                continue
+            # A live structural owner: a reviewer card for the PR of this
+            # card already runs the review of this head; a reassign would
+            # be a second review.
+            pr_nums = sorted({int(m) for m in
+                              _REWORK_PR_TITLE_RE.findall(title or "")})
+            live_keys = _live_keys(slug)
+            owner = None
+            for n in pr_nums:
+                if any((k or "").lower().startswith(
+                        "reviewer-pr%d-" % n) for k in live_keys):
+                    owner = n
+                    break
+            if owner is not None:
+                findings.append((
+                    "reviewlane:%s:%s:owned" % (slug, tid), 0,
+                    "  %s [%s] handed off review without reviewer=, but a "
+                    "live reviewer card owns PR #%d: the review is its, "
+                    "the card is not touched." % (tid, status, owner)))
+                continue
+            covered, guard = board_native_guard.native_or_live(
+                "review-lane-%s" % tid,
+                live_keys=[],
+                native_checked=(board_native_guard.NATIVE_REVIEW_LANE,),
+                why="request_review without reviewer= did not reassign the "
+                    "card: the native review lane does not start on its "
+                    "own, this gate only finishes its routing to the "
+                    "reviewer and creates no duplicates")
+            if covered:
+                continue
+            text = (
+                "%s The review handoff went out without reviewer= "
+                "(review_requested reviewer=null): the native lane did not "
+                "reassign the card, and the dispatcher would hand it back "
+                "to the executor (self-review). The watchdog reassigned it "
+                "to the reviewer: the review lives in THIS card, and waiting "
+                "for CI or rework goes only through its native review lane "
+                "(a verdict or CHANGES REQUESTED). Do not close or re-park "
+                "the card before the verdict (kanban_complete on a PR "
+                "without a verdict is forbidden).\n\n%s"
+                % (REVIEW_LANE_REPAIR_MARKER,
+                   board_native_guard.guard_section(guard)))
+            if apply:
+                if run([HERMES, "kanban", "--board", slug,
+                        "reassign", tid, "reviewer",
+                        "--reason",
+                        "review_requested without reviewer: review-lane "
+                        "repair"], timeout=90) == "":
+                    findings.append((
+                        "reviewlane:%s:%s:reassign-failed" % (slug, tid), 1,
+                        "  %s: the reassign to the reviewer failed (empty "
+                        "CLI output), handle it by hand." % tid))
+                    continue
+                run([HERMES, "kanban", "--board", slug, "comment", tid,
+                     text], timeout=90)
+            findings.append((
+                "reviewlane:%s:%s" % (slug, tid), 0,
+                "  %s [%s] handed off review without reviewer= (event #%d): "
+                "%sreassigned to the reviewer, the review lane is "
+                "repaired." % (tid, status, ev_id,
+                               "" if apply else "[dry-run] ")))
+    finally:
+        con.close()
+    return findings
+
+
 # PR number from a title. First the exact form "PR #N" (a rework card names
 # its PR), then any #N as the last resort.
 _REWORK_PR_TITLE_RE = re.compile(r"(?i)\bPR\s*#?(\d+)")
@@ -10900,6 +11041,9 @@ if __name__ == "__main__":
                 # hourly watchdog.
                 for _, _, text in active_pr_handoff_gate(slug):
                     _dg.append("[%s]\n%s" % (slug, text))
+                # Review-lane repair: a handoff without reviewer= is
+                # reassigned to the reviewer before the executor closes it.
+                for _, _, text in review_lane_repair_gate(slug):
                     _dg.append("[%s]\n%s" % (slug, text))
             except Exception as exc:
                 # a gate failure needs investigation, the only push
