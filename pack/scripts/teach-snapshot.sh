@@ -77,6 +77,19 @@ if git diff --cached --name-only | grep -qiE '\.env$|\.pem$|\.key$|auth\.json|^s
   exit 1
 fi
 
+# Config gate: a changed config.yaml (root or profile) is snapshotted only
+# with an explicit "CONFIG: owner decision <date or link>" line in the
+# message. A flag flipped without an owner decision must not slip into the
+# history silently: restore the value or cite the decision.
+CONFIG_CHANGED=$(git diff --cached --name-only -- config.yaml ':(glob)profiles/*/config.yaml' 2>/dev/null)
+if [ -n "$CONFIG_CHANGED" ] && [ $# -gt 0 ] \
+   && ! printf '%s\n' "$1" | grep -q '^CONFIG:'; then
+  echo "REFUSED: config changed without a 'CONFIG: owner decision ...' line in the message" >&2
+  echo "Changed: $CONFIG_CHANGED" >&2
+  echo "Restore the values (hermes config set / git checkout --) or add the line." >&2
+  exit 3
+fi
+
 # Full-suite gate. A snapshot is committed only after a run of the WHOLE
 # scripts/test_*.py suite (the runner with the hermeticity audit). The total
 # line is printed in full; on red the snapshot is still taken, but the commit
