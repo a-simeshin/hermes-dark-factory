@@ -192,6 +192,15 @@ There are no separate reviewer, rework, rebase or summary cards for a PR.
   guess. Safety net: the watchdog's complete-review gate files a reviewer
   card on a head without a verdict (key `reviewer-pr<N>-<head7>`, marker
   `REVIEW_HOLD_MARKER`), but that is incident handling, not a handoff path;
+- the same applies to every card of a legacy chain of several cards on one
+  PR, including the intermediate links: closing a link with published_pr and
+  "the final card requests review" is forbidden. The gate stays quiet on such
+  a link only because a live structural owner suppresses it, which does not
+  make the delivery legal. If your card is part of such a chain, act as the
+  owner of the whole cycle: finish what the sibling links left in the same
+  branch and deliver once in the order below. A completion contract that
+  demands published_pr is no reason to close early: a schedule park for the
+  CI wait keeps the card alive until the verdict on the head;
 - `kanban_request_review` WITHOUT `reviewer=<reviewer profile>` does not
   reassign the card: the dispatcher hands the review claim back to the
   executor, who then closes the delivery with kanban_complete and no

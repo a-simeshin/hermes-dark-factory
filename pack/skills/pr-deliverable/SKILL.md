@@ -289,6 +289,13 @@ the same repository share them). A release point is confirmed by
 - tests that model a third-party library's output: a `Library contract:
   <artifact>:<version> <Class>#<method>` line in the body and a fixture from
   a real run;
+- a branch behind the base compiles as a merge: CI builds the PR merge ref,
+  not the branch, so a base change of a shared signature turns every job red
+  while focused runs on the branch stay green. Before the push run `git
+  merge-tree --write-tree origin/<base> HEAD` (no conflicts does not mean it
+  compiles) and grep the diff for the changed signature, including fully
+  qualified call sites; on a hit rebase in the same card, adapt the branch
+  code and rerun the focused groups;
 - CI green, which alone is NOT enough: checks are bound to the head sha and
   stay green after the base moves, so a run older than the base head counts
   only together with the mergeable snapshot above; the last verdict is a
