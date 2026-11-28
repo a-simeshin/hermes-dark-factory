@@ -89,7 +89,7 @@ such section (see pr-deliverable). At the task level, not the code level:
   what the fix changes. The delta, not the whole system;
 - the AUTHOR of the issue writes it at creation, in the body, without waiting
   for review;
-- after the section at most 5 lines in the user's words, everything else in
+- **[IM-01]** after the section at most 5 lines in the user's words, everything else in
   `<details><summary>Details</summary>`.
 
 Two hard rules:

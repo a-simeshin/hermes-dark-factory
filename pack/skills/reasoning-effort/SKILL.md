@@ -53,7 +53,7 @@ max to high cut a typical answer from about 30 minutes to about 5.
    it is several times faster than on `max` with a summary of the same size,
    and on a thinking model left at `max` it can eat a large share of session
    time.
-6. Starting layout: default medium, coder high, reviewer and architect max,
+6. **[RE-01]** Starting layout: default medium, coder high, reviewer and architect max,
    tester and ops low.
 
 ## Choosing the level

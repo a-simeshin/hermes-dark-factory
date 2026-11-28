@@ -44,6 +44,7 @@ Everything that names one project is read from `$HERMES_HOME/factory.env` throug
 | `gh-link-guard.py` | guard | Refuses to post a GitHub comment or body whose repository links do not resolve. |
 | `prepush-link-guard.py`, `prepush-identity-guard.py` | git hook | Called by `reference/githooks/pre-push`: dead links in pushed files, and commits made under a default agent address. |
 | `github-pr-filter.sh` | webhook filter | Passes only the owner's PR comments, reviews and issue events (opened, milestoned, labeled) to the agent; drops the bot's own mirror issues. |
+| `factory-doctor.py` | CLI | Checks a project conventions file against the pack contract: every slot heading of `pack/project-template/conventions.md` present and filled beyond its placeholder, every `overrides <ID>` line naming a rule id tagged in the pack. Exit 1 on a problem. Run after copying the template and after every pack upgrade. |
 | `tag-sync-check.sh` | CLI | Compares every local tag with `git ls-remote --tags origin` and exits 1 on a STALE, MISSING or GONE tag; `--force` force-fetches the tags. Run before release work: a plain fetch never overwrites an existing tag. |
 | `gh-app-token.sh` | CLI | Mints a one-hour installation token of a GitHub App. |
 | `visual-delta-capture.py`, `visual-delta-shot.py` | CLI | Before and after screenshots of a UI change from two worktrees; one browser per run, always stopped. |

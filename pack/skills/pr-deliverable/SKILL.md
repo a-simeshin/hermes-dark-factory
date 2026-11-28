@@ -31,7 +31,7 @@ that has a PR.
 - Push with a plain `git push origin <branch>`; the pack's credential helper
   mints the GitHub App token (see the setup docs for the fallback when the
   helper is broken).
-- PR: `gh pr create ... --base <branch from the project conventions>`. The
+- PR: `gh pr create ... --base <branch from project conventions § Integration branch and PR base>`. The
   base is NOT the default branch by default.
 - `gh pr update-branch` cannot resolve conflicts (422): merge locally and
   resolve. An automatic merge can combine signatures from both sides and keep
@@ -204,7 +204,7 @@ test does not count; the reviewer repeats the mutation.
 
 ## Frames and screenshots
 
-- UI verdict: before/after frames for each checked viewport, PNG pushed to
+- **[PR-02]** UI verdict: before/after frames for each checked viewport, PNG pushed to
   the assets branch (`hermes-assets` by default), markdown by raw link.
   Telegram or the card alone do not count.
 - A selector fails: read the component source first (how the test id is
@@ -279,7 +279,8 @@ the same repository share them). A release point is confirmed by
   minutes after a merge into the base);
 - `gh pr view <N> --json baseRefName,files` matches the card (dozens of
   unrelated files mean the wrong base);
-- the visual delta is where the project keeps it (references/visual-delta.md);
+- the visual delta is where project conventions § Visual evidence location
+  puts it (references/visual-delta.md);
 - WCFY: posted before kanban_request_review on the head under review,
   updated before each repeated request after a rework, numbers from live
   commands;

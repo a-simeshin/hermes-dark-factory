@@ -50,7 +50,7 @@ checks itself.
 
 - a child without acceptance criteria; a code card without a branch;
   "investigate and fix" without a hypothesis;
-- more than five children: split through an intermediate parent;
+- **[DEC-01]** more than five children: split through an intermediate parent;
 - parallel children writing the same files;
 - one "write the tests" card: split by layer, unit / integration / e2e;
 - a card without a Stack line is a defective card;
@@ -60,7 +60,7 @@ checks itself.
 
 ## Size and budget
 
-- the worker's iteration budget is finite: an "edit, slow run" loop is cut
+- **[DEC-02]** the worker's iteration budget is finite: an "edit, slow run" loop is cut
   with headroom (two or three e2e tests or one module of edits per card).
   Retries without changing the card burn the budget in the same place;
 - one decomposition layer stays within ONE stack or one side (backend

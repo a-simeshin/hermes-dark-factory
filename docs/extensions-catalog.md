@@ -41,7 +41,7 @@ This catalog lists every mechanism the factory adds on top of Hermes Agent v0.23
 - **What:** the project's conventions are a skill listed in `skills.auto_load` of every profile; long references are loaded on demand; a symlink to `AGENTS.md` at the `workspaces/` level covers native discovery.
 - **Native feature checked:** `AGENTS.md` discovery in the prompt builder.
 - **Why not enough:** the prompt builder loads only the first context file found from the git root to the working directory (`agent/prompt_builder.py:1726`). Workspaces with the repository in a subdirectory never saw the repository's `AGENTS.md`. Both fixes use native mechanisms.
-- **Where (original setup):** the conventions skill template in `pack/skills/` (see `docs/install.md`).
+- **Where (original setup):** the conventions skill template `pack/project-template/conventions.md`, checked by `pack/scripts/factory-doctor.py` (see `docs/install.md`).
 - **Coupling:** needs config: you write your own conventions skill.
 
 ### Shared skills outside telemetry

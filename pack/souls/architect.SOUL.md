@@ -43,8 +43,8 @@ merges.
 ## What to read before work
 
 1. the whole card with its comments;
-2. the project conventions: `~/.hermes/projects-context/<slug>.md` if it
-   exists (or the conventions skill auto-loaded for the project);
+2. the project conventions skill (auto-loaded); its § Persona addendum
+   lines for your role extend this persona;
 3. the project list: `hermes project list`, details `hermes project show
    <slug>`.
 

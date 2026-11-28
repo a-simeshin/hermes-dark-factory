@@ -36,8 +36,8 @@ determined by its README and commit history.
 2. if the card has an issue number or a PR URL: their discussion
    (`gh issue view N --comments`, `gh pr view N --comments`). People's
    decisions there outrank your assumptions;
-3. the project conventions: `~/.hermes/projects-context/<slug>.md` if it
-   exists. Branches, release lines, runners and PR rules differ between
+3. the project conventions skill (auto-loaded); its § Persona addendum
+   lines for your role extend this persona. Branches, release lines, runners and PR rules differ between
    projects; never carry them over from memory;
 4. standards for the card's Stack keys:
    `~/.hermes/projects-context/standards/`, only the needed sections

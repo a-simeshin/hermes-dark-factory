@@ -19,7 +19,8 @@ terminal habits, the call for each common task, and the order of calls that
 saves the most context. Tool names and parameters below match Serena's tools;
 check them against the Serena version you install, and make sure language
 servers are configured for the languages of your repository. More recipes are
-in references/recipes.md.
+in references/recipes.md. `<file>` in the examples stands for a source file;
+stack skills under `pack/stacks/` show the calls with real paths.
 
 ## Key concept: name_path
 
@@ -72,7 +73,7 @@ logs, CI output, configs outside the source tree.
 ### Understand an unfamiliar file
 
 ```
-get_symbols_overview(relative_path="src/main/java/com/example/ProxyHandler.java", depth=1)
+get_symbols_overview(relative_path="<file>", depth=1)
 ```
 
 A symbol map instead of hundreds of lines in context. `depth=1` adds class
@@ -91,7 +92,7 @@ when the exact name is unknown.
 ### Who uses it
 
 ```
-find_referencing_symbols(name_path="ErrorDto/redactUrl", relative_path="core/src/main/java/com/example/ErrorDto.java")
+find_referencing_symbols(name_path="ErrorDto/redactUrl", relative_path="<file>")
 ```
 
 Returns the symbols that reference this one, with a code snippet around each
@@ -103,7 +104,7 @@ signature change and before deletion: the list of callers is the answer to
 ### Where is what I see in a call declared
 
 ```
-find_declaration(name_path="relayWithSessionHeader", relative_path="server/src/main/java/com/example/ProxyController.java")
+find_declaration(name_path="relayWithSessionHeader", relative_path="<file>")
 ```
 
 The reverse of reference search: from a use to the declaration, including
@@ -114,7 +115,7 @@ jumps into dependencies.
 ### Rename across the project
 
 ```
-rename_symbol(name_path="ErrorDto/redactUrl", relative_path="core/src/main/java/com/example/ErrorDto.java", new_name="redactTargetUrl")
+rename_symbol(name_path="ErrorDto/redactUrl", relative_path="<file>", new_name="redactTargetUrl")
 ```
 
 A refactoring done by the language server: it edits the declaration and ALL
@@ -128,7 +129,7 @@ calls of the specific API, never a global replace over the tree, and read
 ### Delete a symbol safely
 
 ```
-safe_delete_symbol(name_path="ProxyHandler/legacyRelay", relative_path="server/src/main/java/com/example/ProxyHandler.java")
+safe_delete_symbol(name_path="ProxyHandler/legacyRelay", relative_path="<file>")
 ```
 
 Checks references before deleting. Cutting lines leaves calls the compiler
@@ -137,7 +138,7 @@ finds later, and in tests sometimes not at all.
 ## Check after an edit
 
 ```
-get_diagnostics_for_file(relative_path="server/src/main/java/com/example/ProxyHandler.java", min_severity=1)
+get_diagnostics_for_file(relative_path="<file>", min_severity=1)
 ```
 
 The language server's errors and warnings for the file, without a build. A

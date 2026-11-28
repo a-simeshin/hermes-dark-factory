@@ -32,7 +32,7 @@ not, write nothing: empty entries clutter memory and push out useful ones.
 | What you learned | Where | How |
 |---|---|---|
 | an environment fact or trap: a path, a command, a tool's behaviour, a config pitfall | profile memory | `memory` add, ONE short line |
-| a universal procedure that works on any project | shared skill in `~/.hermes/shared-skills/` | `skill_manage` |
+| a universal procedure that works on any project | the project layer, marked as a pack candidate (below) | `skill_manage` on a project skill, never on a pack file |
 | a procedure of one project: its build, demo stand, release ritual | project skill in `~/.hermes/shared-skills/<board>/` | `skill_manage` |
 | a project fact or rule: branches, runners, paths, agreements | project conventions, NOT memory | a proposal comment on the card |
 
@@ -40,12 +40,23 @@ Check before writing: "will this be true on ANOTHER project?" No: the target
 is project-level, not profile memory. A project fact in profile memory becomes
 a lie on the next project.
 
-If your installation loads generic skills from a read-only pack (an external
-skills directory), the agents do not edit it. A lesson starts in the project
-layer (the project conventions skill or a project reference); it goes to the
-pack only as a proposal to the owner, after it has been retold without
-project details (branches, paths, modules, card or PR numbers) and still
-makes sense.
+Agents never edit pack files: the pack's skills, personas, stacks and
+scripts are a read-only clone that the owner upgrades by switching a tag.
+Every lesson goes to the project layer (the project conventions skill or a
+project reference). A rule that contradicts a pack rule id goes to project
+conventions § Pack overrides as `overrides <ID> because <reason>, <date>`.
+
+A lesson that still makes sense once retold without project details
+(branches, paths, modules, card or PR numbers) is a pack candidate. Mark it
+with one line directly under the lesson:
+
+```
+pack-candidate: <skill or persona it belongs to>: <one-line generic form>
+```
+
+The marker is a proposal, not an edit: the owner (or an agent asked to)
+turns it into an issue or pull request on the pack repository, and the
+project copy stays until a pack release carries the rule.
 
 ## What never goes into memory
 
@@ -104,7 +115,8 @@ into a sandbox by patching the module, never read from live files.
 
 - the lesson question was asked before closing the card;
 - if there is a lesson, it was written BEFORE `kanban_complete`;
-- the entry passed "is this true on another project";
+- the entry passed "is this true on another project"; a yes is marked
+  `pack-candidate:`, and no pack file was edited;
 - a card that changed `~/.hermes` closed with a snapshot and its hash in the
   summary;
 - if the snapshot ran the tests, the report quotes the runner's final summary

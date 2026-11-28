@@ -13,8 +13,8 @@ The owner does not want a wall of text; they want two visual prototypes,
 before and after. When the change is not visible on screen, they want a
 conceptual diagram of how the process, code or components change.
 
-Where it lives is a project decision; follow the project conventions. The
-reference setup keeps it in the ISSUE, at the prototype stage: the PR has no
+**[PR-01]** Where it lives is a project decision: project conventions
+§ Visual evidence location. The pack default keeps it in the ISSUE, at the prototype stage: the PR has no
 Before/After section and no separate visual-delta cards, and a final
 screenshot from the E2E test is enough when a UI test runs. The owner moved
 it there for cost (separate visual-delta work on PRs became the single most

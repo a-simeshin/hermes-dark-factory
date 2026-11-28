@@ -155,14 +155,15 @@ loops. The diagnosis "the board is busy" was false.
 
 ## "Green locally" means the CI phase, not a build with tests skipped
 
-Quality gates live in the phase CI runs (for example `verify` in Maven, `check`
-in Gradle, `lint` plus `test` in a JS project). A build with tests skipped runs
+Quality gates live in the phase CI runs (for example a `verify` or `check`
+task, or `lint` plus `test` in a JS project). A build with tests skipped runs
 none of the static analysis, coverage or style checks: green locally, CI fails
 a minute before the tests. Two PRs in a row once failed this way, one on a
 static-analysis finding, one on coverage a hundredth below the minimum.
 
-Before the push, run the phase CI runs on the touched modules (with their
-in-repo dependencies).
+**[DBG-01]** Before the push, run the phase CI runs on the touched modules
+(with their in-repo dependencies); the command is in project conventions
+§ Build and test commands.
 
 A gate is closed with code or tests. Suppressing an analyser with an
 annotation, lowering a coverage threshold, widening excludes or marking code

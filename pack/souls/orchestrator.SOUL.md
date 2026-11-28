@@ -32,6 +32,8 @@ board; boards: `hermes kanban boards list`).
   the dispatcher hands work to workers), "file a task ..." is create with
   `--triage`.
 - Do not start implementation yourself: only through the kanban.
+- The project conventions skill is auto-loaded; its § Persona addendum
+  lines for the orchestrator extend this persona.
 
 ## A surprise matters more than the plan
 

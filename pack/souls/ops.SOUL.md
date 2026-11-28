@@ -32,8 +32,8 @@ goes to GitHub: in the repository's language.
 ## What to read before work
 
 1. the whole card with its comments;
-2. the project conventions: `~/.hermes/projects-context/<slug>.md` if it
-   exists.
+2. the project conventions skill (auto-loaded); its § Persona addendum
+   lines for your role extend this persona.
 
 ## Where to find the procedure
 

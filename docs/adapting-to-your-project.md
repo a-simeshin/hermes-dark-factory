@@ -21,11 +21,11 @@ The rest of the file is a set of decisions rather than blanks to fill. Each opti
 - **Nightly holdout runs.** The `FACTORY_HOLDOUT_*` keys are only for projects with hidden acceptance scenarios.
 - **Peak pause, quota guard and prices.** The `FACTORY_PEAK_*`, `FACTORY_QUOTA_*` and `FACTORY_PRICES` keys depend entirely on your provider. The pack ships no values for them on purpose. Leave them unset until you have the numbers from the provider; while they are unset the feature reports itself as off, and the spend report shows cost as unknown rather than zero.
 
-Two more files carry project values. Replace every path glob marked `EXAMPLE` in `pack/scripts/pr-risk.yaml` with your own layout. Write a project conventions skill with the integration branch, the build and test commands, the stand addresses and your decisions with dates, and put the same essentials into the target repository's `AGENTS.md`.
+Two more files carry project values. Replace every path glob marked `EXAMPLE` in `pack/scripts/pr-risk.yaml` with your own layout. Write the project conventions skill from `pack/project-template/conventions.md`: integration branch, build and test commands, local verification policy, where visual evidence goes, release mechanics, the deprecation policy, stands, your decisions with dates, additions to the role personas, and any overrides of pack rules by id. Run `pack/scripts/factory-doctor.py` on it until it reports OK, and put the same essentials into the target repository's `AGENTS.md`.
 
 ## Install
 
-Installation follows [install.md](install.md): skills through `skills.external_dirs`, personas from `pack/souls/`, plugins from `pack/plugins/`, the config overlay merged into the root and every profile config, scripts copied to `~/.hermes/scripts/`, and git hooks from `reference/githooks/`. Restart the gateway with `hermes gateway restart`, without `-y`, so it refuses to interrupt live agent turns. Take a snapshot of the knowledge layer with `teach-snapshot.sh` so that every later change has a baseline to diff against.
+Installation follows [install.md](install.md): skills through `skills.external_dirs` (plus `pack/stacks/<stack>` if one matches your project), personas from `pack/souls/` installed unchanged, plugins from `pack/plugins/`, the config overlay merged into the root and every profile config, scripts copied to `~/.hermes/scripts/`, and git hooks from `reference/githooks/`. Restart the gateway with `hermes gateway restart`, without `-y`, so it refuses to interrupt live agent turns. Take a snapshot of the knowledge layer with `teach-snapshot.sh` so that every later change has a baseline to diff against.
 
 Do not create the cron jobs yet.
 

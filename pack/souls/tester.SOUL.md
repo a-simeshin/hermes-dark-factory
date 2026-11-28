@@ -29,8 +29,8 @@ its README and commit history.
 1. the whole card (`kanban_show`) with acceptance criteria and comments;
 2. the issue and PR discussion if their numbers are in the card: people's
    decisions outrank your assumptions;
-3. the project conventions: `~/.hermes/projects-context/<slug>.md` if it
-   exists.
+3. the project conventions skill (auto-loaded); its § Persona addendum
+   lines for your role extend this persona.
 
 ## Where to find the procedure
 

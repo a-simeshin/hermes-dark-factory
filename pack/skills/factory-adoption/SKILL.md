@@ -78,16 +78,19 @@ Collect facts, not guesses; write each with its source (file, command output):
    (`FACTORY_PEAK_*`), quota guard (`FACTORY_QUOTA_*`), price table
    (`FACTORY_PRICES`). Off is a valid answer.
 3. Replace the `EXAMPLE` path globs in `pack/scripts/pr-risk.yaml`.
-4. Write the project conventions skill (integration branch, build and test
-   commands, stands, owner decisions with dates) and the same essentials in
-   the target repository's `AGENTS.md`.
+4. Copy `pack/project-template/conventions.md` to the project skills
+   directory as `project-conventions/SKILL.md`, fill every section (headings
+   unchanged), run `pack/scripts/factory-doctor.py <file> <pack-clone>/pack`
+   until OK, and put the same essentials in the target repository's `AGENTS.md`.
 
 ### 3. Install, in the order of docs/install.md
 
 1. Skills: `skills.external_dirs` in every profile's `config.yaml` points at
-   `<pack-clone>/pack/skills`; the conventions skill goes in `skills.auto_load`.
-2. Souls: `pack/souls/<role>.SOUL.md` to each profile's `SOUL.md`
-   (`orchestrator.SOUL.md` to the root), plus a marked project section.
+   `<pack-clone>/pack/skills` (and `pack/stacks/<stack>` only if the project
+   uses it); the conventions skill goes in `skills.auto_load`.
+2. Souls: `pack/souls/<role>.SOUL.md` unchanged to each profile's `SOUL.md`
+   (`orchestrator.SOUL.md` to the root); project additions go to the
+   conventions' Persona addendum section, never into the SOUL file.
 3. Plugins: `pack/plugins/*` to `~/.hermes/plugins/`; give
    `kanban-artifact-guard` its `repos` list as its README shows.
 4. Config: merge `pack/config/profile-overlay.example.yaml` into the root and
@@ -112,6 +115,10 @@ Follow references/modifying.md: native first, extend before adding, values in
 mutant, full suite green, docs and catalog updated.
 
 ### 6. Upgrade
+
+Pack upgrade: switch the clone to the new tag, read `CHANGELOG.md`, run
+`factory-doctor.py` on the conventions and fix every reported slot or
+override id. Never edit the clone.
 
 Before `hermes update --backup --yes`: walk `docs/extensions-catalog.md`
 against the release notes and remove what became native. After: `hermes
@@ -146,7 +153,8 @@ failing jobs, diff `disk-cleanup` against the bundled plugin.
    before the matching cron job is created. Keep the merge flow of
    `pr-hygiene.py` in dry run until the owner accepts it: while
    `$HERMES_HOME/cache/mergeflow-hold` exists, its merge-flow actions only report.
-5. `hermes -p coder -z "List the first three rules of the project conventions"` quotes your conventions skill.
+5. `factory-doctor.py <conventions> <pack-clone>/pack` reports OK, and
+   `hermes -p coder -z "List the first three rules of the project conventions"` quotes your conventions skill.
 6. One end-to-end card on a throwaway issue in the active milestone: the same
    card opens the PR (`metadata.published_pr` is the full URL), posts
    "What changes for you" before `kanban_request_review`, passes the review

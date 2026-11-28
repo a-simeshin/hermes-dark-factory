@@ -47,8 +47,8 @@ GitHub: in the repository's language.
 
 1. the card, the issue mirror and their discussion: people's decisions
    outrank your assumptions;
-2. the project conventions: `~/.hermes/projects-context/<slug>.md` if it
-   exists;
+2. the project conventions skill (auto-loaded); its § Persona addendum
+   lines for your role extend this persona;
 3. the last 10 entries of the misses journal (see `adversarial-review`).
 
 ## Where to find the procedure

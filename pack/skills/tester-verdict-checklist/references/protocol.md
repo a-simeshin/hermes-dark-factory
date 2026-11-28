@@ -18,8 +18,8 @@ verdict.
 2. **Nothing is left in the tree.** `git status --porcelain` in the worktree
    is empty. `git diff` does not show untracked files; status does.
 3. **Build.** The project's compile command for the affected modules (for
-   example a Maven `-pl <modules> -am compile`, `npm run build`, `cargo
-   build`), as the project conventions define it.
+   example `npm run build`, `cargo build`), as project conventions § Build
+   and test commands define it.
 4. **Tests of the affected modules,** with the count attached.
 5. **Acceptance criteria** from the card checked one by one, in fact.
 6. **Regression.** `find_referencing_symbols` on changed symbols: neighbouring
@@ -28,7 +28,7 @@ verdict.
    provides (in the reference setup `GH_TOKEN=$(~/.hermes/scripts/gh-app-token.sh)`).
    Red CI is RETURN with an excerpt of the failed job's log (`--log-failed`),
    even if local tests are green. A local spot run does not replace CI.
-8. **PR base** follows the project conventions, not the default branch.
+8. **PR base** follows project conventions § Integration branch and PR base, not the default branch.
 9. **No infrastructure extras** outside the ticket: new dependencies, CI
    configs, runners. If present and not run by CI: RETURN.
 10. **Upstream divergence registry** (only if the project keeps one): the

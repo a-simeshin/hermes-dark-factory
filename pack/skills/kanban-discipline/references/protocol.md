@@ -63,7 +63,7 @@ stayed parked. Only a red test before the fix and a green one after prove
 
 `--skill` accepts ONLY the names of skills that are actually installed
 (`hermes skills list`). Technology keys from the card's **Stack** line (for
-example react, test, e2e, java) are not skills: they are addresses in the
+example react, test, e2e, backend) are not skills: they are addresses in the
 project's standards catalogue and live as a line in the card body.
 
 Passed as `--skill`, they kill the agent during initialisation, before the

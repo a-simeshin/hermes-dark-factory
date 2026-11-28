@@ -19,6 +19,10 @@ Edit agent files by hand only for emergencies (a runaway process, a leaked secre
 
 Keep rounds short and single-topic. One round per new kind of mistake; group several incidents of the same kind into one round.
 
+## Where a lesson lands
+
+The agents never edit pack files: the pack is a read-only clone pinned to a tag, and an upgrade replaces it. A lesson goes to the project layer: the project conventions skill or a project reference. A rule that departs from a pack default goes to the conventions' Pack overrides section as `overrides <ID> because <reason>, <date>`, where the id is the bold tag in front of the pack rule. A lesson that still makes sense without project details is marked with a `pack-candidate:` line under it (see the `save-lesson-before-complete` skill); you or an agent you ask turn those lines into an issue or pull request on the pack repository.
+
 ## Snapshots
 
 The knowledge layer (personas, skills, project context, scripts, plugins, config) lives in a git repository inside the Hermes home. A snapshot script commits a whitelist of paths with a message describing the round. Never use `git add -A` there: the home directory also holds secrets, databases and caches. Snapshots give you three things: a diff to review, a rollback point, and a history of why each rule exists.

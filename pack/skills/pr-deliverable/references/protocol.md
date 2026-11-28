@@ -29,8 +29,8 @@ that has a PR.
   (anonymous fetch) while pushes fail with `could not read Username`. If the
   helper is broken, pass a freshly minted token for one push with
   `TOKEN=$(~/.hermes/scripts/gh-app-token.sh) git -c credential.helper= -c 'credential.helper=!f() { echo username=<bot-account>; echo password=$TOKEN; }; f' push origin <branch>`.
-- PR: `gh pr create --title "..." --body "..." --base <branch from the
-  project conventions and merge history>`. The base is NOT the default branch
+- PR: `gh pr create --title "..." --body "..." --base <branch from
+  project conventions § Integration branch and PR base and merge history>`. The base is NOT the default branch
   by default.
 - update-branch conflicts: `gh pr update-branch` cannot resolve them. Before
   blocking the card, check whether an identical conflict was already resolved
@@ -422,7 +422,8 @@ Authorization) verbatim in browser storage.
   means wait and take it again. In one case a rebase card delivered a PR
   with green CI on its head, but neighbouring merges had already turned it
   CONFLICTING: the run was older than the base head;
-- the visual delta is where the project keeps it (references/visual-delta.md;
+- the visual delta is where project conventions § Visual evidence location
+  puts it (references/visual-delta.md;
   for a UI-facing issue kept in the issue: the body starts with
   `## Before / After` and the PR has no Before/After section);
 - the PR has a `## What changes for you` comment (one, posted before

@@ -3,13 +3,14 @@
 This document collects the less frequent Serena calls that the main skill
 only names: finding implementations and overrides, text search when there is
 no symbol, replacing a whole method body, inserting a method next to an
-existing one, and bulk regex edits inside a file. Paths in the examples are
-illustrative.
+existing one, and bulk regex edits inside a file. `<file>` stands for a source file of your
+repository; stack skills under `pack/stacks/` show the same calls with real
+paths of their language.
 
 ### Who implements and overrides it
 
 ```
-find_implementations(name_path="Transport", relative_path="core/src/main/java/com/example/Transport.java")
+find_implementations(name_path="Transport", relative_path="<file>")
 ```
 
 For an interface it returns the implementations, for an abstract method the
@@ -22,7 +23,7 @@ not implementations.
 
 ```
 search_for_pattern(substring_pattern="destructiveHint\\s*=\\s*true",
-                   paths_include_glob="**/*.java",
+                   paths_include_glob="**/*.<ext>",
                    restrict_search_to_code_files=True,
                    context_lines_before=2, context_lines_after=2)
 ```
@@ -34,7 +35,7 @@ not wander into build output, dependency folders or binaries).
 ### Replace a whole method body
 
 ```
-replace_symbol_body(name_path="ProxyHandler/relayAndAwait[0]", relative_path="server/src/main/java/com/example/ProxyHandler.java", body="...")
+replace_symbol_body(name_path="ProxyHandler/relayAndAwait[0]", relative_path="<file>", body="...")
 ```
 
 Edits the symbol within the bounds the language server knows. `sed` by line
@@ -44,8 +45,8 @@ not exist here.
 ### Add a method next to an existing one
 
 ```
-insert_after_symbol(name_path="ProxyHandler/relayAndAwait", relative_path="server/src/main/java/com/example/ProxyHandler.java", body="...")
-insert_before_symbol(name_path="ProxyHandler/close", relative_path="server/src/main/java/com/example/ProxyHandler.java", body="...")
+insert_after_symbol(name_path="ProxyHandler/relayAndAwait", relative_path="<file>", body="...")
+insert_before_symbol(name_path="ProxyHandler/close", relative_path="<file>", body="...")
 ```
 
 Insertion by symbol, not by line: no counting indentation or looking for the
@@ -54,7 +55,7 @@ closing brace.
 ### Bulk edit inside a file
 
 ```
-replace_content(relative_path="ui/src/test/java/com/example/UiIT.java",
+replace_content(relative_path="<file>",
                 needle="connectButton\\(\\).*?click\\(\\);",
                 repl="connectViaProfile();",
                 mode="regex",

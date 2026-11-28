@@ -26,8 +26,8 @@ references/protocol.md, distilled lessons in references/lessons.md.
    diff equals the ticket (no more and no less).
 2. `git status --porcelain` in the worktree is empty (only status shows
    untracked files).
-3. Build: the project's compile command for the affected modules (from the
-   project conventions).
+3. Build: the project's compile command for the affected modules (from project
+   conventions § Build and test commands).
 4. Tests of the affected modules, with the count attached. "Green" is the
    verbatim final summary line of YOUR OWN run of the test runner, quoted;
    no invented markers, no line copied from someone else's handoff.
@@ -36,7 +36,7 @@ references/protocol.md, distilled lessons in references/lessons.md.
 7. CI on the PR: `gh pr checks <N>`; red means RETURN with an excerpt from
    `gh run view <id> --log-failed`, even when local runs are green. A local
    run does not replace CI.
-8. The PR base follows the project conventions, not the default branch.
+8. The PR base follows project conventions § Integration branch and PR base, not the default branch.
 9. No infrastructure extras outside the ticket (dependencies, CI configs,
    runners); anything CI does not run is RETURN.
 10. If the project keeps a registry of divergences from an upstream (for

@@ -123,8 +123,9 @@ in its own scope. Measure peak RSS with
   over a PR also build its in-repo dependencies, or you test stale
   artifacts. Sign of a stale run: the target test class is absent from
   stdout while the build says success;
-- the full build is CI's job when the project conventions say so; locally
-  run targeted tests, format and lint. Changes to the build or CI config get
+- **[WRK-01]** the full build is CI's job (project conventions § Local
+  verification policy says what else is CI only); locally run targeted
+  tests, format and lint. Changes to the build or CI config get
   ONE full build before the push. Never repeat a full build without changes
   in between; one background build per worker;
 - write build output to a file: `> log 2>&1; echo EXIT=$?; grep '<success
