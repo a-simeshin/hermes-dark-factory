@@ -320,7 +320,8 @@ def test_repass_after_failed_archive_no_noise():
 
 def test_recreate_failure_falls_back_to_block():
     """create is silent (CLI error): fall back to the earlier behaviour for
-    ready: comment, block needs_input, gate-alert escalation."""
+    ready: comment, block needs_input, escalation into the watchdog report
+    (ikeygate-blockfail; no beacon card is created)."""
     slug, tmp, old = make_board([
         ("t_fail", "Block will fail", "ready", "coder", "", 3 * 3600)])
     calls = []
@@ -339,16 +340,20 @@ def test_recreate_failure_falls_back_to_block():
     assert "NOT" in text, "failure not flagged:\n%s" % text
     blocks = [c for c in calls if len(c) > 4 and c[4] == "block"]
     assert any("t_fail" in c and "needs_input" in c for c in blocks), calls
+    # No beacon card is created: the escalation is a finding in the report.
     creates = [c for c in calls if len(c) > 4 and c[4] == "create"]
-    assert any(mod.GATE_ALERT_KEY in c for c in creates), \
-        "no gate-alert beacon create: %s" % calls
+    assert not any("max_in_progress gate" in " ".join(map(str, c))
+                   for c in creates), calls
+    escal = [f for f in found if f[0] == "ikeygate-blockfail"]
+    assert len(escal) == 1, found
+    assert "t_fail" in escal[0][2], escal[0][2]
     shutil.rmtree(tmp)
     print("OK test_recreate_failure_falls_back_to_block")
 
 
 def test_recreate_failure_todo_no_block():
     """create is silent for todo: block is not called (the core cannot),
-    comment + gate-alert escalation."""
+    comment + escalation into the watchdog report (ikeygate-recreatefail)."""
     slug, tmp, old = make_board([
         ("t_ftodo", "Todo and create fails", "todo", "coder", "", 3 * 3600)])
     calls = []
@@ -366,8 +371,13 @@ def test_recreate_failure_todo_no_block():
     assert not any(len(c) > 4 and c[4] == "block" for c in calls), calls
     assert any(len(c) > 4 and c[4] == "comment" and "t_ftodo" in c
                for c in calls), calls
+    # No beacon card is created: the escalation is a finding in the report.
     creates = [c for c in calls if len(c) > 4 and c[4] == "create"]
-    assert any(mod.GATE_ALERT_KEY in c for c in creates), calls
+    assert not any("max_in_progress gate" in " ".join(map(str, c))
+                   for c in creates), calls
+    escal = [f for f in found if f[0] == "ikeygate-recreatefail"]
+    assert len(escal) == 1, found
+    assert "t_ftodo" in escal[0][2], escal[0][2]
     text = [f[2] for f in found if f[0] == "ikeygate:t_ftodo"][0]
     assert "todo" in text
     shutil.rmtree(tmp)
@@ -376,8 +386,8 @@ def test_recreate_failure_todo_no_block():
 
 def test_three_first_touch_todo_one_escalation():
     """3 first-touch todo cards without a key and a silent create give ONE
-    _gate_board_comment escalation per pass, not three (ikeygate-recreatefail
-    is aggregated after the loop)."""
+    escalation in the report per pass, not three (ikeygate-recreatefail is
+    aggregated after the loop)."""
     slug, tmp, old = make_board([
         ("t_ft1", "First todo", "todo", "coder", "", 3 * 3600),
         ("t_ft2", "Second todo", "todo", "coder", "", 3 * 3600),
@@ -388,25 +398,21 @@ def test_three_first_touch_todo_one_escalation():
     def _silent(cmd, timeout=120):
         calls.append(cmd)
         return ""
-    esc = []
-    real_gbc = mod._gate_board_comment
-    mod._gate_board_comment = (
-        lambda key, state, now, body: esc.append((key, body)))
     mod.run = _silent
     try:
         found = mod.idempotency_gate(slug, state={}, now=time.time())
     finally:
         mod.run = real_run
-        mod._gate_board_comment = real_gbc
         mod.BOARDS = old
-    assert len(esc) == 1, "expected 1 escalation, got %d: %s" % (
-        len(esc), esc)
-    key, body = esc[0]
+    escal = [f for f in found if f[0] == "ikeygate-recreatefail"]
+    assert len(escal) == 1, "expected 1 escalation, got %d: %s" % (
+        len(escal), escal)
+    key, body = escal[0][0], escal[0][2]
     assert key == "ikeygate-recreatefail", key
     for tid in ("t_ft1", "t_ft2", "t_ft3"):
         assert tid in body, "%s missing from aggregated body: %s" % (
             tid, body)
-    assert len(found) == 3, found
+    assert len(found) == 4, found
     shutil.rmtree(tmp)
     print("OK test_three_first_touch_todo_one_escalation")
 
@@ -423,19 +429,15 @@ def test_three_ready_blockfail_one_escalation():
     def _silent(cmd, timeout=120):
         calls.append(cmd)
         return ""
-    esc = []
-    real_gbc = mod._gate_board_comment
-    mod._gate_board_comment = (
-        lambda key, state, now, body: esc.append((key, body)))
     mod.run = _silent
     try:
-        mod.idempotency_gate(slug, state={}, now=time.time())
+        found = mod.idempotency_gate(slug, state={}, now=time.time())
     finally:
         mod.run = real_run
-        mod._gate_board_comment = real_gbc
         mod.BOARDS = old
-    assert len(esc) == 1, esc
-    key, body = esc[0]
+    escal = [f for f in found if f[0] == "ikeygate-blockfail"]
+    assert len(escal) == 1, escal
+    key, body = escal[0][0], escal[0][2]
     assert key == "ikeygate-blockfail", key
     for tid in ("t_bf0", "t_bf1", "t_bf2"):
         assert tid in body, body

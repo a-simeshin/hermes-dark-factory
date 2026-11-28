@@ -163,6 +163,43 @@ QA_VERDICT_RE = re.compile(
     r"(?im)^#{1,4}\s*(?:review\s+verdict\s*\(\s*qa\s*\)|"
     r"qa\s+verdict)(?=\s|:|$)")
 
+# The verdict format actually published: a "## Review verdict" heading with
+# no colon, the deciding line on the next line, "PASS" in bold:
+#   ## Review verdict
+#   **PASS** on head `8ff7e029` ...
+# The legacy substrings above stay for older comments. Without this, an
+# accepted PR read as "no review yet" and a guard reopened work on it.
+REVIEW_HEADING_RE = re.compile(r"(?im)^#{1,4}\s*review\s+verdict.*$")
+VERDICT_KIND_RE = re.compile(
+    r"(?im)^\s*(?:\*\*)?\s*(pass|changes\s+requested|approved?|accepted?)"
+    r"\s*(?:\*\*)?(?=\s|:|$)")
+
+
+def verdict_kind(body):
+    """'ok' | 'rejected' | '': the reviewer verdict in a comment.
+
+    With a "## Review verdict" heading the deciding token is searched in the
+    body after the heading line is removed (in the form
+    "## Review verdict: PASS" the token sits on the heading line, and the
+    legacy substrings decide). Without a heading the legacy substrings
+    REJECT_MARKER / ACCEPT_MARKERS decide. QA comments are filtered by the
+    caller (qa_verdict_comment)."""
+    text = body or ""
+    low = text.lower()
+    if REVIEW_HEADING_RE.search(text):
+        hit = VERDICT_KIND_RE.search(REVIEW_HEADING_RE.sub("", text))
+        if hit:
+            token = re.sub(r"\s+", " ", hit.group(1).lower())
+            if token == "pass" or token.startswith(("approve", "accept")):
+                return "ok"
+            return "rejected"
+    if REJECT_MARKER in low:
+        return "rejected"
+    if any(m in low for m in ACCEPT_MARKERS):
+        return "ok"
+    return ""
+
+
 def qa_verdict_comment(body):
     """True: the comment is a QA verdict, not a reviewer verdict."""
     return bool(QA_VERDICT_RE.search(body or ""))
@@ -351,13 +388,11 @@ def review_state(number):
     verdicts = []
     for comment in data.get("comments") or []:
         body = comment.get("body") or ""
-        low = body.lower()
         if qa_verdict_comment(body):
             continue
-        if REJECT_MARKER in low:
-            verdicts.append((comment.get("createdAt") or "", "rejected"))
-        elif any(m in low for m in ACCEPT_MARKERS):
-            verdicts.append((comment.get("createdAt") or "", "ok"))
+        kind = verdict_kind(body)
+        if kind:
+            verdicts.append((comment.get("createdAt") or "", kind))
     if not verdicts:
         return "none", "no review yet"
     verdicts.sort()
@@ -2079,12 +2114,7 @@ def pr_activity(number):
         body = comment.get("body") or ""
         if qa_verdict_comment(body):
             continue
-        low = body.lower()
-        state = ""
-        if REJECT_MARKER in low:
-            state = "rejected"
-        elif any(m in low for m in ACCEPT_MARKERS):
-            state = "ok"
+        state = verdict_kind(body)
         if not state:
             continue
         stamp = comment.get("createdAt") or ""

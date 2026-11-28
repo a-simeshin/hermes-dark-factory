@@ -29,6 +29,16 @@ background: references/protocol.md, one-off techniques: references/lessons.md.
 
 ## Rules with the price of breaking them
 
+- a silent config.yaml edit (a value changed with no trace in sessions):
+  the write has no audit in the CLI or in the dashboard's orchestration PUT.
+  Evidence: the file's mtime plus `backups/config/config.yaml.good.<stamp>`
+  (the copy is taken on a fresh load, copy2 keeps the source mtime, new
+  copies appear only when the content changes). Then rule out writers one
+  by one: state.db messages (`tool_calls LIKE`), `profiles/*/state.db`,
+  journalctl for SSH and cron scopes at the second of the write, cron
+  scripts. When every automatic writer is ruled out, the guard is the
+  `CONFIG:` line gate in `teach-snapshot.sh`: a config change enters
+  history only with an owner decision line;
 - red CI: `gh run view <run-id> --log-failed` FIRST (run-id from
   `gh pr checks <PR>`). A failure within 20-30 s is build, style or
   configuration: tests did not run and their colour means nothing (one PR lost

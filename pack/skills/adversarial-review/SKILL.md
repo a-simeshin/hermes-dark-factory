@@ -289,6 +289,18 @@ review finding on an open PR is rework of that PR".
 - Every WCFY promise is checked by a live scenario on every kind of entry the
   feature distinguishes (for example a saved item and an ad-hoc one). A live
   run of only one entry kind proves nothing about the others.
+- Every user-visible action (a button, an automatic fix, a navigation, a
+  value filled in for the user) is checked against the MAIN scenario of the
+  issue, not against what the test fixture builds. A fixture can feed an
+  input that already equals the right answer (the target already is the live
+  path), and then no mutant fails: the issue's scenario (a different input)
+  is not represented in the tests at all. A fixture input equal to the
+  answer is a coverage gap, not proof. Compare the test input with the
+  issue's input on every field the feature distinguishes (URL path,
+  transport, state) and require the main scenario's input in the tests. A
+  PR whose fixture already used the alive path got a PASS for its "switch"
+  button, while the issue's scenario (the user typed one path, the live
+  endpoint sat on a neighbouring one) still failed after the click.
 - A UI layout change is checked in the error, connected and empty states,
   not only on a clean load: in the error state a fixed block can eat the
   scroll area and hide exactly the field that fixes the error.
@@ -337,6 +349,8 @@ review finding on an open PR is rework of that PR".
 
 - issue body starts with `## Before / After`, images compared with the diff;
 - third-party claims opened at the primary source, link in the verdict;
+- every user-visible action checked on the input of the issue's MAIN
+  scenario: a fixture input equal to the answer is a coverage gap, not proof;
 - release facts (tag, version, what already shipped) confirmed against the
   remote (`git ls-remote`, `tag-sync-check.sh`), not the local clone;
 - feature/ux issue: the owner's "prototype accepted" comment exists;

@@ -24,8 +24,9 @@ Checks:
      rolling back to 1 from the project conventions: swap above 3.5 GB, load5
      above 12 with two running, a double crashed failure within a 30 min window
      with a trace of an abnormal gateway stop. A violation or rollback is fixed
-     at once through `hermes config set` and accompanied by an alert comment on
-     the board. The dispatcher built into the gateway reads max_in_progress
+     at once through `hermes config set` and alerted ONLY in the regular
+     watchdog report (owner decision: the beacon card was removed, the gate
+     writes no card comments). The dispatcher built into the gateway reads max_in_progress
      only once at start (gateway/kanban_watchers.py: _kanban_dispatcher_boot,
      v0.23.1): changing the limit through `hermes config set` takes effect only
      after a gateway restart; only the separate deprecated loop
@@ -38,8 +39,8 @@ Checks:
      waited 30 hours for an assignee. The watchdog does not fill in an
      assignee: cards must be created with one (the creator picks the profile),
      and a silent kanban.default_assignee would break profile routing. The
-     gate beacon is excluded by construction: the watchdog blocks it with
-     needs_input itself when it creates it (_park_beacon);
+     max_in_progress gate beacon was removed (owner decision): gate alerts
+     live only in the watchdog report;
   6b. review layer: findings about open PR heads and the live review lane;
      cards are no longer armed per head (one PR = one card);
   7. subscription cleanup: card events (crashed, timed_out, gave_up, blocked,
@@ -1897,8 +1898,9 @@ def idempotency_gate(slug, state=None, now=None):
     neither multiplies copies (the key makes create idempotent) nor comments
     (dedup by the presence of the gate comment). If recreation fails, fall
     back to the former behaviour: a comment, block needs_input (the core
-    block_task only moves running/ready) and a gate-alert escalation
-    (_gate_board_comment, as in max_in_progress_gate).
+    block_task only moves running/ready) and an escalation into the watchdog
+    report (finding ikeygate-recreatefail / ikeygate-blockfail; the beacon
+    card was removed by owner decision).
     """
     db = os.path.join(BOARDS, slug, "kanban.db")
     if not os.path.exists(db):
@@ -1916,11 +1918,10 @@ def idempotency_gate(slug, state=None, now=None):
         (time.time() - IKEYGATE_MIN_AGE_S,)))
     con.close()
     found = []
-    # Escalations are aggregated per pass. The gate is called from check(),
-    # while main() persists only report keys, so REPEAT_AFTER in
-    # _gate_board_comment does not dedup WITHIN a pass: 12 cards without a
-    # key produced 12 separate beacon comments in one pass. Collect the
-    # first-touch task_ids per loop and call _gate_board_comment once.
+    # Escalations are aggregated per pass: 12 cards without a key once
+    # produced 12 separate escalations in one pass. Collect the first-touch
+    # task_ids per loop and write ONE finding per failure kind
+    # (ikeygate-recreatefail / ikeygate-blockfail) into the watchdog report.
     blockfail = []
     recreatefail = []
     for task_id, created_by, title, created_at, status in rows:
@@ -2000,25 +2001,23 @@ def idempotency_gate(slug, state=None, now=None):
             "      %s\n"
             "      Creator: %s, age %.0f h. %s"
             % (task_id, status, title, created_by, age_h, note))))
+    # Owner decision: gate escalations go into the watchdog report (found),
+    # not as a comment on a beacon card. Dedup WITHIN a pass is kept by the
+    # aggregation above; dedup across passes is the stock REPEAT_AFTER on the
+    # finding key.
     if blockfail:
-        _gate_board_comment(
-            "ikeygate-blockfail",
-            state if state is not None else _load_state(),
-            now if now is not None else time.time(),
-            IKEYGATE_COMMENT_PREFIX + " automatic recreation and block "
+        found.append(("ikeygate-blockfail", 0, (
+            "    Idempotency gate: automatic recreation and block "
             "were not applied to %s on board %s: agent cards without "
-            "idempotency-key may still be open: check "
-            "manually." % (", ".join(blockfail), slug))
+            "idempotency-key may still be open: check manually."
+            % (", ".join(blockfail), slug))))
     if recreatefail:
-        _gate_board_comment(
-            "ikeygate-recreatefail",
-            state if state is not None else _load_state(),
-            now if now is not None else time.time(),
-            IKEYGATE_COMMENT_PREFIX + " automatic recreation "
+        found.append(("ikeygate-recreatefail", 0, (
+            "    Idempotency gate: automatic recreation "
             "failed for %s on board %s: recreate with "
             "--idempotency-key and archive manually."
             % (", ".join("%s [%s]" % (tid, st)
-                         for tid, st in recreatefail), slug))
+                         for tid, st in recreatefail), slug))))
     return found
 
 
@@ -8929,9 +8928,10 @@ ROLLBACK_SWAP_USED_MB = 3584      # cond 1: swap used over 3.5 GB of 4
 ROLLBACK_LOAD5 = 12.0             # cond 2: load5 > 12 with two cards running
 ROLLBACK_LOAD5_MIN_RUNNING = 2    # cond 2: counted only with >= 2 running
 ROLLBACK_CRASH_WINDOW_S = 30 * 60 # cond 3: window of a double crash
-GATE_BOARD = cfg("FACTORY_BOARD", "main")  # board where the rule lives and where the alert goes
 GLOBAL_CONFIG = os.path.join(os.environ.get("HERMES_HOME", HOME), "config.yaml")
-GATE_ALERT_KEY = "ops-gate-max-in-progress-alert"
+# Owner decision: the alert beacon card of the max_in_progress gate is gone
+# (it collected events nobody read). No GATE_BOARD/GATE_ALERT_KEY: gate
+# alerts go only into the regular watchdog report.
 
 HERMES_REPO = os.path.join(HOME, "hermes-agent")
 CODE_STALE_GRACE = 15 * 60      # code newer than the gateway for over 15 min: alert
@@ -9230,10 +9230,8 @@ def max_in_progress_gate(state, now):
                 "    \"Parallel workers\"."
                 % (severity, "; ".join(reasons), outcome, stats))
         key = "maxinprogress-rollback"
-        _gate_board_comment(
-            key, state, now,
-            "rollback to 1: %s; %s. kanban.max_in_progress %s. %s"
-            % ("; ".join(reasons), stats, value, outcome))
+        # The alert goes ONLY into the watchdog report (returned below): no
+        # beacon card, no card comment.
         if now - state.get(key, 0) <= REPEAT_AFTER:
             return None  # fixed and alerted within this window, the report stays silent
         return (key, text)
@@ -9251,12 +9249,6 @@ def max_in_progress_gate(state, now):
             outcome = "lowered %d -> %s" % (value, MAX_IN_PROGRESS_ALLOWED)
             severity = "lowered automatically"
         key = "maxinprogress"
-        _gate_board_comment(
-            key, state, now,
-            "ceiling violation: kanban.max_in_progress = %d in %s; %s. "
-            "Rule: the project conventions, \"Parallel workers: limit 2 "
-            "and conditions for rolling back to 1\"."
-            % (value, GLOBAL_CONFIG, outcome))
         if now - state.get(key, 0) <= REPEAT_AFTER:
             return None  # fixed and alerted within this window, the report stays silent
         return (key, "  max_in_progress gate (%s).\n"
@@ -9274,54 +9266,6 @@ def max_in_progress_gate(state, now):
             return (key, "  max_in_progress gate: a pair of parallel cards.\n"
                          "    %s. Rollback conditions are not met." % stats)
     return None
-
-
-def _gate_board_comment(key, state, now, body):
-    """Alert comment on the gate board (dedup REPEAT_AFTER, like all others)."""
-    if now - state.get(key, 0) <= REPEAT_AFTER:
-        return ""
-    # Native-or-live rule: the shared helper before create.
-    covered, guard = board_native_guard.native_or_live(
-        GATE_ALERT_KEY,
-        live_keys=_live_keys(GATE_BOARD),
-        native_checked=[board_native_guard.NATIVE_RESPAWN],
-        why="alert of the kanban.max_in_progress gate for a human: there "
-            "is no stock delivery of the gate diagnostics (delivery side)")
-    if covered:
-        return ""
-    card = ""
-    out = run([HERMES, "kanban", "--board", GATE_BOARD, "create",
-               "max_in_progress gate: watchdog alerts",
-               "--body", "Beacon for alerts of the kanban.max_in_progress "
-               "gate. No assignee on purpose: the card informs, it does "
-               "not work.",
-               "--idempotency-key", GATE_ALERT_KEY, "--json"], timeout=90)
-    try:
-        card = (json.loads(out) or {}).get("id", "")
-    except Exception:
-        card = ""
-    if card:
-        run([HERMES, "kanban", "--board", GATE_BOARD, "comment", card,
-             body], timeout=90)
-        _park_beacon(card)
-    return card
-
-
-def _park_beacon(card):
-    """The beacon does not stay in ready: by design it has no assignee, and
-    invariant I4 (the stock stranded_in_ready diagnostic) rightly counts such
-    a card as a stall.
-    It does not stay in todo either: the dispatcher promotes a parentless
-    card back to ready within a minute. So a needs_input block: visible on the
-    board, outside the dispatcher queue, lifted only by hand. The phrase
-    "Release condition" in the reason counts it as a legitimate wait in the
-    graph (waited)."""
-    reason = ("Beacon for alerts of the max_in_progress gate: it informs, it "
-              "does not work, the dispatcher does not spawn it. Release "
-              "condition: by hand, when the parallelism ceiling rule leaves "
-              "the project conventions or the owner changes the beacon.")
-    run([HERMES, "kanban", "--board", GATE_BOARD, "block", card, reason,
-         "--kind", "needs_input"], timeout=90)
 
 
 def twin_blocked_missing_module_detector(slug):

@@ -120,6 +120,16 @@ rebase that meets one blocks with a question).
   with run history into triage, where the decomposer rewrites it from its
   stale body. Update the body (`kanban edit --body`) at every handoff;
 - `--initial-status blocked` is released ONLY by hand;
+- replacing a budget-burned card with new links: create the new cards
+  FIRST, then archive the old ones. The admission gate, the duplicate
+  detector and the issue executor poll must see a live executor at the
+  moment of the archive; the archive comment carries the new card ids,
+  otherwise the gates take the old card for the live owner of the issue.
+  Archive old children and the root parent first, then child (a live parent
+  holds the closure). Before archiving a beacon card (or any card a
+  generator writes into), first remove the recreation path from the
+  generator (the beacon's idempotency-key), then archive: a live key
+  recreates the beacon on the next pass;
 - canonical dependency chain: create in ready, then `block --kind
   dependency`. A card created blocked and then dependency-blocked waits
   forever;
